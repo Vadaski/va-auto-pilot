@@ -134,3 +134,10 @@
   - Protocol changes must survive two-perspective review: adopter (can they execute it?) and philosophy (does it violate goal-first?). Start prompt must never duplicate the Decision Loop -- pointer only. Delegation Prompt sections are a minimum contract ('at least')
   - not a maximum. Gate commands belong in Quality Gates section only -- reference by name elsewhere.
 ---
+
+## 2026-02-24T06:00:29.392Z - AP-015
+- Summary: Added va-auto-pilot upgrade command with version tracking, file classification (always-overwrite scripts, never-overwrite user state, merge-aware templates), upgrade-in-progress sentinel for crash detection, and token resolution from existing config.yaml. Two-perspective review (operator + security auditor) found 4 CRITICALs: config.yaml unprotected, raw token writes on --force, raw tokens on new files, no crash detection. All fixed: config.yaml added to NEVER_OVERWRITE, resolveContextFromConfig reads user values before template rendering, sentinel written before/removed after file ops. 7 new CLI flow tests for upgrade safety.
+- Files: `bin/va-auto-pilot.mjs`, `test-flows/upgrade-cli.yaml`
+- Signals:
+  - config.yaml must always be in NEVER_OVERWRITE. Template files written during upgrade must be rendered through applyTemplate with user's context. Upgrade sentinel prevents partial upgrade state. Scripts are always safe to overwrite (single source of truth).
+---

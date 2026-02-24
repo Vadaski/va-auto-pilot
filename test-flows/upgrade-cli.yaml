@@ -1,0 +1,198 @@
+name: Upgrade CLI
+# CLI flows for the upgrade command.
+# These use isolated temp directories to avoid polluting the real project.
+
+flows:
+  - name: "upgrade --help: shows upgrade in usage"
+    command: "node"
+    args: ["bin/va-auto-pilot.mjs", "--help"]
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["upgrade", "Update scripts"]
+      should: []
+
+  - name: "upgrade --dry-run: works on current project"
+    command: "node"
+    args: ["bin/va-auto-pilot.mjs", "upgrade", ".", "--dry-run"]
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["Installed version", "Available version", "dry-run"]
+      should:
+        - stdout_not_contains: ["Error:"]
+
+  - name: "upgrade: fails gracefully on empty directory"
+    command: "node"
+    args: ["bin/va-auto-pilot.mjs", "upgrade", "/tmp/va-auto-pilot-test-nonexistent-dir"]
+    assert:
+      must:
+        - exit_code_nonzero: true
+        - stderr_contains: ["No VA Auto-Pilot installation detected"]
+      should: []
+
+  - name: "upgrade: NEVER_OVERWRITE protects sprint-state.json"
+    command: "bash"
+    args:
+      - "-c"
+      - |
+        set -e
+        DIR=$(mktemp -d)
+        node bin/va-auto-pilot.mjs init "$DIR" --project-prefix MYPROJ
+        # Modify sprint-state.json to simulate user edits
+        echo '{"projectPrefix":"MYPROJ","tasks":[{"id":"MYPROJ-001","title":"Custom"}]}' > "$DIR/.va-auto-pilot/sprint-state.json"
+        CUSTOM=$(cat "$DIR/.va-auto-pilot/sprint-state.json")
+        # Bump version to trigger upgrade
+        node -e "const p='$DIR/.va-auto-pilot/version.json';const v=JSON.parse(require('fs').readFileSync(p,'utf8'));v.packageVersion='0.0.1';require('fs').writeFileSync(p,JSON.stringify(v,null,2))"
+        node bin/va-auto-pilot.mjs upgrade "$DIR" --force
+        AFTER=$(cat "$DIR/.va-auto-pilot/sprint-state.json")
+        if [ "$CUSTOM" = "$AFTER" ]; then echo "NEVER_OVERWRITE_OK"; else echo "NEVER_OVERWRITE_BROKEN"; fi
+        rm -rf "$DIR"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["NEVER_OVERWRITE_OK"]
+        - stdout_not_contains: ["NEVER_OVERWRITE_BROKEN"]
+      should: []
+
+  - name: "upgrade: NEVER_OVERWRITE protects config.yaml"
+    command: "bash"
+    args:
+      - "-c"
+      - |
+        set -e
+        DIR=$(mktemp -d)
+        node bin/va-auto-pilot.mjs init "$DIR" --project-prefix MYPROJ
+        CONFIG_BEFORE=$(cat "$DIR/.va-auto-pilot/config.yaml")
+        # Bump version to trigger upgrade
+        node -e "const p='$DIR/.va-auto-pilot/version.json';const v=JSON.parse(require('fs').readFileSync(p,'utf8'));v.packageVersion='0.0.1';require('fs').writeFileSync(p,JSON.stringify(v,null,2))"
+        node bin/va-auto-pilot.mjs upgrade "$DIR" --force
+        CONFIG_AFTER=$(cat "$DIR/.va-auto-pilot/config.yaml")
+        if [ "$CONFIG_BEFORE" = "$CONFIG_AFTER" ]; then echo "CONFIG_PROTECTED_OK"; else echo "CONFIG_PROTECTED_BROKEN"; fi
+        rm -rf "$DIR"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["CONFIG_PROTECTED_OK"]
+        - stdout_not_contains: ["CONFIG_PROTECTED_BROKEN"]
+      should: []
+
+  - name: "upgrade: scripts match current version after upgrade"
+    command: "bash"
+    args:
+      - "-c"
+      - |
+        set -e
+        DIR=$(mktemp -d)
+        node bin/va-auto-pilot.mjs init "$DIR" --project-prefix TST
+        # Bump version to trigger upgrade
+        node -e "const p='$DIR/.va-auto-pilot/version.json';const v=JSON.parse(require('fs').readFileSync(p,'utf8'));v.packageVersion='0.0.1';require('fs').writeFileSync(p,JSON.stringify(v,null,2))"
+        node bin/va-auto-pilot.mjs upgrade "$DIR" --force
+        # Compare each script file to verify they match the repo source
+        ALL_OK=true
+        for f in scripts/*.mjs scripts/*.ts; do
+          if [ -f "$f" ] && [ -f "$DIR/$f" ]; then
+            if ! diff -q "$f" "$DIR/$f" > /dev/null 2>&1; then
+              echo "MISMATCH: $f"
+              ALL_OK=false
+            fi
+          fi
+        done
+        if [ "$ALL_OK" = "true" ]; then echo "SCRIPTS_UPDATED_OK"; else echo "SCRIPTS_UPDATED_BROKEN"; fi
+        rm -rf "$DIR"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["SCRIPTS_UPDATED_OK"]
+        - stdout_not_contains: ["SCRIPTS_UPDATED_BROKEN"]
+      should: []
+
+  - name: "upgrade: template tokens are resolved (not raw placeholders)"
+    command: "bash"
+    args:
+      - "-c"
+      - |
+        set -e
+        DIR=$(mktemp -d)
+        node bin/va-auto-pilot.mjs init "$DIR" --project-prefix TOKTEST
+        # Bump version to trigger upgrade
+        node -e "const p='$DIR/.va-auto-pilot/version.json';const v=JSON.parse(require('fs').readFileSync(p,'utf8'));v.packageVersion='0.0.1';require('fs').writeFileSync(p,JSON.stringify(v,null,2))"
+        node bin/va-auto-pilot.mjs upgrade "$DIR" --force
+        # Check that no file in .va-auto-pilot or docs contains raw {{TOKEN}} placeholders
+        # (exclude config.yaml since it is NEVER_OVERWRITE and was already rendered at init)
+        FOUND_RAW=false
+        for f in $(find "$DIR" -type f -name '*.md' -o -name '*.yaml' -o -name '*.json' | grep -v node_modules | grep -v config.yaml); do
+          if grep -q '{{' "$f" 2>/dev/null; then
+            echo "RAW_TOKEN_IN: $f"
+            FOUND_RAW=true
+          fi
+        done
+        if [ "$FOUND_RAW" = "false" ]; then echo "TOKENS_RESOLVED_OK"; else echo "TOKENS_RESOLVED_BROKEN"; fi
+        rm -rf "$DIR"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["TOKENS_RESOLVED_OK"]
+        - stdout_not_contains: ["TOKENS_RESOLVED_BROKEN"]
+      should: []
+
+  - name: "upgrade: sentinel removed after successful upgrade"
+    command: "bash"
+    args:
+      - "-c"
+      - |
+        set -e
+        DIR=$(mktemp -d)
+        node bin/va-auto-pilot.mjs init "$DIR" --project-prefix SNT
+        # Bump version to trigger upgrade
+        node -e "const p='$DIR/.va-auto-pilot/version.json';const v=JSON.parse(require('fs').readFileSync(p,'utf8'));v.packageVersion='0.0.1';require('fs').writeFileSync(p,JSON.stringify(v,null,2))"
+        node bin/va-auto-pilot.mjs upgrade "$DIR" --force
+        if [ ! -f "$DIR/.va-auto-pilot/.upgrade-in-progress" ]; then echo "SENTINEL_CLEANED_OK"; else echo "SENTINEL_LEAKED"; fi
+        rm -rf "$DIR"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["SENTINEL_CLEANED_OK"]
+        - stdout_not_contains: ["SENTINEL_LEAKED"]
+      should: []
+
+  - name: "upgrade: sentinel blocks non-force upgrade"
+    command: "bash"
+    args:
+      - "-c"
+      - |
+        DIR=$(mktemp -d)
+        node bin/va-auto-pilot.mjs init "$DIR" --project-prefix SNT
+        # Bump version to trigger upgrade
+        node -e "const p='$DIR/.va-auto-pilot/version.json';const v=JSON.parse(require('fs').readFileSync(p,'utf8'));v.packageVersion='0.0.1';require('fs').writeFileSync(p,JSON.stringify(v,null,2))"
+        # Plant sentinel manually
+        echo "interrupted" > "$DIR/.va-auto-pilot/.upgrade-in-progress"
+        node bin/va-auto-pilot.mjs upgrade "$DIR" 2>&1 || true
+        echo "EXIT_CHECKED"
+        rm -rf "$DIR"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["EXIT_CHECKED", "previous upgrade may have been interrupted"]
+      should:
+        - stdout_contains: ["--force"]
+
+  - name: "upgrade --dry-run: no sentinel created"
+    command: "bash"
+    args:
+      - "-c"
+      - |
+        set -e
+        DIR=$(mktemp -d)
+        node bin/va-auto-pilot.mjs init "$DIR" --project-prefix DRY
+        # Bump version to trigger upgrade
+        node -e "const p='$DIR/.va-auto-pilot/version.json';const v=JSON.parse(require('fs').readFileSync(p,'utf8'));v.packageVersion='0.0.1';require('fs').writeFileSync(p,JSON.stringify(v,null,2))"
+        node bin/va-auto-pilot.mjs upgrade "$DIR" --dry-run
+        if [ ! -f "$DIR/.va-auto-pilot/.upgrade-in-progress" ]; then echo "DRY_RUN_NO_SENTINEL_OK"; else echo "DRY_RUN_SENTINEL_LEAKED"; fi
+        rm -rf "$DIR"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["DRY_RUN_NO_SENTINEL_OK"]
+        - stdout_not_contains: ["DRY_RUN_SENTINEL_LEAKED"]
+      should: []

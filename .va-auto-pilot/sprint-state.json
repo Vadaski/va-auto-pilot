@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-02-24T05:46:47.046Z",
+  "updatedAt": "2026-02-24T06:00:22.602Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -394,6 +394,35 @@
       "failCount": 0,
       "reason": "",
       "verification": "All gates pass: npm run check:all (41/41 units, 36/36 CLI MUST, validate:distribution). Two-perspective review (adopter + philosophy architect): 4 CRITICALs found, all 4 fixed. 5 WARNINGs dispositioned (1 fixed, 4 accepted with rationale).",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-015",
+      "title": "Design protocol update mechanism with forward-compatible upgrade path",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "human-board instruction",
+      "createdAt": "2026-02-24",
+      "startedAt": "2026-02-24T05:48:19.914Z",
+      "completedAt": "2026-02-24T06:00:22.601Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "All gates pass: npm run check:all (41 unit tests, 62/62 CLI MUST, validate:distribution). Two-perspective review (operator mid-sprint + security auditor): 4 CRITICALs found and fixed (config.yaml protected, token resolution during upgrade, upgrade sentinel). 10 upgrade-specific CLI flow tests.",
       "notes": "",
       "review": {
         "implementer": "",

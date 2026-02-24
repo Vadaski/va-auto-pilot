@@ -8,7 +8,8 @@
 
 ## Instructions (highest priority)
 
-要设计更新机制，对未来本协议升级的兼容性要考虑到
+- [x] 要设计更新机制，对未来本协议升级的兼容性要考虑到
+> Processed 2026-02-23: AP-015 complete. Added `va-auto-pilot upgrade` command with version tracking (version.json with schemaVersion), file classification (always-overwrite scripts, never-overwrite user state, merge-aware templates), token resolution from existing config.yaml, and upgrade-in-progress sentinel for crash detection. Two-perspective review (operator + security auditor): 4 CRITICALs found and fixed. 10 upgrade CLI flow tests. All gates pass.
 
 - [x] 对于 instruction， 还需要深度优化，比如我希望委派是通过执行 cli 命令完成，需要讲清楚，你要先理解项目设计哲学再进行优化，你可以开多视角来反复优化。
 > Processed 2026-02-23: AP-014 complete. Delegation Contract rewritten as CLI-driven invariants (not rigid sequence). Decision Loop as annotated bash. Start prompt reduced to 14-line mandate+pointer+hard-rules. Two-perspective review (adopter + philosophy architect): 4 CRITICALs found and fixed — start prompt recipe eliminated, "no more" → "at least", pitfalls.json → CLI command, inlined gates → Quality Gates reference. All gates pass.

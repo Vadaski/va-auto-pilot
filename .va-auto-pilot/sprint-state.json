@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-02-23T20:13:06.650Z",
+  "updatedAt": "2026-02-24T05:46:47.046Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -365,6 +365,35 @@
       "failCount": 0,
       "reason": "",
       "verification": "All gates pass: node --check, npm run check:all, npm run validate:distribution. Codex review: no CRITICAL/BUG findings (P2 sprint.md board artifact only). Adversarial review (burned-by-hype-marketing perspective): no CRITICAL findings, 2 WARNINGs accepted with rationale.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-014",
+      "title": "Optimize protocol delegation contract to be fully CLI-driven with clear design philosophy grounding",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "human-board instruction",
+      "createdAt": "2026-02-24",
+      "startedAt": "2026-02-24T05:36:16.904Z",
+      "completedAt": "2026-02-24T05:46:47.045Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "All gates pass: npm run check:all (41/41 units, 36/36 CLI MUST, validate:distribution). Two-perspective review (adopter + philosophy architect): 4 CRITICALs found, all 4 fixed. 5 WARNINGs dispositioned (1 fixed, 4 accepted with rationale).",
       "notes": "",
       "review": {
         "implementer": "",

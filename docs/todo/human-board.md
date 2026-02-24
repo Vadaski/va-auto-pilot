@@ -7,6 +7,12 @@
 ---
 
 ## Instructions (highest priority)
+
+要设计更新机制，对未来本协议升级的兼容性要考虑到
+
+- [x] 对于 instruction， 还需要深度优化，比如我希望委派是通过执行 cli 命令完成，需要讲清楚，你要先理解项目设计哲学再进行优化，你可以开多视角来反复优化。
+> Processed 2026-02-23: AP-014 complete. Delegation Contract rewritten as CLI-driven invariants (not rigid sequence). Decision Loop as annotated bash. Start prompt reduced to 14-line mandate+pointer+hard-rules. Two-perspective review (adopter + philosophy architect): 4 CRITICALs found and fixed — start prompt recipe eliminated, "no more" → "at least", pitfalls.json → CLI command, inlined gates → Quality Gates reference. All gates pass.
+
 - [x] 复盘日志 (retrospective failure log): when a quality gate or acceptance fails, CLI captures structured failure metadata (what attempted, what failed, failure hypothesis, missing context) and writes to a pitfall guide. Manager agent reads pitfall guide at cycle start alongside Codebase Signals. Implementation delegation injects relevant pitfalls into sub-agent prompts. Each fix annotates the entry with resolution. Closes the loop: failure → structured metadata → reusable avoidance knowledge. Converted to AP-011.
 > Processed 2026-02-23: AP-011 complete. sprint-board pitfall command (add/resolve/list), failureDetail on update --state Failed, templates/.va-auto-pilot/pitfalls.json, protocol updated (Operational Memory, State Update, Delegation contracts), pitfall count surfaced in sprint-board summary. 9 new CLI flow tests. All gates pass. Committed and pushed.
 - [x] Add two new protocol capabilities: (1) Strategic Decomposition — when goal is high-level/vague, launch parallel dimension-scan agents first, each with independent constraints and current-state audit, then converge into backlog; (2) Mandatory post-sprint adversarial review — fresh-context agent, no prior history, adopts a specific sharp critical perspective (not generic), finds what the sprint team was blind to. Both must feel like natural extensions of the constraint/anchor/perspective philosophy already in the protocol. Model decides dimensions and adversarial viewpoint dynamically — no fixed lists. See full direction below.

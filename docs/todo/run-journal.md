@@ -126,3 +126,11 @@
 - Summary: Rewrote website/index.html and website/app.js i18n strings for marketing conviction. Hero: 'The loop frontier models deserve.' (6-word headline). Signal pill 1 leads with model tier requirement (Claude Opus 4 / GPT-5). Philosophy reduced from 5 descriptive cards to 3 provocative claim cards. Compare section leads with NOT-for-you disqualifiers including model tier. Demo updated to show 3 key loop moments: sprint planning, adversarial catch, pitfall prevention. ZH strings encoded as unicode escapes for JS safety. All quality gates pass. Adversarial review (burned-by-hype-marketing perspective) cleared with no CRITICAL findings.
 - Files: `website/index.html`, `website/app.js`
 ---
+
+## 2026-02-24T05:47:01.040Z - AP-014
+- Summary: Optimized protocol Delegation Contract to be fully CLI-driven. Phase 1: rewrote Decision Loop as annotated bash, Delegation Contract as CLI lifecycle with prompt template, start prompt with all 13 CLI steps. Phase 2 (multi-perspective review): adopter perspective found 3 CRITICALs (gate duplication, pitfalls.json direct read, codex install missing), philosophy perspective found 2 CRITICALs (start prompt is recipe, 'no more' restricts model). Fixed: (1) start prompt reduced to 14-line mandate+pointer+hard-rules (no recipe), (2) 'exactly these sections -- no more' changed to 'at least', (3) pitfalls.json read replaced with CLI command, (4) inlined gates replaced with reference to Quality Gates section, (5) rigid lifecycle reframed as Delegation Invariants. All gates pass.
+- Files: `docs/operations/va-auto-pilot-protocol.md`, `docs/operations/start-va-auto-pilot-prompt.md`
+- Signals:
+  - Protocol changes must survive two-perspective review: adopter (can they execute it?) and philosophy (does it violate goal-first?). Start prompt must never duplicate the Decision Loop -- pointer only. Delegation Prompt sections are a minimum contract ('at least')
+  - not a maximum. Gate commands belong in Quality Gates section only -- reference by name elsewhere.
+---

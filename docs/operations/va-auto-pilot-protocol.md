@@ -59,7 +59,7 @@ Never delete human-written content.
 At the start of each cycle:
 
 1. Read `docs/todo/run-journal.md`.
-2. Read `.va-auto-pilot/pitfalls.json` — identify unresolved entries relevant to the current task (by task ID match, failure type, or keyword overlap). Inject matching unresolved pitfalls into delegation prompts under **Hard constraints**.
+2. Query pitfalls via `node scripts/sprint-board.mjs pitfall --list --unresolved` — identify unresolved entries relevant to the current task (by task ID match, failure type, or keyword overlap). Inject matching unresolved pitfalls into delegation prompts under **Hard constraints**.
 3. Check `Codebase Signals` first.
 4. Reuse existing signals before inventing new conventions.
 5. Append one execution entry at the end of each cycle.
@@ -68,19 +68,30 @@ At the start of each cycle:
 
 ## Decision Loop
 
-```
-Read human-board.md
-  -> unhandled instructions? execute now
-Read run-journal.md
-Resolve next task via CLI
-  -> node scripts/sprint-board.mjs next
-  -> optional: node scripts/sprint-board.mjs plan --json --max-parallel 3
-  -> has Failed task? fix + retest
-  -> has Testing task? run acceptance
-  -> has Review task? run review
-  -> has In Progress task? continue
-  -> has Backlog task? start highest priority
-  -> none? mark Sprint Complete and stop
+```bash
+# 1. Human board — always first
+cat docs/todo/human-board.md
+# -> unhandled instructions? execute now, then mark [x]
+
+# 2. Operational memory
+cat docs/todo/run-journal.md
+node scripts/sprint-board.mjs pitfall --list --unresolved
+
+# 3. Resolve next task
+node scripts/sprint-board.mjs next --json
+# -> returns task ID, state, and metadata
+
+# 4. Branch on task state:
+#    Failed     → fix root cause, re-run gates, advance or re-fail
+#    Testing    → npm run validate:distribution
+#    Review     → codex review --uncommitted
+#    In Progress → continue delegation
+#    Backlog    → start via Delegation Contract
+#    none       → node scripts/sprint-board.mjs summary → Sprint Complete, stop
+
+# 5. Optional parallel tracks
+node scripts/sprint-board.mjs plan --json --max-parallel 3
+# -> execute independent tracks via model-native tool calls
 ```
 
 ### Task Pick Strategy
@@ -88,7 +99,7 @@ Resolve next task via CLI
 - Priority order: P0 > P1 > P2 > P3
 - Tie-breaker: earliest creation date
 - Skip tasks requiring unavailable external resources
-- Use CLI output as execution trigger, not manual guesswork
+- The `next --json` output is the execution trigger — not manual inspection of the board
 
 ---
 
@@ -226,14 +237,45 @@ Rules:
 
 ## Delegation Contract
 
-Every implementation delegation must include:
+Delegation is a CLI-driven sequence: pick task, move state, delegate, gate, commit. Every manager action maps to a deterministic command.
 
-1. Task ID and objective
-2. Relevant file paths
-3. Hard constraints (architecture, security, naming, limits)
-4. Completion gates (`npm run check:all`)
-5. A no-how clause: do not prescribe implementation steps
-6. If `.va-auto-pilot/pitfalls.json` contains unresolved entries matching the current task by task ID, failure type, or keyword overlap — include them verbatim in the **Hard constraints** section with the heading `Known pitfalls to avoid`.
+### Delegation Invariants
+
+The following invariants must hold for every delegation. The manager decides ordering and concurrency; the invariants are non-negotiable.
+
+- **Before delegation begins**, the task must be in `In Progress` state.
+- **Before delegation begins**, unresolved pitfalls must be queried and matching entries injected into the delegation prompt.
+- **Before commit**, all quality gates defined in the Quality Gates section must pass.
+- **After completion**, state and journal must be updated to reflect the outcome.
+- **On failure**, a pitfall entry must be recorded alongside the state change to `Failed`.
+
+Reference commands (satisfy the invariants above):
+
+```bash
+node scripts/sprint-board.mjs next --json
+node scripts/sprint-board.mjs update --id AP-XXX --state "In Progress"
+node scripts/sprint-board.mjs pitfall --list --unresolved
+# delegate to sub-agent (see Delegation Prompt below)
+npm run check:all && codex review --uncommitted && npm run validate:distribution
+node scripts/sprint-board.mjs update --id AP-XXX --state "Done"
+node scripts/sprint-board.mjs journal --task AP-XXX --summary "what changed and why"
+# on failure:
+node scripts/sprint-board.mjs update --id AP-XXX --state "Failed"
+node scripts/sprint-board.mjs pitfall --task AP-XXX \
+  --failure-type <gate|acceptance|review> --attempted "..." --hypothesis "..."
+```
+
+### Delegation Prompt
+
+The prompt sent to a sub-agent must contain at least these sections:
+
+1. **Task ID and objective** — the WHAT, from `next --json` output
+2. **Relevant file paths** — scope the sub-agent's workspace
+3. **Hard constraints** — architecture, security, naming, limits. If `pitfall --list --unresolved` returned entries matching this task (by ID, failure type, or keyword overlap), include them verbatim under a `Known pitfalls to avoid` heading
+4. **Completion gates** — "Pass all gates defined in the Quality Gates section of this protocol."
+5. **No-how clause** — "Do not prescribe implementation steps. Decide your own path to satisfy the objective and pass the gates."
+
+The manager defines WHAT must be true and HOW to verify it. The sub-agent decides HOW to make it true.
 
 ---
 

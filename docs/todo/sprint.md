@@ -1,6 +1,6 @@
 # Sprint Board
 
-> Last updated: 2026-02-23 by VA Auto-Pilot
+> Last updated: 2026-02-24 by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:
@@ -51,6 +51,7 @@
 | AP-010 | Add mandatory post-sprint independent adversarial review phase to protocol | 2026-02-23 | Sprint Completion Gate section added to both protocol files. Specifies adversarial reviewer setup (fresh context, diff-only), manager-assigned specific perspective grounded in what changed, structured finding report format, CRITICAL-blocks / WARNING-requires-disposition enforcement, and guard with control-downgrade semantics (not just disclosure) when fresh context is unavailable. npm run check:all and npm run validate:distribution pass. |
 | AP-011 | Add retrospective failure log: capture structured failure metadata and pitfall guide | 2026-02-23 | pitfall CLI (add/resolve/list), failureDetail on update --state Failed, templates/.va-auto-pilot/pitfalls.json, protocol updated (Operational Memory, State Update, Delegation contracts), pitfall count in summary, 9 new CLI flow tests pass, all 41 unit tests pass, validate:distribution passes |
 | AP-012 | Rewrite website and README to clearly articulate framework's design philosophy and competitive advantage | 2026-02-23 | README.md, README.zh.md, website/index.html, website/app.js rewritten to communicate design philosophy: frontier-model-first, constraint-derived perspectives, CLI correctness guarantee, manager-delegates pattern, strategic decomposition, adversarial sprint completion gate, failure compounding. All gates passed: check:all PASS, validate:distribution PASS, codex review PASS (P0 JS syntax bug found and fixed). Sprint Completion Gate: 3 adversarial reviewers (skeptic/future-user/first-timer) all returned PASS with no CRITICAL findings. |
+| AP-014 | Optimize protocol delegation contract to be fully CLI-driven with clear design philosophy grounding | 2026-02-24 | All gates pass: npm run check:all (41/41 units, 36/36 CLI MUST, validate:distribution). Two-perspective review (adopter + philosophy architect): 4 CRITICALs found, all 4 fixed. 5 WARNINGs dispositioned (1 fixed, 4 accepted with rationale). |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |

@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "va-auto-pilot": "./bin/va-auto-pilot.mjs"
+    "va-auto-pilot": "bin/va-auto-pilot.mjs"
   },
   "engines": {
     "node": ">=20"

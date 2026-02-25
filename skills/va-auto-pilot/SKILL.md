@@ -20,21 +20,16 @@ Use this skill when the user asks to:
 ## Workflow
 
 1. Confirm target repository root (default: current directory).
-2. Install scaffold:
-
-```bash
-npx -y va-auto-pilot init <target-dir>
-```
-
-3. If npm package is unavailable, run fallback bootstrap:
+2. Install scaffold (no npm registry dependency):
 
 ```bash
 tmp="$(mktemp -d)"
 git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
 node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init <target-dir>
+rm -rf "$tmp"
 ```
 
-4. Read and align these files to the target project:
+3. Read and align these files to the target project:
 
 - `.va-auto-pilot/config.yaml`
 - `.va-auto-pilot/sprint-state.json`
@@ -43,13 +38,13 @@ node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init <target-dir>
 - `docs/todo/run-journal.md`
 - `docs/operations/va-auto-pilot-protocol.md`
 
-5. Ensure quality gates are runnable:
+4. Ensure quality gates are runnable:
 
 - `qualityGate.buildCommand`
 - `qualityGate.reviewCommand`
 - `qualityGate.acceptanceTestCommand`
 
-6. Start the loop (primary task + optional parallel tracks):
+5. Start the loop (primary task + optional parallel tracks):
 
 - read `human-board.md`
 - read `run-journal.md` (`Codebase Signals` first)

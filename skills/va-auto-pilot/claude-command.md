@@ -9,7 +9,10 @@ Execution rules:
 1. If `.va-auto-pilot/config.yaml` is missing, run:
 
 ```bash
-npx -y va-auto-pilot init .
+tmp="$(mktemp -d)"
+git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
+node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
+rm -rf "$tmp"
 ```
 
 2. Read these files in order before taking action:

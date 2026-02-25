@@ -94,8 +94,11 @@ The pitfall guide captures structured failure metadata — not just error string
 # local
 node ./bin/va-auto-pilot.mjs init .
 
-# npm (after publish)
-npx -y va-auto-pilot init .
+# bootstrap from GitHub (no npm registry dependency)
+tmp="$(mktemp -d)"
+git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
+node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
+rm -rf "$tmp"
 ```
 
 Render board after initialization:

@@ -94,8 +94,11 @@ VA Auto-Pilot 采用不同的模型。在任何评审开始之前，管理 Agent
 # 本地
 node ./bin/va-auto-pilot.mjs init .
 
-# npm（发布后）
-npx -y va-auto-pilot init .
+# 从 GitHub 引导（不依赖 npm registry）
+tmp="$(mktemp -d)"
+git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
+node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
+rm -rf "$tmp"
 ```
 
 初始化后渲染看板：

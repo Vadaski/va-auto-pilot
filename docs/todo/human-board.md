@@ -42,7 +42,7 @@
 
 - [x] **清理无用 devDependency**：`tsx` 在 devDependencies 里但没有任何 script 使用它（test-runner.ts 是 reference implementation，实际测试用 node:test）。要么删除 tsx，要么把 test-runner.ts 正式接入 scripts。建议删除 tsx，保持零 devDep 的简洁性。
 
-- [ ] **website 国际化修复**：检查 website/ 中的文案是否与最新 README 的定位一致。特别是 tagline（应该是 "CLI-first autonomous multi-agent engineering loop"，不是 "USB interface"）、对比表信息、Frontier Models 章节是否在 landing page 有体现。
+- [x] **website 国际化修复**：检查 website/ 中的文案是否与最新 README 的定位一致。特别是 tagline（应该是 "CLI-first autonomous multi-agent engineering loop"，不是 "USB interface"）、对比表信息、Frontier Models 章节是否在 landing page 有体现。
 
 ## Feedback (to fold into next cycle)
 - npm publish 时 tarball 含 53 个文件、340KB，偏大。优化 .npmignore 后应显著缩小。

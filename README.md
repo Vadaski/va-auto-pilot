@@ -1,6 +1,54 @@
 # VA Auto-Pilot
 
+[![CI](https://github.com/Vadaski/va-auto-pilot/actions/workflows/ci.yml/badge.svg)](https://github.com/Vadaski/va-auto-pilot/actions)
+[![npm](https://img.shields.io/npm/v/va-auto-pilot)](https://www.npmjs.com/package/va-auto-pilot)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Vadaski/va-auto-pilot?style=social)](https://github.com/Vadaski/va-auto-pilot)
+
+**The USB interface for AI agents — dispatch, verify, orchestrate.**
+
 [中文文档](./README.zh.md)
+
+```
+┌──────────────────────────────────────────────────────┐
+│                    Manager Agent                     │
+│  Objective → Constraints → Anchors → Perspectives    │
+├──────────┬──────────┬──────────┬─────────────────────┤
+│ Worker A │ Worker B │ Worker C │  ...parallel tracks  │
+│ (impl)   │ (impl)   │ (review) │                     │
+├──────────┴──────────┴──────────┴─────────────────────┤
+│          CLI Quality Gates (deterministic)            │
+│  typecheck · lint · test · codex-review · acceptance  │
+├──────────────────────────────────────────────────────┤
+│         Pitfall Guide (failure knowledge compounds)   │
+└──────────────────────────────────────────────────────┘
+```
+
+### Try it now
+
+```bash
+npx va-auto-pilot init .
+```
+
+---
+
+## Protocol Comparison
+
+How does VA Auto-Pilot relate to MCP and A2A? They are **complementary**, not competing:
+
+| Dimension | MCP (Anthropic) | A2A (Google) | VA Auto-Pilot |
+|-----------|----------------|-------------|---------------|
+| **Focus** | Tool-level context | Agent discovery + coordination | Long-task execution + evidence verification |
+| **Task type** | Short synchronous tool calls | Discovery + routing | Long tasks + auto-topology + scheduler |
+| **Time model** | Synchronous | Async (push) | Async (polling; v0.2 push) |
+| **Verification** | Return value = result | Weak | CLI gates + model-eval + pitfall |
+| **Orchestration** | None | Basic routing | Topological sort + capability match + concurrency control |
+| **Failure learning** | None | None | Pitfall compounding |
+| **Interop** | — | MCP-compatible | Complements MCP & A2A |
+
+> **TL;DR** — MCP connects models to tools. A2A connects agents to agents. VA Auto-Pilot makes sure the work actually gets done right.
+
+---
 
 ## The Design Bet
 
@@ -16,6 +64,26 @@ That is the bet.
 
 ---
 
+## Why Frontier Models Need This
+
+2026 frontier models (Claude Opus 4, GPT-5, Gemini 2.5 Pro) bring extraordinary capabilities: autonomous multi-step reasoning, million-token context windows, and native tool calling. VA Auto-Pilot is designed to **amplify these strengths** and **guard against remaining weaknesses**.
+
+### Amplifying strengths
+
+- **Objective-driven delegation** — The manager gives goals, constraints, and acceptance criteria. No micromanagement. The model's reasoning ability is fully unleashed.
+- **Parallel autonomous tracks** — Frontier models handle complex parallel tool orchestration natively. The framework leans into this instead of serializing everything.
+- **Long-context awareness** — Sprint state, pitfall guides, and run journals are designed for models that can hold an entire project in context.
+
+### Guarding against weaknesses
+
+- **Evidence gates prevent hallucination** — The model cannot self-certify. CLI commands produce objective pass/fail signals. "I think it's done" is not the same as "it is done."
+- **Pitfall compounding prevents repeated mistakes** — Structured failure metadata from past runs is injected into future delegations as hard constraints. The system gets harder to fool over time.
+- **Adversarial review breaks self-validation loops** — A fresh-context reviewer sees only the diff, never the intent. This structurally prevents the most common autonomous loop failure: growing confidence in growing errors.
+
+> **One sentence:** Trust the model's reasoning power; use deterministic mechanisms to catch its blind spots.
+
+---
+
 ## Core Intellectual Contributions
 
 ### 1. Perspectives emerge from constraints and anchors — never from role lists
@@ -28,73 +96,59 @@ VA Auto-Pilot uses a different model. Before any review, the manager identifies:
 
 Given those real constraints and anchors, the question becomes: *which expert views would expose the most critical failure modes for this specific change?* The perspectives emerge from the analysis — they are never assigned from a fixed list.
 
-This is why reviews sharpen over time. The model learns which viewpoints matter for each kind of change. A fresh-role-list never learns anything.
-
 ### 2. CLI-first is a correctness guarantee, not a style preference
 
 Quality gates run via deterministic CLI commands. `npm run check:all` either passes or it does not. The model cannot declare success, argue its way through, or self-certify quality.
 
-This creates an objective synchronization point that separates "I think it's done" from "it is done." Without this, autonomous loops collapse into self-validation — the model becomes increasingly confident about increasingly wrong outputs.
+This creates an objective synchronization point that separates "I think it's done" from "it is done."
 
 ### 3. The manager delegates — it never implements
 
-The manager agent's value is knowing *what* needs to be true, not *how* to make it true. Implementation is always delegated to sub-agents with full context: objective, constraints, hard limits, and completion gate. The sub-agent decides the path.
-
-This matches how strong models actually work best. They reason well from objectives. They reason poorly from step-by-step instructions that second-guess their judgment.
+The manager agent's value is knowing *what* needs to be true, not *how* to make it true. Implementation is always delegated to sub-agents with full context: objective, constraints, hard limits, and completion gate.
 
 ### 4. Strategic decomposition before tactical execution
 
-High-level goals ("bring this to commercial quality") are not decomposed by a human into tasks. The framework runs a parallel dimension scan: each sub-agent audits one axis of the problem independently, with no cross-contamination between dimensions. The findings converge into a prioritized backlog.
-
-The model is a better project planner than most humans when given the right framing. The framework gives it that framing.
+High-level goals are not decomposed by a human into tasks. The framework runs a parallel dimension scan: each sub-agent audits one axis of the problem independently, with no cross-contamination between dimensions.
 
 ### 5. Adversarial post-sprint review as a first-class gate
 
 Every sprint ends with a fresh-context adversarial reviewer who has seen only the diff — not what was intended, not what was discussed. Their job is to find what the sprint team was blind to.
 
-This prevents the most common failure mode in autonomous loops: self-validation bias accumulating across sprints until a significant regression slips through. The adversarial reviewer is structurally unable to be fooled by good intentions.
-
 ### 6. Failure knowledge compounds
 
-The pitfall guide captures structured failure metadata — not just error strings, but hypotheses and missing context. Future delegations inject relevant pitfalls as hard constraints. The system gets harder to fool over time. Each failure makes subsequent delegations more precise.
+The pitfall guide captures structured failure metadata — not just error strings, but hypotheses and missing context. Future delegations inject relevant pitfalls as hard constraints. The system gets harder to fool over time.
 
 ---
 
 ## When to Use VA Auto-Pilot
 
 **Use it when:**
-- You have access to Claude Opus 4.6 or gpt-5.3-codex class capability (or equivalent)
+- You have access to Claude Opus 4 or GPT-5 class capability (or equivalent)
 - Your goal is complex enough that a human would need to decompose it before executing
 - You need guaranteed quality gates, not best-effort review
-- You want an execution loop that gets better as models improve, not one you have to maintain
+- You want an execution loop that gets better as models improve
 
 **Do not use it when:**
-- You are running a mid-tier or weak model — the framework will not compensate, and the tasks will fail or produce poor output
-- You want to control every implementation step — if you need to prescribe how, use a different tool
-- Your task is small and bounded — a single well-written prompt is faster and more appropriate
+- You are running a mid-tier or weak model — the framework will not compensate
+- You want to control every implementation step
+- Your task is small and bounded — a single well-written prompt is faster
 - You want minimal ceremony — this framework has protocol; the value is in the guarantees
-
----
-
-## What You Get
-
-- `va-auto-pilot` CLI scaffold for any repository
-- machine-readable sprint state (`.va-auto-pilot/sprint-state.json`)
-- generated sprint board (`docs/todo/sprint.md`)
-- human override board (`docs/todo/human-board.md`)
-- append-only run memory (`docs/todo/run-journal.md`)
-- protocol documents and start prompt
-- acceptance flow runner (`scripts/test-runner.ts`)
 
 ---
 
 ## Quick Start
 
 ```bash
-# local
-node ./bin/va-auto-pilot.mjs init .
+# Install globally
+npm i -g va-auto-pilot
 
-# bootstrap from GitHub (no npm registry dependency)
+# Or run directly with npx
+npx va-auto-pilot init .
+```
+
+Bootstrap from GitHub (no npm dependency):
+
+```bash
 tmp="$(mktemp -d)"
 git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
 node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
@@ -111,7 +165,7 @@ node scripts/sprint-board.mjs render
 
 ## Goal-First Delegation
 
-The correct way to use this framework is to give it a goal, not a plan. The model figures out the plan.
+The correct way to use this framework is to give it a goal, not a plan.
 
 ```text
 $va-auto-pilot
@@ -130,62 +184,58 @@ Acceptance:
 - acceptance flow MUST 100%, SHOULD >= 80%
 ```
 
-Notice what is absent: no list of files to touch, no sequence of steps to follow, no prescribed approach. The model decides the path. You define the destination and the constraints. That is the entire contract.
+No list of files. No sequence of steps. No prescribed approach. You define the destination and the constraints. That is the entire contract.
 
 ---
 
 ## Concurrency Model
 
-- One primary task is selected per cycle, and zero or more independent tracks can run in parallel.
-- Synchronization happens at mandatory quality gates.
-- State promotion is blocked until required gates pass.
-- Concurrency decisions are runtime judgments made by the manager agent.
-- Default path is model-native parallel tool orchestration.
-
-Default model-native path:
+- One primary task per cycle, zero or more independent tracks in parallel
+- Synchronization at mandatory quality gates
+- State promotion blocked until required gates pass
+- Default path is model-native parallel tool orchestration
 
 ```bash
 node scripts/sprint-board.mjs plan --json --max-parallel 3 > .va-auto-pilot/parallel-plan.json
-# manager agent executes tracks via native parallel tool calls
-# synchronization barrier before state promotion
 npm run check:all && codex review --uncommitted && npm run validate:distribution
-```
-
-Experimental helper (opt-in only):
-
-```bash
-node scripts/va-parallel-runner.mjs spawn --plan-file .va-auto-pilot/parallel-plan.json --agent-cmd "codex exec --task {taskId}"
 ```
 
 ---
 
 ## Distribution
 
-Codex install:
-
-```text
-$skill-installer install https://github.com/Vadaski/va-auto-pilot/tree/main/skills/va-auto-pilot
-```
-
-The package is not published on npm; install via GitHub sources.
-
-Fallback (if `skill-installer` is unavailable):
-
 ```bash
-tmp="$(mktemp -d)"
-git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
-node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
-# Required runtime dependency for VA Auto-Pilot scripts
-npm install yaml
-rm -rf "$tmp"
-```
+# npm
+npm i -g va-auto-pilot
 
-Claude Code install:
-
-```bash
+# Claude Code
 mkdir -p .claude/commands
-curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/va-auto-pilot/claude-command.md -o .claude/commands/va-auto-pilot.md
+curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/va-auto-pilot/claude-command.md \
+  -o .claude/commands/va-auto-pilot.md
 ```
+
+---
+
+## Roadmap
+
+### v0.2
+
+- MCP Server Adapter — expose VA Auto-Pilot as an MCP tool server
+- Persistence — SQLite-backed sprint state and pitfall storage
+- Push-based async — replace polling with event-driven notifications
+- Web Dashboard — real-time sprint visualization
+
+### v0.3
+
+- REST / gRPC adapter for non-CLI integrations
+- Governance — cost guardrails + permission scoping
+- A2A bridge — bidirectional agent discovery and task delegation
+
+### Future
+
+- Multi-language SDK (Python, Go)
+- Distributed orchestration across machines
+- Agentic AI Foundation contribution
 
 ---
 
@@ -201,18 +251,10 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 
 ## Website
 
-`website/` is a standalone static site with:
-
-- bilingual switch (EN / 中文)
-- interactive state machine
-- animated execution demo
-- SEO + OG metadata
-
-Local preview:
+`website/` is a standalone static site with bilingual switch (EN / 中文), interactive state machine, animated execution demo, and SEO + OG metadata.
 
 ```bash
-cd website
-python3 -m http.server 4173
+cd website && python3 -m http.server 4173
 ```
 
 ---

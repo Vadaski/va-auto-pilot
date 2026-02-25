@@ -32,8 +32,23 @@
 [x] 真正需要注意的问题（5 observations）
 > Processed 2026-02-23: Converted to sprint backlog via `sprint-board.mjs add`. AP-004 (unit tests, P1), AP-005 (YAML parser, P2), AP-006 (test-flows coverage, P1), AP-007 (naming fix, P3), AP-008 (templates architecture, P2 — architectural decision required before implementation).
 
+- [ ] **CI 补全**：目前 GitHub Actions 只有 `deploy-website.yml`（部署静态站），缺少代码质量 CI。新建 `.github/workflows/ci.yml`，在 push/PR 到 main 时运行 `npm ci && npm run check:all`。Node 20。参考 va-agent-protocol 的 CI 写法。
+
+- [ ] **README.zh.md 同步**：英文 README 已大改版（加了 Protocol Comparison 对比表、Why Frontier Models Need This、Relationship to va-agent-protocol、扩展 Roadmap），中文版完全没跟上。同步所有新增章节到 README.zh.md，保持中文 README 与英文结构一致。
+
+- [ ] **.npmignore 优化**：当前 npm publish 把 `.claude/settings.local.json`、`.va-auto-pilot/sprint-state.json`、`.va-auto-pilot/parallel-runs/`、`.github/` 等内部文件全发了出去。完善 .npmignore，只保留 `bin/`、`scripts/`、`templates/`、`skills/`、`test-flows/`、`docs/operations/`、`README.md`、`LICENSE`、`CONTRIBUTING.md`、`package.json`。发布 0.1.1 修复。
+
+- [ ] **CHANGELOG.md 创建**：项目没有 CHANGELOG。创建 CHANGELOG.md，补录 v0.1.0 的主要功能（sprint execution loop、CLI quality gates、pitfall compounding、adversarial review、upgrade command、62 tests）。使用 Keep a Changelog 格式。
+
+- [ ] **清理无用 devDependency**：`tsx` 在 devDependencies 里但没有任何 script 使用它（test-runner.ts 是 reference implementation，实际测试用 node:test）。要么删除 tsx，要么把 test-runner.ts 正式接入 scripts。建议删除 tsx，保持零 devDep 的简洁性。
+
+- [ ] **website 国际化修复**：检查 website/ 中的文案是否与最新 README 的定位一致。特别是 tagline（应该是 "CLI-first autonomous multi-agent engineering loop"，不是 "USB interface"）、对比表信息、Frontier Models 章节是否在 landing page 有体现。
+
 ## Feedback (to fold into next cycle)
-- Add product feedback and bug reports here.
+- npm publish 时 tarball 含 53 个文件、340KB，偏大。优化 .npmignore 后应显著缩小。
+- va-auto-pilot 和 va-agent-protocol 的关系需要在两个 README 和 website 中都讲清楚，避免用户困惑。
 
 ## Direction (long-term)
-- Add strategic direction here.
+- va-auto-pilot 是 sprint execution engine，va-agent-protocol 是 universal task protocol。两者互补。
+- 考虑把 va-auto-pilot 作为 va-agent-protocol 的 monorepo 子包（packages/auto-pilot），简化维护和版本同步。
+- 未来：MCP Server Adapter 让 VA Auto-Pilot 可以被任何 MCP client 直接调用。

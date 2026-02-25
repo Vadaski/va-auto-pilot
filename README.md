@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/Vadaski/va-auto-pilot?style=social)](https://github.com/Vadaski/va-auto-pilot)
 
-**The USB interface for AI agents — dispatch, verify, orchestrate.**
+**CLI-first autonomous multi-agent engineering loop — set a goal, the model finds the path.**
 
 [中文文档](./README.zh.md)
 
@@ -29,24 +29,6 @@
 ```bash
 npx va-auto-pilot init .
 ```
-
----
-
-## Protocol Comparison
-
-How does VA Auto-Pilot relate to MCP and A2A? They are **complementary**, not competing:
-
-| Dimension | MCP (Anthropic) | A2A (Google) | VA Auto-Pilot |
-|-----------|----------------|-------------|---------------|
-| **Focus** | Tool-level context | Agent discovery + coordination | Long-task execution + evidence verification |
-| **Task type** | Short synchronous tool calls | Discovery + routing | Long tasks + auto-topology + scheduler |
-| **Time model** | Synchronous | Async (push) | Async (polling; v0.2 push) |
-| **Verification** | Return value = result | Weak | CLI gates + model-eval + pitfall |
-| **Orchestration** | None | Basic routing | Topological sort + capability match + concurrency control |
-| **Failure learning** | None | None | Pitfall compounding |
-| **Interop** | — | MCP-compatible | Complements MCP & A2A |
-
-> **TL;DR** — MCP connects models to tools. A2A connects agents to agents. VA Auto-Pilot makes sure the work actually gets done right.
 
 ---
 
@@ -81,6 +63,14 @@ That is the bet.
 - **Adversarial review breaks self-validation loops** — A fresh-context reviewer sees only the diff, never the intent. This structurally prevents the most common autonomous loop failure: growing confidence in growing errors.
 
 > **One sentence:** Trust the model's reasoning power; use deterministic mechanisms to catch its blind spots.
+
+---
+
+## Relationship to va-agent-protocol
+
+VA Auto-Pilot is a **sprint execution framework** — it runs the autonomous engineering loop. [va-agent-protocol](https://github.com/Vadaski/va-agent-protocol) is the **universal task protocol** — the standardized contract that wraps any CLI agent (including VA Auto-Pilot) into a composable unit.
+
+VA Auto-Pilot was the first adapter built for va-agent-protocol. You can use Auto-Pilot standalone or as a managed agent inside the protocol's orchestrator.
 
 ---
 
@@ -220,22 +210,19 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 
 ### v0.2
 
-- MCP Server Adapter — expose VA Auto-Pilot as an MCP tool server
 - Persistence — SQLite-backed sprint state and pitfall storage
 - Push-based async — replace polling with event-driven notifications
 - Web Dashboard — real-time sprint visualization
 
 ### v0.3
 
-- REST / gRPC adapter for non-CLI integrations
 - Governance — cost guardrails + permission scoping
-- A2A bridge — bidirectional agent discovery and task delegation
+- REST / gRPC adapter for non-CLI integrations
 
 ### Future
 
 - Multi-language SDK (Python, Go)
 - Distributed orchestration across machines
-- Agentic AI Foundation contribution
 
 ---
 

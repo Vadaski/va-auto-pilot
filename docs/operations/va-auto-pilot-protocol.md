@@ -18,6 +18,7 @@
 9. Frontier model first: use the strongest available model for high-impact tasks.
 10. Closed-loop quality is mandatory: build -> review -> acceptance -> commit.
 11. Perspectives emerge from constraints and anchors — never from fixed role lists. Wrong perspectives mean wrong anchors; change both.
+12. This repository and skill distribution do not depend on a published npm package; installation/distribution is expected to come from GitHub sources (for example via `skill-installer` path install or direct `git clone` + `va-auto-pilot.mjs init`).
 
 ---
 

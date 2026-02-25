@@ -167,6 +167,19 @@ Codex install:
 $skill-installer install https://github.com/Vadaski/va-auto-pilot/tree/main/skills/va-auto-pilot
 ```
 
+The package is not published on npm; install via GitHub sources.
+
+Fallback (if `skill-installer` is unavailable):
+
+```bash
+tmp="$(mktemp -d)"
+git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
+node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
+# Required runtime dependency for VA Auto-Pilot scripts
+npm install yaml
+rm -rf "$tmp"
+```
+
 Claude Code install:
 
 ```bash

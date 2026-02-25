@@ -167,6 +167,19 @@ Codex 安装：
 $skill-installer install https://github.com/Vadaski/va-auto-pilot/tree/main/skills/va-auto-pilot
 ```
 
+说明：仓库当前未发布 npm 包，安装必须走 GitHub 源码路径。
+
+若环境不支持 `skill-installer`，可用源码回退安装：
+
+```bash
+tmp="$(mktemp -d)"
+git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
+node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
+# VA Auto-Pilot 运行时依赖
+npm install yaml
+rm -rf "$tmp"
+```
+
 Claude Code 安装：
 
 ```bash

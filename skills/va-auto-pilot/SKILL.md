@@ -20,12 +20,15 @@ Use this skill when the user asks to:
 ## Workflow
 
 1. Confirm target repository root (default: current directory).
-2. Install scaffold (no npm registry dependency):
+2. Install scaffold (no npm registry dependency, and the VA Auto-Pilot package is not yet published to npm):
 
 ```bash
 tmp="$(mktemp -d)"
 git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
 node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init <target-dir>
+cd <target-dir>
+# required by VA Auto-Pilot scripts in runtime
+npm install yaml
 rm -rf "$tmp"
 ```
 

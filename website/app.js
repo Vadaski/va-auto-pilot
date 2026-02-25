@@ -1,12 +1,12 @@
 const I18N = {
   en: {
-    "meta.title": "VA Auto-Pilot | Objective-First Engineering Loop",
+    "meta.title": "VA Auto-Pilot | CLI-First Autonomous Multi-Agent Engineering Loop",
     "meta.description":
-      "For engineering leaders using frontier models: objective and constraints in, merge-ready delivery out with deterministic quality gates.",
+      "CLI-first autonomous multi-agent engineering loop — set a goal, the model finds the path. Governed parallel execution with deterministic quality gates. Powered by va-agent-protocol.",
     "meta.ogDescription":
-      "Engineering leadership loop for frontier models: governed parallel execution, adversarial review, and deterministic release gates.",
+      "CLI-first autonomous multi-agent engineering loop: governed parallel execution, adversarial review, and deterministic release gates. Built on va-agent-protocol.",
     "meta.twitterDescription":
-      "Engineering-leadership AI loop: objective in, governed delivery out.",
+      "CLI-first autonomous multi-agent engineering loop: goal in, governed delivery out.",
 
     "nav.menu": "Menu",
     "nav.advantages": "Advantages",
@@ -19,13 +19,13 @@ const I18N = {
     "cta.install": "Install VA Auto-Pilot Skill",
     "cta.viewLoop": "See It Run",
 
-    "hero.eyebrow": "For engineering leaders responsible for delivery quality",
-    "hero.title": "Ship with AI speed and engineering-level control.",
+    "hero.eyebrow": "CLI-first autonomous multi-agent engineering loop",
+    "hero.title": "Set a goal, the model finds the path.",
     "hero.lead":
-      "Set objective, constraints, and release criteria. VA Auto-Pilot runs planning, parallel execution, adversarial review, and deterministic gates so your team reviews outcomes, not prompt minutiae.",
+      "VA Auto-Pilot is a CLI-first autonomous multi-agent engineering loop. Define objective, constraints, and acceptance criteria — the framework runs planning, parallel execution, adversarial review, and deterministic gates. Built on va-agent-protocol, the universal task protocol that wraps any CLI agent into a composable unit.",
     "hero.signal1": "Requires Claude Opus 4.6 or gpt-5.3-codex class models",
-    "hero.signal2": "Roadmap objective in -> audit-traceable commit out",
-    "hero.signal3": "Lower review load, higher release confidence",
+    "hero.signal2": "Goal in -> audit-traceable commit out",
+    "hero.signal3": "Works standalone or as a managed agent inside va-agent-protocol",
 
     "advantages.eyebrow": "Manager Value",
     "advantages.title": "Built for predictability, governance, and throughput",
@@ -85,7 +85,7 @@ const I18N = {
     "compare.title": "Best when you own delivery outcomes, not just code generation",
     "compare.va.title": "This fits your team if",
     "compare.va.body":
-      "You lead teams shipping production systems, run Opus 4.6 / gpt-5.3-codex class models, and need auditability, release gates, and reliable merge readiness.",
+      "You lead teams shipping production systems, run Opus 4.6 / gpt-5.3-codex class models, and need auditability, release gates, and reliable merge readiness. Unlike MCP (model-to-tool) or A2A (agent-to-agent messaging), VA Auto-Pilot is a full execution loop with governed state transitions and deterministic quality gates.",
     "compare.notfor.title": "This likely does not fit if",
     "compare.notfor.body":
       "You need full manual control of implementation steps, prefer zero-ceremony iteration, or run below Opus 4.6 / gpt-5.3-codex class capability.",
@@ -96,7 +96,7 @@ const I18N = {
     "credits.body":
       "Co-creators: Vadaski, Codex, Claude. Acknowledgements: the Vera project, where practical patterns were distilled and validated.",
 
-    "footer.tagline": "For engineering leaders: governed frontier-model execution from objective to merge.",
+    "footer.tagline": "CLI-first autonomous multi-agent engineering loop — governed execution from goal to merge. Powered by va-agent-protocol.",
 
     "common.copy": "Copy",
     "common.copyLink": "Copy Link",
@@ -105,13 +105,13 @@ const I18N = {
     "common.copyFail": "Copy failed"
   },
   zh: {
-    "meta.title": "VA Auto-Pilot | 目标优先的工程闭环",
+    "meta.title": "VA Auto-Pilot | CLI 优先的自主多智能体工程闭环",
     "meta.description":
-      "面向工程负责人的前沿模型执行闭环：目标与约束输入，经过并行执行、对抗审查与确定性门禁，输出可合并交付。",
+      "CLI 优先的自主多智能体工程闭环——设定目标，模型自行寻路。治理化并行执行与确定性质量门禁。基于 va-agent-protocol 构建。",
     "meta.ogDescription":
-      "工程负责人可治理的前沿模型执行系统：并行推进、对抗审查、确定性发布门禁。",
+      "CLI 优先的自主多智能体工程闭环：治理化并行执行、对抗审查、确定性发布门禁。基于 va-agent-protocol 构建。",
     "meta.twitterDescription":
-      "工程负责人视角：目标输入，治理化并行执行，可信提交输出。",
+      "CLI 优先的自主多智能体工程闭环：目标输入，治理化交付输出。",
 
     "nav.menu": "菜单",
     "nav.advantages": "优势",
@@ -124,13 +124,13 @@ const I18N = {
     "cta.install": "安装 VA Auto-Pilot Skill",
     "cta.viewLoop": "查看执行",
 
-    "hero.eyebrow": "面向对交付质量负责的工程负责人",
-    "hero.title": "兼顾 AI 速度与工程级可控交付。",
+    "hero.eyebrow": "CLI 优先的自主多智能体工程闭环",
+    "hero.title": "设定目标，模型自行寻路。",
     "hero.lead":
-      "你定义目标、约束和发布标准。VA Auto-Pilot 负责规划、并行执行、对抗审查和确定性门禁，让团队把精力放在结果判断而不是提示词细节。",
+      "VA Auto-Pilot 是 CLI 优先的自主多智能体工程闭环。定义目标、约束和验收标准——框架自动执行规划、并行推进、对抗审查和确定性门禁。基于 va-agent-protocol（通用任务协议）构建，可将任何 CLI Agent 封装为可组合单元。",
     "hero.signal1": "要求 Claude Opus 4.6 或 gpt-5.3-codex 级模型",
-    "hero.signal2": "路线目标输入 -> 可审计提交输出",
-    "hero.signal3": "降低审查负担，提高发布信心",
+    "hero.signal2": "目标输入 -> 可审计提交输出",
+    "hero.signal3": "可独立运行，也可作为 va-agent-protocol 编排下的托管 Agent",
 
     "advantages.eyebrow": "负责人价值",
     "advantages.title": "为可预测交付、风险治理与吞吐提升而设计",
@@ -190,7 +190,7 @@ const I18N = {
     "compare.title": "当你对交付结果负责时，它最有价值",
     "compare.va.title": "适合你的团队，如果",
     "compare.va.body":
-      "你在负责生产级系统交付，使用 Opus 4.6 / gpt-5.3-codex 级模型，并且需要可审计、可门禁、可稳定合并的执行闭环。",
+      "你在负责生产级系统交付，使用 Opus 4.6 / gpt-5.3-codex 级模型，并且需要可审计、可门禁、可稳定合并的执行闭环。与 MCP（模型到工具）或 A2A（Agent 间消息传递）不同，VA Auto-Pilot 是具备治理化状态转换和确定性质量门禁的完整执行闭环。",
     "compare.notfor.title": "大概率不适合，如果",
     "compare.notfor.body":
       "你必须人工控制每个实现步骤、追求零仪式试错，或当前模型能力低于 Opus 4.6 / gpt-5.3-codex 等级。",
@@ -201,7 +201,7 @@ const I18N = {
     "credits.body":
       "共创作者：Vadaski、Codex、Claude。致谢：Vera 项目，许多可复用工程模式在其中沉淀并得到验证。",
 
-    "footer.tagline": "面向工程负责人：从目标到可合并提交的治理化前沿模型执行闭环。",
+    "footer.tagline": "CLI 优先的自主多智能体工程闭环——从目标到可合并提交的治理化执行。基于 va-agent-protocol 驱动。",
 
     "common.copy": "复制",
     "common.copyLink": "复制链接",

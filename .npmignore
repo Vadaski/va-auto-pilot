@@ -1,0 +1,22 @@
+# Artifacts
+*.tgz
+
+# Development / CI
+.claude/
+.va-auto-pilot/
+.github/
+node_modules/
+
+# Website
+website/
+
+# Docs not shipped
+docs/todo/
+docs/articles/
+docs/comparisons/
+docs/human-on-the-loop.md
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo

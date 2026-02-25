@@ -48,7 +48,7 @@ That is the bet.
 
 ## Why Frontier Models Need This
 
-2026 frontier models (Claude Opus 4, GPT-5, Gemini 2.5 Pro) bring extraordinary capabilities: autonomous multi-step reasoning, million-token context windows, and native tool calling. VA Auto-Pilot is designed to **amplify these strengths** and **guard against remaining weaknesses**.
+2026 frontier models (Claude Opus 4.6, GPT-5.3-codex, or equivalent) bring extraordinary capabilities: autonomous multi-step reasoning, million-token context windows, and native tool calling. VA Auto-Pilot is designed to **amplify these strengths** and **guard against remaining weaknesses**.
 
 ### Amplifying strengths
 
@@ -113,7 +113,7 @@ The pitfall guide captures structured failure metadata — not just error string
 ## When to Use VA Auto-Pilot
 
 **Use it when:**
-- You have access to Claude Opus 4 or GPT-5 class capability (or equivalent)
+- You have access to Claude Opus 4.6 or GPT-5.3-codex class capability (or equivalent)
 - Your goal is complex enough that a human would need to decompose it before executing
 - You need guaranteed quality gates, not best-effort review
 - You want an execution loop that gets better as models improve

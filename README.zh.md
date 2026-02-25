@@ -1,6 +1,54 @@
 # VA Auto-Pilot
 
+[![CI](https://github.com/Vadaski/va-auto-pilot/actions/workflows/ci.yml/badge.svg)](https://github.com/Vadaski/va-auto-pilot/actions)
+[![npm](https://img.shields.io/npm/v/va-auto-pilot)](https://www.npmjs.com/package/va-auto-pilot)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Vadaski/va-auto-pilot?style=social)](https://github.com/Vadaski/va-auto-pilot)
+
+**CLI 优先的自治多智能体工程闭环——给出目标，模型自己找路径。**
+
 [English README](./README.md)
+
+```
+┌──────────────────────────────────────────────────────┐
+│                    管理 Agent                         │
+│  目标 → 约束 → 锚点 → 视角                            │
+├──────────┬──────────┬──────────┬─────────────────────┤
+│ 工人 A   │ 工人 B   │ 工人 C   │  ...并行轨道         │
+│ (实现)   │ (实现)   │ (审查)   │                     │
+├──────────┴──────────┴──────────┴─────────────────────┤
+│         CLI 质量门禁（确定性）                          │
+│  typecheck · lint · test · codex-review · acceptance  │
+├──────────────────────────────────────────────────────┤
+│        陷阱指南（失败知识会复利）                        │
+└──────────────────────────────────────────────────────┘
+```
+
+### 立即体验
+
+```bash
+npx va-auto-pilot init .
+```
+
+---
+
+## 协议对比
+
+VA Auto-Pilot 与 MCP 和 A2A 的关系是**互补**，而非竞争：
+
+| 维度 | MCP (Anthropic) | A2A (Google) | VA Auto-Pilot |
+|------|----------------|-------------|---------------|
+| **定位** | 工具级上下文 | Agent 发现 + 协调 | 长任务执行 + 证据验证 |
+| **任务类型** | 短同步工具调用 | 发现 + 路由 | 长任务 + 自动拓扑 + 调度器 |
+| **时间模型** | 同步 | 异步 (push) | 异步 (polling; v0.2 push) |
+| **验证机制** | 返回值 = 结果 | 弱 | CLI 门禁 + 模型评估 + 陷阱 |
+| **编排** | 无 | 基础路由 | 拓扑排序 + 能力匹配 + 并发控制 |
+| **失败学习** | 无 | 无 | 陷阱复利 |
+| **互操作** | — | MCP 兼容 | 与 MCP/A2A 互补 |
+
+> **一句话** — MCP 把模型连接到工具。A2A 把 Agent 连接到 Agent。VA Auto-Pilot 确保事情真正做对。
+
+---
 
 ## 这个框架在押什么赌注
 
@@ -16,6 +64,34 @@ VA Auto-Pilot 押的是反向的赌注。
 
 ---
 
+## 为什么前沿模型需要这个
+
+2026 前沿模型（Claude Opus 4.6、GPT-5.3-codex 或同等级）带来了非凡能力：自主多步推理、百万 token 上下文窗口、原生工具调用。VA Auto-Pilot 旨在**放大这些优势**并**防御残余弱点**。
+
+### 放大优势
+
+- **目标驱动委派** — 管理者给出目标、约束和验收标准，不做微管理。模型的推理能力被充分释放。
+- **并行自主轨道** — 前沿模型原生处理复杂的并行工具编排。框架顺势而为，而不是把一切串行化。
+- **长上下文感知** — 冲刺状态、陷阱指南、运行日志天然适配能在上下文中容纳整个项目的模型。
+
+### 防御弱点
+
+- **证据门禁防止幻觉** — 模型不能自我认证。CLI 命令产生客观的通过/失败信号。"我觉得做完了"不等于"确实做完了"。
+- **陷阱复利防止重蹈覆辙** — 过往运行中的结构化失败元数据作为硬约束注入后续委派。系统随时间越来越难被愚弄。
+- **对抗性审查打破自我验证闭环** — 全新上下文的审查员只看 diff，不看意图。这在结构上防止了自治循环最常见的失败模式：对越来越错的输出越来越有信心。
+
+> **一句话：** 信任模型的推理力，用确定性机制兜底盲区。
+
+---
+
+## 与 va-agent-protocol 的关系
+
+VA Auto-Pilot 是一个**冲刺执行框架**——它运行自治工程闭环。[va-agent-protocol](https://github.com/Vadaski/va-agent-protocol) 是**通用任务协议**——将任何 CLI Agent（包括 VA Auto-Pilot）包装成可组合单元的标准化契约。
+
+VA Auto-Pilot 是为 va-agent-protocol 构建的第一个适配器。你可以独立使用 Auto-Pilot，也可以在协议编排器内将它作为被管理的 Agent。
+
+---
+
 ## 核心设计贡献
 
 ### 1. 视角从约束与锚点中浮现，而不是从角色列表中分配
@@ -28,73 +104,59 @@ VA Auto-Pilot 采用不同的模型。在任何评审开始之前，管理 Agent
 
 确定了真实的约束与锚点之后，问题就变成了：*针对这次特定变更，哪些专家视角能暴露最关键的失败模式？* 视角从分析中浮现——而不是从固定列表中指派。
 
-这就是为什么审查会随时间变得更精准。模型会学会哪些视角对哪类变更最有价值。一个固定角色列表永远不会学到任何东西。
-
 ### 2. CLI 优先是正确性保证，而不是风格偏好
 
 质量门禁通过确定性 CLI 命令执行。`npm run check:all` 只有两种结果：通过或不通过。模型无法宣称自己完成了，无法用言辞绕过去，无法自我认证质量。
 
-这建立了一个客观的同步点，把"我认为做好了"和"确实做好了"分开。没有这个机制，自治循环会坍塌成自我验证——模型对越来越错的输出越来越有把握。
+这建立了一个客观的同步点，把"我认为做好了"和"确实做好了"分开。
 
 ### 3. 管理者委派，而不是实现
 
-管理 Agent 的价值在于知道*什么*必须为真，而不是*怎么*把它变成真。实现总是委派给带完整上下文的子 Agent：目标、约束、硬限制和完成门禁。子 Agent 决定路径。
-
-这与强模型的实际工作方式一致。它们从目标出发推理得很好。从步骤清单出发推理则效果很差，因为步骤清单在替它们做判断。
+管理 Agent 的价值在于知道*什么*必须为真，而不是*怎么*把它变成真。实现总是委派给带完整上下文的子 Agent：目标、约束、硬限制和完成门禁。
 
 ### 4. 战略拆解先于战术执行
 
-高层目标（"把这个做到商业质量"）不由人工拆解成任务。框架运行一次并行维度扫描：每个子 Agent 独立审计问题的一个维度，各维度之间不交叉污染。所有发现汇聚成一个有优先级的任务待办。
-
-给出正确的框架时，模型在项目规划上比大多数人类做得更好。这个框架就是给它那个正确框架。
+高层目标不由人工拆解成任务。框架运行一次并行维度扫描：每个子 Agent 独立审计问题的一个维度，各维度之间不交叉污染。
 
 ### 5. 对抗性冲刺收尾审查是一级门禁
 
-每个冲刺结束时，都有一个全新上下文的对抗性审查员——他只看到了 diff，看不到意图是什么，也看不到过程中的讨论。他的工作是找到冲刺团队视而不见的东西。
-
-这防止了自治循环中最常见的失败模式：自我验证偏差在冲刺间累积，直到一个重大回归悄悄通过。对抗性审查员在结构上无法被好意所蒙蔽。
+每个冲刺结束时，都有一个全新上下文的对抗性审查员——他只看到了 diff，看不到意图。他的工作是找到冲刺团队视而不见的东西。
 
 ### 6. 失败知识会复利
 
-陷阱指南记录结构化的失败元数据——不只是错误字符串，还有假设和缺失的上下文。未来的委派会把相关陷阱作为硬约束注入进去。系统随时间越来越难被愚弄。每一次失败都让后续委派更加精准。
+陷阱指南记录结构化的失败元数据——不只是错误字符串，还有假设和缺失的上下文。未来的委派会把相关陷阱作为硬约束注入。系统随时间越来越难被愚弄。
 
 ---
 
 ## 什么时候用 VA Auto-Pilot
 
 **适合使用的场景：**
-- 你有前沿级别的模型（Claude Opus 4.6 或 gpt-5.3-codex 级别，或同等能力）
+- 你有前沿级别的模型（Claude Opus 4.6 或 GPT-5.3-codex 级别，或同等能力）
 - 你的目标足够复杂，人类也需要先拆解才能执行
 - 你需要有保证的质量门禁，而不是尽力而为的审查
 - 你希望有一个随模型进步而变强的执行闭环
 
 **不适合使用的场景：**
-- 你用的是中等或较弱的模型——框架不会替你补能力，任务会失败或产出质量低下
-- 你想控制每一个实现步骤——如果你需要规定怎么做，用别的工具
-- 你的任务小而明确——一个写得好的单条提示词更快、更合适
-- 你希望流程轻量——这个框架有协议开销，价值在于保证质量，而不是快
-
----
-
-## 你会得到什么
-
-- 可复用 CLI 脚手架：`va-auto-pilot`
-- 机器可读状态源：`.va-auto-pilot/sprint-state.json`
-- 可读看板投影：`docs/todo/sprint.md`
-- 人类控制面：`docs/todo/human-board.md`
-- 追加式运行记忆：`docs/todo/run-journal.md`
-- 协议文档与启动提示
-- 验收流执行器：`scripts/test-runner.ts`
+- 你用的是中等或较弱的模型——框架不会替你补能力
+- 你想控制每一个实现步骤
+- 你的任务小而明确——一个写得好的单条提示词更快
+- 你希望流程轻量——这个框架有协议开销，价值在于保证质量
 
 ---
 
 ## 快速开始
 
 ```bash
-# 本地
-node ./bin/va-auto-pilot.mjs init .
+# 全局安装
+npm i -g va-auto-pilot
 
-# 从 GitHub 引导（不依赖 npm registry）
+# 或直接用 npx
+npx va-auto-pilot init .
+```
+
+从 GitHub 引导（不依赖 npm）：
+
+```bash
 tmp="$(mktemp -d)"
 git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
 node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
@@ -111,7 +173,7 @@ node scripts/sprint-board.mjs render
 
 ## 目标优先委派
 
-使用这个框架的正确方式是给它一个目标，而不是一个计划。模型自己想出计划。
+使用这个框架的正确方式是给它一个目标，而不是一个计划。
 
 ```text
 $va-auto-pilot
@@ -130,62 +192,55 @@ $va-auto-pilot
 - 验收流 MUST 100%，SHOULD >= 80%
 ```
 
-注意缺失了什么：没有要修改哪些文件，没有要遵循的步骤顺序，没有规定的实现方式。模型决定路径，你定义终局和约束。这是全部的契约。
+没有要修改哪些文件，没有要遵循的步骤顺序，没有规定的实现方式。你定义终局和约束，这是全部的契约。
 
 ---
 
-## 并发推进模型
+## 并发模型
 
-- 每轮先选一个主任务，同时可并发启动 0 到多个独立轨道。
-- 强制门禁是并发轨道的同步屏障。
-- 未通过门禁不得推进状态。
-- 并发策略由管理 Agent 在实时上下文中决策。
-- 默认路径是模型原生并发工具调用。
-
-并发规划命令：
+- 每轮先选一个主任务，同时可并发启动 0 到多个独立轨道
+- 强制门禁是并发轨道的同步屏障
+- 未通过门禁不得推进状态
+- 默认路径是模型原生并发工具调用
 
 ```bash
 node scripts/sprint-board.mjs plan --json --max-parallel 3 > .va-auto-pilot/parallel-plan.json
-# 由管理 Agent 使用原生并发工具调用执行各轨道
-# 状态推进前在门禁处同步
 npm run check:all && codex review --uncommitted && npm run validate:distribution
-```
-
-实验性辅助器（仅在明确需要时启用）：
-
-```bash
-node scripts/va-parallel-runner.mjs spawn --plan-file .va-auto-pilot/parallel-plan.json --agent-cmd "codex exec --task {taskId}"
 ```
 
 ---
 
 ## 分发安装
 
-Codex 安装：
-
-```text
-$skill-installer install https://github.com/Vadaski/va-auto-pilot/tree/main/skills/va-auto-pilot
-```
-
-说明：仓库当前未发布 npm 包，安装必须走 GitHub 源码路径。
-
-若环境不支持 `skill-installer`，可用源码回退安装：
-
 ```bash
-tmp="$(mktemp -d)"
-git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
-node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
-# VA Auto-Pilot 运行时依赖
-npm install yaml
-rm -rf "$tmp"
-```
+# npm
+npm i -g va-auto-pilot
 
-Claude Code 安装：
-
-```bash
+# Claude Code
 mkdir -p .claude/commands
-curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/va-auto-pilot/claude-command.md -o .claude/commands/va-auto-pilot.md
+curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/va-auto-pilot/claude-command.md \
+  -o .claude/commands/va-auto-pilot.md
 ```
+
+---
+
+## 路线图
+
+### v0.2
+
+- 持久化 — SQLite 存储冲刺状态和陷阱
+- 推送式异步 — 用事件驱动通知替代轮询
+- Web 仪表盘 — 实时冲刺可视化
+
+### v0.3
+
+- REST / gRPC 适配器
+- 治理 — 成本护栏 + 权限范围
+
+### 未来
+
+- 多语言 SDK（Python、Go）
+- 分布式编排
 
 ---
 
@@ -201,18 +256,10 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 
 ## 官网
 
-`website/` 为独立静态站点，包含：
-
-- 中英切换
-- 交互式状态机
-- 动画执行演示
-- SEO 与 OG 元信息
-
-本地预览：
+`website/` 为独立静态站点，包含中英切换、交互式状态机、动画执行演示、SEO 与 OG 元信息。
 
 ```bash
-cd website
-python3 -m http.server 4173
+cd website && python3 -m http.server 4173
 ```
 
 ---

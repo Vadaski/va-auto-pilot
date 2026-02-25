@@ -1,6 +1,6 @@
 {
   "name": "va-auto-pilot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI-first autonomous multi-agent engineering loop for any codebase",
   "license": "MIT",
   "type": "module",

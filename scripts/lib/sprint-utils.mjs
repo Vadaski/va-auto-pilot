@@ -6,6 +6,145 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 
+// ---------------------------------------------------------------------------
+// Type definitions
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {Object} ReviewDetail
+ * @property {string} [implementer]
+ * @property {string} [security]
+ * @property {string} [qa]
+ * @property {string} [domain]
+ * @property {string} [architect]
+ */
+
+/**
+ * @typedef {Object} TestingDetail
+ * @property {string} [flow]
+ * @property {string} [mustPassRate]
+ * @property {string} [shouldPassRate]
+ */
+
+/**
+ * @typedef {Object} FailureDetail
+ * @property {string} failureType
+ * @property {string} attempted
+ * @property {string} hypothesis
+ * @property {string} missingContext
+ */
+
+/**
+ * @typedef {Object} Task
+ * @property {string} id
+ * @property {string} title
+ * @property {string} priority
+ * @property {string} state
+ * @property {string} owner
+ * @property {string} source
+ * @property {string} createdAt
+ * @property {string} startedAt
+ * @property {string} completedAt
+ * @property {string} lastFailedAt
+ * @property {number} failCount
+ * @property {string} reason
+ * @property {string} verification
+ * @property {string} notes
+ * @property {ReviewDetail} review
+ * @property {TestingDetail} testing
+ * @property {string[]} dependsOn
+ * @property {FailureDetail} [failureDetail]
+ */
+
+/**
+ * @typedef {Object} SprintState
+ * @property {string} [projectPrefix]
+ * @property {string} [updatedAt]
+ * @property {Task[]} tasks
+ */
+
+/**
+ * @typedef {Object} SprintConfig
+ * @property {string} [stateFile]
+ * @property {string} [boardFile]
+ * @property {string} [runJournalFile]
+ */
+
+/**
+ * @typedef {Object} SprintDefaults
+ * @property {string} stateFile
+ * @property {string} boardFile
+ * @property {string} journalFile
+ */
+
+/**
+ * @typedef {Object} ParsedArgv
+ * @property {string} command
+ * @property {Record<string, string>} options
+ * @property {Set<string>} flags
+ */
+
+/**
+ * @typedef {Object} SmokeTestStepResult
+ * @property {string} step
+ * @property {boolean} passed
+ * @property {string} [error]
+ * @property {string} [screenshotPath]
+ */
+
+/**
+ * @typedef {Object} GateResult
+ * @property {string} gate
+ * @property {string} type
+ * @property {boolean} passed
+ * @property {string} [criticalPath]
+ * @property {string} [output]
+ * @property {number} durationMs
+ * @property {boolean} hangDetected
+ * @property {boolean} crashDetected
+ * @property {SmokeTestStepResult[]} stepResults
+ * @property {{path: string}[]} [screenshots]
+ */
+
+/**
+ * @typedef {Object} PitfallEntry
+ * @property {string} taskId
+ * @property {string} failureType
+ * @property {string} attempted
+ * @property {string} hypothesis
+ * @property {string} missingContext
+ */
+
+/**
+ * @typedef {Object} SmokeTestResult
+ * @property {boolean} skipped
+ * @property {string} skipReason
+ * @property {boolean} passed
+ * @property {GateResult[]} gateResults
+ * @property {PitfallEntry[]} pitfallEntries
+ */
+
+/**
+ * @typedef {Object} QualityGateConfig
+ * @property {string} [buildCommand]
+ * @property {string} [reviewCommand]
+ * @property {string} [acceptanceTestCommand]
+ * @property {string} [smokeTestCommand]
+ * @property {Object} [smokeTest]
+ * @property {boolean} [smokeTest.enabled]
+ * @property {number} [smokeTest.timeout]
+ * @property {string} [smokeTest.screenshotDir]
+ * @property {string[]} [smokeTest.criticalPaths]
+ */
+
+// ---------------------------------------------------------------------------
+// Utility functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the current time as an ISO 8601 string.
+ * @returns {string}
+ */
 export function nowIso() {
   return new Date().toISOString();
 }
@@ -14,6 +153,9 @@ export function nowIso() {
  * Strips surrounding quotes and trims whitespace from a scalar YAML value.
  * Kept for backward compatibility; the yaml package handles quoting internally
  * so this is no longer used by readSprintPathsFromConfig.
+ *
+ * @param {string} value - raw YAML scalar string
+ * @returns {string}
  */
 export function stripYamlValue(value) {
   return value.replace(/^["']/, "").replace(/["']$/, "").trim();
@@ -23,6 +165,9 @@ export function stripYamlValue(value) {
  * Reads the [sprint] section of a YAML config file using the yaml package.
  * Returns the sprint section as a plain object, or {} if the file is missing,
  * unparseable, or has no sprint section.
+ *
+ * @param {string} configPath - absolute or relative path to the YAML config file
+ * @returns {SprintConfig}
  */
 export function readSprintPathsFromConfig(configPath) {
   if (!fs.existsSync(configPath)) {
@@ -57,6 +202,8 @@ export function readSprintPathsFromConfig(configPath) {
  *
  * Reads config once per process; callers should cache the result if
  * calling frequently.
+ *
+ * @returns {SprintDefaults}
  */
 export function resolveDefaults() {
   const sprintFromConfig = readSprintPathsFromConfig(
@@ -156,6 +303,13 @@ export function parseArgv(argv, boolFlags = new Set(["json", "help"])) {
   return parsed;
 }
 
+/**
+ * Retrieves a required option value or throws if missing.
+ *
+ * @param {Record<string, string>} options - parsed options map
+ * @param {string} key - the option key to look up
+ * @returns {string}
+ */
 export function requireOption(options, key) {
   const value = options[key];
   if (!value) {
@@ -174,19 +328,8 @@ export function requireOption(options, key) {
  * Returns a plain object with the qualityGate settings, or {} when the file
  * is missing, unparseable, or has no qualityGate section.
  *
- * Shape of the returned object when present:
- * {
- *   buildCommand: string,
- *   reviewCommand: string,
- *   acceptanceTestCommand: string,
- *   smokeTestCommand: string,
- *   smokeTest: {
- *     enabled: boolean,
- *     timeout: number,
- *     screenshotDir: string,
- *     criticalPaths: string[],
- *   }
- * }
+ * @param {string} [configPath] - path to the config.yaml file (defaults to .va-auto-pilot/config.yaml)
+ * @returns {QualityGateConfig}
  */
 export function readQualityGateConfig(configPath) {
   const resolved = configPath
@@ -219,36 +362,15 @@ export function readQualityGateConfig(configPath) {
 /**
  * Runs smoke tests for each critical path configured in config.yaml.
  *
- * Preconditions:
- *   - qualityGate.smokeTest.enabled must be true
- *   - qualityGate.smokeTest.criticalPaths must be a non-empty array of file paths
- *
- * Returns an object:
- * {
- *   skipped: boolean,        // true when feature is disabled or no paths configured
- *   skipReason: string,      // human-readable reason when skipped
- *   passed: boolean,         // true when all smoke tests passed (false if any failed)
- *   gateResults: GateResult[], // one per critical path that was run
- *   pitfallEntries: object[], // formatted pitfall data for any failures
- * }
- *
- * Each pitfallEntry has the shape expected by sprint-board's addPitfall():
- * {
- *   taskId: string,
- *   failureType: "gate",
- *   attempted: string,
- *   hypothesis: string,
- *   missingContext: string,
- * }
- *
  * Handles missing Puppeteer gracefully: if the smoke-test-runner exits with a
  * message about Puppeteer not being installed, the function returns skipped=true
  * with a warning rather than propagating a hard failure.
  *
- * @param {object} options
+ * @param {Object} [options]
  * @param {string} [options.configPath]      - path to config.yaml (defaults to .va-auto-pilot/config.yaml)
  * @param {string} [options.taskId]          - task ID to attach to pitfall entries (e.g. "AP-042")
  * @param {string} [options.smokeTestScript] - path to smoke-test-runner.mjs (defaults to scripts/smoke-test-runner.mjs)
+ * @returns {Promise<SmokeTestResult>}
  */
 export async function runSmokeTests(options = {}) {
   const configPath = options.configPath ?? null;
@@ -307,12 +429,12 @@ export async function runSmokeTests(options = {}) {
       continue;
     }
 
-    let rawOutput = "";
+    let rawOutput;
     let exitCode = 0;
     let puppeteerMissing = false;
 
     try {
-      rawOutput = await new Promise((resolve, reject) => {
+      rawOutput = await new Promise((resolve, _reject) => {
         const args = [
           smokeTestScript,
           "--config",

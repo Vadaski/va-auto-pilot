@@ -66,7 +66,7 @@ function evaluateAssertion(type, value, result) {
       };
 
     case "stdout_json_parseable": {
-      let ok = false;
+      let ok;
       try {
         JSON.parse(stdout);
         ok = true;

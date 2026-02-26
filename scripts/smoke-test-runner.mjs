@@ -312,8 +312,8 @@ async function run() {
 
   // Signal handlers for cleanup
   const cleanup = async () => {
-    if (browser) { try { await browser.close(); } catch {} }
-    if (appProcess) { try { appProcess.kill("SIGKILL"); } catch {} }
+    if (browser) { try { await browser.close(); } catch { /* ignore cleanup errors */ } }
+    if (appProcess) { try { appProcess.kill("SIGKILL"); } catch { /* ignore cleanup errors */ } }
     process.exit(130);
   };
   process.on("SIGINT", cleanup);

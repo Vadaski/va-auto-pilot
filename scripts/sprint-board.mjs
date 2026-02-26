@@ -8,7 +8,56 @@ import {
   parseArgv,
   requireOption
 } from "./lib/sprint-utils.mjs";
+import { VAPilotError } from "./lib/errors.mjs";
 
+/**
+ * @typedef {import("./lib/sprint-utils.mjs").Task} Task
+ * @typedef {import("./lib/sprint-utils.mjs").SprintState} SprintState
+ * @typedef {import("./lib/sprint-utils.mjs").FailureDetail} FailureDetail
+ * @typedef {import("./lib/sprint-utils.mjs").ParsedArgv} ParsedArgv
+ */
+
+/**
+ * @typedef {"Backlog" | "In Progress" | "Review" | "Testing" | "Failed" | "Done"} TaskState
+ */
+
+/**
+ * @typedef {Object} NextTaskResult
+ * @property {string} state
+ * @property {string} action
+ * @property {Task} task
+ */
+
+/**
+ * @typedef {Object} ParallelPlan
+ * @property {string} generatedAt
+ * @property {string} primaryTaskId
+ * @property {string} primaryAction
+ * @property {string[]} parallelTracks
+ * @property {Record<string, string[]>} dependencyGraph
+ * @property {string[]} syncPoints
+ */
+
+/**
+ * @typedef {Object} PitfallData
+ * @property {number} version
+ * @property {PitfallRecord[]} entries
+ */
+
+/**
+ * @typedef {Object} PitfallRecord
+ * @property {string} id
+ * @property {string} taskId
+ * @property {string} failureType
+ * @property {string} attempted
+ * @property {string} hypothesis
+ * @property {string} missingContext
+ * @property {string} resolution
+ * @property {string | null} resolvedAt
+ * @property {string} createdAt
+ */
+
+/** @type {readonly string[]} */
 const VALID_STATES = ["Backlog", "In Progress", "Review", "Testing", "Failed", "Done"];
 const NEXT_ORDER = ["Failed", "Testing", "Review", "In Progress", "Backlog"];
 const PRIORITY_WEIGHT = { P0: 0, P1: 1, P2: 2, P3: 3 };
@@ -86,17 +135,29 @@ Global options:
 `);
 }
 
+/**
+ * @param {string | undefined} raw
+ * @returns {string}
+ */
 function shortDate(raw) {
   if (!raw) return "-";
   return String(raw).slice(0, 10);
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function escapeCell(value) {
   const input = String(value ?? "").trim();
   if (!input) return "-";
   return input.replaceAll("|", "\\|").replaceAll("\n", "<br>");
 }
 
+/**
+ * @param {Task[]} tasks
+ * @returns {Task[]}
+ */
 function sortTasks(tasks) {
   return [...tasks].sort((a, b) => {
     const pA = PRIORITY_WEIGHT[a.priority] ?? 99;
@@ -111,6 +172,10 @@ function sortTasks(tasks) {
   });
 }
 
+/**
+ * @param {string | string[] | undefined} raw
+ * @returns {string[]}
+ */
 function normalizeDependsOn(raw) {
   if (Array.isArray(raw)) {
     return raw.map((item) => String(item ?? "").trim()).filter(Boolean);
@@ -126,6 +191,12 @@ function normalizeDependsOn(raw) {
   return [];
 }
 
+/**
+ * Normalizes a raw task object into a fully-populated Task with default values.
+ *
+ * @param {Partial<Task> & Record<string, unknown>} task
+ * @returns {Task}
+ */
 function normalizeTask(task) {
   return {
     id: String(task.id ?? ""),
@@ -164,27 +235,42 @@ function normalizeTask(task) {
   };
 }
 
+/**
+ * @param {string} filePath
+ * @returns {SprintState}
+ */
 function readState(filePath) {
   if (!fs.existsSync(filePath)) {
-    throw new Error(`State file not found: ${filePath}`);
+    throw new VAPilotError("FILE_NOT_FOUND", `State file not found: ${filePath}`, { filePath });
   }
 
   const raw = fs.readFileSync(filePath, "utf8");
   const data = JSON.parse(raw);
 
   if (!Array.isArray(data.tasks)) {
-    throw new Error("Invalid state file: tasks must be an array");
+    throw new VAPilotError("PARSE_ERROR", "Invalid state file: tasks must be an array", { filePath });
   }
 
   data.tasks = data.tasks.map(normalizeTask);
   return data;
 }
 
+/**
+ * @param {string} filePath
+ * @param {SprintState} data
+ * @returns {void}
+ */
 function writeState(filePath, data) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
 }
 
+/**
+ * @param {Task[]} tasks
+ * @param {string[]} columns
+ * @param {(task: Task) => unknown[]} mapRow
+ * @returns {string}
+ */
 function rowsForSection(tasks, columns, mapRow) {
   if (tasks.length === 0) {
     return `| ${columns.map(() => "-").join(" | ")} |`;
@@ -196,6 +282,10 @@ function rowsForSection(tasks, columns, mapRow) {
   }).join("\n");
 }
 
+/**
+ * @param {SprintState} state
+ * @returns {string}
+ */
 function renderBoardMarkdown(state) {
   const date = shortDate(state.updatedAt || nowIso());
   const prefix = escapeCell(state.projectPrefix || "TASK");
@@ -261,6 +351,11 @@ ${rowsForSection(backlog, ["Priority", "ID", "Task", "Depends On", "Owner", "Sou
 `;
 }
 
+/**
+ * @param {string} boardFile
+ * @param {SprintState} state
+ * @returns {void}
+ */
 function writeBoard(boardFile, state) {
   const markdown = renderBoardMarkdown(state);
   fs.mkdirSync(path.dirname(boardFile), { recursive: true });
@@ -272,6 +367,9 @@ function writeBoard(boardFile, state) {
  *
  * Returns an array of cycle descriptions (empty if no cycles).
  * Each description is a string like "A -> B -> C -> A".
+ *
+ * @param {Task[]} tasks
+ * @returns {string[]}
  */
 function detectCycles(tasks) {
   const adjById = new Map();
@@ -322,10 +420,19 @@ function detectCycles(tasks) {
   return cycles;
 }
 
+/**
+ * @param {Task} task
+ * @param {Set<string>} doneIds
+ * @returns {boolean}
+ */
 function isDependencySatisfied(task, doneIds) {
   return task.dependsOn.every((dependencyId) => doneIds.has(dependencyId));
 }
 
+/**
+ * @param {Task[]} tasks
+ * @returns {NextTaskResult | null}
+ */
 function findNextTask(tasks) {
   const doneIds = new Set(
     tasks
@@ -357,12 +464,19 @@ function findNextTask(tasks) {
   return null;
 }
 
+/**
+ * @param {Task[]} tasks
+ * @param {number} maxParallel
+ * @returns {ParallelPlan | null}
+ */
 function buildParallelPlan(tasks, maxParallel) {
   // Guard: report cycles before planning to prevent silent deadlocks.
   const cycles = detectCycles(tasks);
   if (cycles.length > 0) {
-    throw new Error(
-      `Dependency cycle(s) detected in sprint state:\n${cycles.map((c) => `  ${c}`).join("\n")}\nFix dependsOn fields before running a parallel plan.`
+    throw new VAPilotError(
+      "CYCLE_DETECTED",
+      `Dependency cycle(s) detected in sprint state:\n${cycles.map((c) => `  ${c}`).join("\n")}\nFix dependsOn fields before running a parallel plan.`,
+      { cycles }
     );
   }
 
@@ -418,6 +532,9 @@ function buildParallelPlan(tasks, maxParallel) {
  * Finds the highest numeric suffix of IDs matching the projectPrefix pattern,
  * increments by 1, and zero-pads to 3 digits.
  * Example: existing [AP-001, AP-002, AP-003] -> AP-004
+ *
+ * @param {SprintState} state
+ * @returns {string}
  */
 function nextTaskId(state) {
   const prefix = String(state.projectPrefix || "TASK");
@@ -436,15 +553,20 @@ function nextTaskId(state) {
   return `${prefix}-${String(next).padStart(3, "0")}`;
 }
 
+/**
+ * @param {SprintState} state
+ * @param {Record<string, string>} options
+ * @returns {Task}
+ */
 function addTask(state, options) {
   const title = requireOption(options, "title");
 
   const priority = options.priority;
   if (!priority) {
-    throw new Error("Missing required option --priority");
+    throw new VAPilotError("CONFIG_ERROR", "Missing required option --priority", { option: "priority" });
   }
   if (!(priority in PRIORITY_WEIGHT)) {
-    throw new Error(`Invalid priority '${priority}'. Expected P0/P1/P2/P3.`);
+    throw new VAPilotError("CONFIG_ERROR", `Invalid priority '${priority}'. Expected P0/P1/P2/P3.`, { priority, validPriorities: ["P0", "P1", "P2", "P3"] });
   }
 
   const id = nextTaskId(state);
@@ -476,17 +598,23 @@ function addTask(state, options) {
   return task;
 }
 
+/**
+ * @param {SprintState} state
+ * @param {Record<string, string>} options
+ * @param {Set<string>} [flags]
+ * @returns {Task}
+ */
 function updateTask(state, options, flags) {
   const id = requireOption(options, "id");
   const task = state.tasks.find((item) => item.id === id);
 
   if (!task) {
-    throw new Error(`Task not found: ${id}`);
+    throw new VAPilotError("INVALID_TASK", `Task not found: ${id}`, { taskId: id });
   }
 
   if (options.state) {
     if (!VALID_STATES.includes(options.state)) {
-      throw new Error(`Invalid state '${options.state}'. Expected one of: ${VALID_STATES.join(", ")}`);
+      throw new VAPilotError("INVALID_STATE", `Invalid state '${options.state}'. Expected one of: ${VALID_STATES.join(", ")}`, { state: options.state, validStates: [...VALID_STATES] });
     }
 
     task.state = options.state;
@@ -565,6 +693,11 @@ function updateTask(state, options, flags) {
   return task;
 }
 
+/**
+ * @param {string} filePath
+ * @param {Record<string, string>} options
+ * @returns {void}
+ */
 function appendJournal(filePath, options) {
   const taskId = requireOption(options, "task");
   const summary = requireOption(options, "summary");
@@ -600,6 +733,11 @@ function appendJournal(filePath, options) {
   fs.appendFileSync(filePath, `${prefix}${lines.join("\n")}\n`, "utf8");
 }
 
+/**
+ * @param {SprintState} state
+ * @param {string} pitfallsFile
+ * @returns {void}
+ */
 function printSummary(state, pitfallsFile) {
   const counts = Object.fromEntries(VALID_STATES.map((name) => [name, 0]));
   for (const task of state.tasks) {
@@ -646,6 +784,10 @@ function printSummary(state, pitfallsFile) {
 // Pitfall guide
 // ---------------------------------------------------------------------------
 
+/**
+ * @param {string} filePath
+ * @returns {PitfallData}
+ */
 function readPitfalls(filePath) {
   if (!fs.existsSync(filePath)) {
     return { version: 1, entries: [] };
@@ -655,7 +797,7 @@ function readPitfalls(filePath) {
   try {
     data = JSON.parse(raw);
   } catch (e) {
-    throw new Error(`Cannot parse pitfalls file: ${filePath} — ${e.message}`);
+    throw new VAPilotError("PARSE_ERROR", `Cannot parse pitfalls file: ${filePath} — ${e.message}`, { filePath, cause: e.message });
   }
   if (!Array.isArray(data.entries)) {
     throw new Error(`Invalid pitfalls file: 'entries' must be an array`);
@@ -663,11 +805,20 @@ function readPitfalls(filePath) {
   return data;
 }
 
+/**
+ * @param {string} filePath
+ * @param {PitfallData} data
+ * @returns {void}
+ */
 function writePitfalls(filePath, data) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
 }
 
+/**
+ * @param {PitfallRecord[]} entries
+ * @returns {string}
+ */
 function nextPitfallId(entries) {
   let max = 0;
   for (const entry of entries) {
@@ -680,6 +831,11 @@ function nextPitfallId(entries) {
   return `PF-${String(max + 1).padStart(3, "0")}`;
 }
 
+/**
+ * @param {string} pitfallsFile
+ * @param {Record<string, string>} options
+ * @returns {PitfallRecord}
+ */
 function addPitfall(pitfallsFile, options) {
   const taskId = requireOption(options, "task");
   const failureType = requireOption(options, "failure-type");
@@ -708,6 +864,11 @@ function addPitfall(pitfallsFile, options) {
   return entry;
 }
 
+/**
+ * @param {string} pitfallsFile
+ * @param {Record<string, string>} options
+ * @returns {PitfallRecord}
+ */
 function resolvePitfall(pitfallsFile, options) {
   const pfId = requireOption(options, "resolve");
   const resolution = requireOption(options, "resolution");
@@ -723,6 +884,12 @@ function resolvePitfall(pitfallsFile, options) {
   return entry;
 }
 
+/**
+ * @param {string} pitfallsFile
+ * @param {Record<string, string>} options
+ * @param {Set<string>} [flags]
+ * @returns {PitfallRecord[]}
+ */
 function listPitfalls(pitfallsFile, options, flags) {
   const data = readPitfalls(pitfallsFile);
   let entries = data.entries;
@@ -886,6 +1053,8 @@ function main() {
 try {
   main();
 } catch (error) {
-  console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+  const msg = error instanceof Error ? error.message : String(error);
+  const prefix = error instanceof VAPilotError ? `[${error.code}] ` : "";
+  console.error(`Error: ${prefix}${msg}`);
   process.exit(1);
 }

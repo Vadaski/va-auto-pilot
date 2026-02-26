@@ -19,7 +19,8 @@ import {
   stripYamlValue,
   readSprintPathsFromConfig,
   parseArgv,
-  requireOption
+  requireOption,
+  runSmokeTests
 } from "./lib/sprint-utils.mjs";
 
 // ---------------------------------------------------------------------------
@@ -424,6 +425,95 @@ test("add: --depends-on stores comma-separated IDs", () => {
 // ---------------------------------------------------------------------------
 // summary: correct counts
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// VAPilotError — structured error type (ISS-019)
+// ---------------------------------------------------------------------------
+import { VAPilotError } from "./lib/errors.mjs";
+
+test("VAPilotError has code, message, and context properties", () => {
+  const err = new VAPilotError("INVALID_TASK", "task missing", { taskId: "UT-001" });
+  assert.equal(err.code, "INVALID_TASK");
+  assert.equal(err.message, "task missing");
+  assert.deepEqual(err.context, { taskId: "UT-001" });
+  assert.equal(err.name, "VAPilotError");
+});
+
+test("VAPilotError is instanceof Error (backwards compatible)", () => {
+  const err = new VAPilotError("FILE_NOT_FOUND", "gone");
+  assert.ok(err instanceof Error, "must be instanceof Error");
+  assert.ok(err instanceof VAPilotError, "must be instanceof VAPilotError");
+});
+
+test("VAPilotError.toJSON returns structured object", () => {
+  const err = new VAPilotError("PARSE_ERROR", "bad json", { filePath: "/tmp/x.json" });
+  const json = err.toJSON();
+  assert.equal(json.code, "PARSE_ERROR");
+  assert.equal(json.message, "bad json");
+  assert.deepEqual(json.context, { filePath: "/tmp/x.json" });
+});
+
+test("VAPilotError works without context argument", () => {
+  const err = new VAPilotError("CONFIG_ERROR", "no config");
+  assert.equal(err.context, undefined);
+  const json = err.toJSON();
+  assert.equal(json.context, undefined);
+});
+
+test("VAPilotError: each ErrorCode is constructable", () => {
+  /** @type {import("./lib/errors.mjs").ErrorCode[]} */
+  const codes = [
+    "INVALID_TASK", "INVALID_STATE", "FILE_NOT_FOUND",
+    "PARSE_ERROR", "CYCLE_DETECTED", "CONFIG_ERROR", "DEPENDENCY_MISSING"
+  ];
+  for (const code of codes) {
+    const err = new VAPilotError(code, `test ${code}`);
+    assert.equal(err.code, code);
+    assert.ok(err instanceof Error);
+  }
+});
+
+test("VAPilotError: sprint-board uses FILE_NOT_FOUND for missing state file", () => {
+  const r = runBoard(["summary"], "/nonexistent/state.json");
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("FILE_NOT_FOUND"), `expected FILE_NOT_FOUND in: ${r.stderr}`);
+});
+
+test("VAPilotError: sprint-board uses INVALID_STATE for bad state transition", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "Backlog", dependsOn: [] }
+  ]);
+  const r = runBoard(["update", "--id", "UT-001", "--state", "Limbo"], stateFile);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("INVALID_STATE"), `expected INVALID_STATE in: ${r.stderr}`);
+});
+
+test("VAPilotError: sprint-board uses INVALID_TASK for unknown task ID", () => {
+  const { stateFile } = writeTmpState([]);
+  const r = runBoard(["update", "--id", "UT-999", "--state", "Done"], stateFile);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("INVALID_TASK"), `expected INVALID_TASK in: ${r.stderr}`);
+});
+
+test("VAPilotError: sprint-board uses CYCLE_DETECTED for dependency cycles", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "A", priority: "P1", state: "Backlog", dependsOn: ["UT-002"] },
+    { id: "UT-002", title: "B", priority: "P1", state: "Backlog", dependsOn: ["UT-001"] }
+  ]);
+  const r = runBoard(["plan", "--json"], stateFile);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("CYCLE_DETECTED"), `expected CYCLE_DETECTED in: ${r.stderr}`);
+});
+
+test("VAPilotError: sprint-board uses CONFIG_ERROR for invalid priority", () => {
+  const { stateFile } = writeTmpState([]);
+  const r = runBoard(["add", "--title", "Bad", "--priority", "PX"], stateFile);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("CONFIG_ERROR"), `expected CONFIG_ERROR in: ${r.stderr}`);
+});
+
+// ---------------------------------------------------------------------------
+// summary: correct counts
+// ---------------------------------------------------------------------------
 test("summary: counts tasks by state", () => {
   const { stateFile } = writeTmpState([
     { id: "UT-001", title: "B1", priority: "P1", state: "Backlog", dependsOn: [] },
@@ -436,4 +526,321 @@ test("summary: counts tasks by state", () => {
   assert.ok(r.stdout.includes("Backlog    : 2"), r.stdout);
   assert.ok(r.stdout.includes("In Progress: 1"), r.stdout);
   assert.ok(r.stdout.includes("Done       : 1"), r.stdout);
+});
+
+// ---------------------------------------------------------------------------
+// runSmokeTests
+// ---------------------------------------------------------------------------
+
+/**
+ * Helper: write a YAML config file for runSmokeTests tests.
+ * Returns the path to the config file.
+ */
+function writeSmokeConfig(qualityGateObj) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-smoke-cfg-"));
+  const configFile = path.join(tmpDir, "config.yaml");
+  // Build YAML manually to avoid needing yaml.stringify
+  const lines = ["qualityGate:"];
+  function yamlify(obj, indent) {
+    for (const [k, v] of Object.entries(obj)) {
+      if (Array.isArray(v)) {
+        lines.push(`${indent}${k}:`);
+        for (const item of v) {
+          if (typeof item === "object") {
+            lines.push(`${indent}  -`);
+            yamlify(item, indent + "    ");
+          } else {
+            lines.push(`${indent}  - ${JSON.stringify(item)}`);
+          }
+        }
+      } else if (typeof v === "object" && v !== null) {
+        lines.push(`${indent}${k}:`);
+        yamlify(v, indent + "  ");
+      } else if (typeof v === "boolean") {
+        lines.push(`${indent}${k}: ${v}`);
+      } else if (typeof v === "number") {
+        lines.push(`${indent}${k}: ${v}`);
+      } else {
+        lines.push(`${indent}${k}: ${JSON.stringify(v)}`);
+      }
+    }
+  }
+  yamlify(qualityGateObj, "  ");
+  fs.writeFileSync(configFile, lines.join("\n") + "\n", "utf8");
+  return { configFile, tmpDir };
+}
+
+/**
+ * Helper: write a temp Node.js script that acts as a fake smoke-test-runner.
+ * The script writes `stdout` to stdout and `stderr` to stderr, then exits with `exitCode`.
+ */
+function writeFakeRunner(stdout, stderr = "", exitCode = 0) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-smoke-runner-"));
+  const script = path.join(tmpDir, "fake-runner.mjs");
+  const code = [
+    `process.stdout.write(${JSON.stringify(stdout)});`,
+    stderr ? `process.stderr.write(${JSON.stringify(stderr)});` : "",
+    exitCode !== 0 ? `process.exitCode = ${exitCode};` : ""
+  ].filter(Boolean).join("\n");
+  fs.writeFileSync(script, code, "utf8");
+  return script;
+}
+
+/**
+ * Helper: write a fake runner that exits with an error and stderr content.
+ * Uses process.exit to trigger the err path in execFile callback.
+ */
+function writeFakeRunnerWithError(stdout, stderr, exitCode = 1) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-smoke-runner-"));
+  const script = path.join(tmpDir, "fake-runner.mjs");
+  const code = [
+    `process.stdout.write(${JSON.stringify(stdout)});`,
+    `process.stderr.write(${JSON.stringify(stderr)});`,
+    `process.exit(${exitCode});`
+  ].join("\n");
+  fs.writeFileSync(script, code, "utf8");
+  return script;
+}
+
+test("runSmokeTests: returns skipped when smokeTest.enabled is not true", async () => {
+  const { configFile } = writeSmokeConfig({
+    smokeTest: { enabled: false, criticalPaths: ["some-path.yaml"] }
+  });
+  const result = await runSmokeTests({ configPath: configFile });
+  assert.equal(result.skipped, true);
+  assert.ok(result.skipReason.includes("enabled is not true"));
+  assert.equal(result.passed, true);
+  assert.deepEqual(result.gateResults, []);
+});
+
+test("runSmokeTests: returns skipped when smokeTest section is missing", async () => {
+  const { configFile } = writeSmokeConfig({});
+  const result = await runSmokeTests({ configPath: configFile });
+  assert.equal(result.skipped, true);
+  assert.ok(result.skipReason.includes("enabled is not true"));
+});
+
+test("runSmokeTests: returns skipped when criticalPaths is empty", async () => {
+  const { configFile } = writeSmokeConfig({
+    smokeTest: { enabled: true, criticalPaths: [] }
+  });
+  const result = await runSmokeTests({ configPath: configFile });
+  assert.equal(result.skipped, true);
+  assert.ok(result.skipReason.includes("criticalPaths is empty"));
+  assert.equal(result.passed, true);
+});
+
+test("runSmokeTests: detects path escape outside project directory", async () => {
+  // Use an absolute path that escapes the project root
+  const { configFile } = writeSmokeConfig({
+    smokeTest: {
+      enabled: true,
+      criticalPaths: ["/etc/passwd"]
+    }
+  });
+  const fakeRunner = writeFakeRunner("{}");
+  const result = await runSmokeTests({
+    configPath: configFile,
+    smokeTestScript: fakeRunner
+  });
+  assert.equal(result.skipped, false);
+  assert.equal(result.passed, false);
+  assert.equal(result.gateResults.length, 1);
+  assert.ok(result.gateResults[0].output.includes("Path escapes project directory"));
+  assert.equal(result.gateResults[0].passed, false);
+});
+
+test("runSmokeTests: detects missing Puppeteer from stderr", async () => {
+  // Create a criticalPaths entry that is a real file inside the project
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-smoke-pp-"));
+  const criticalPathFile = path.join(process.cwd(), ".va-auto-pilot", "test-smoke-pp.yaml");
+  // Ensure the directory exists
+  fs.mkdirSync(path.dirname(criticalPathFile), { recursive: true });
+  fs.writeFileSync(criticalPathFile, "steps: []\n", "utf8");
+
+  const fakeRunner = writeFakeRunnerWithError("", "Puppeteer is not installed", 1);
+  const { configFile } = writeSmokeConfig({
+    smokeTest: {
+      enabled: true,
+      criticalPaths: [criticalPathFile]
+    }
+  });
+
+  // Capture stderr to verify the warning is printed
+  const origStderrWrite = process.stderr.write;
+  let stderrOutput = "";
+  process.stderr.write = (chunk) => { stderrOutput += chunk; return true; };
+
+  try {
+    const result = await runSmokeTests({
+      configPath: configFile,
+      smokeTestScript: fakeRunner
+    });
+    // When puppeteer is missing, the path is skipped (continue), so gateResults has no entry for it
+    assert.equal(result.skipped, false);
+    // The path was skipped, not failed
+    assert.equal(result.gateResults.length, 0);
+    assert.ok(stderrOutput.includes("Puppeteer is not installed"), `expected warning in stderr, got: ${stderrOutput}`);
+  } finally {
+    process.stderr.write = origStderrWrite;
+    // cleanup
+    try { fs.unlinkSync(criticalPathFile); } catch { /* ignore */ }
+  }
+});
+
+test("runSmokeTests: JSON parse failure from stdout", async () => {
+  const criticalPathFile = path.join(process.cwd(), ".va-auto-pilot", "test-smoke-json.yaml");
+  fs.mkdirSync(path.dirname(criticalPathFile), { recursive: true });
+  fs.writeFileSync(criticalPathFile, "steps: []\n", "utf8");
+
+  const fakeRunner = writeFakeRunner("this is not JSON");
+  const { configFile } = writeSmokeConfig({
+    smokeTest: {
+      enabled: true,
+      criticalPaths: [criticalPathFile]
+    }
+  });
+
+  try {
+    const result = await runSmokeTests({
+      configPath: configFile,
+      smokeTestScript: fakeRunner,
+      taskId: "UT-SMOKE-1"
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.passed, false);
+    assert.equal(result.gateResults.length, 1);
+    assert.ok(result.gateResults[0].output.includes("Could not parse smoke-test-runner output as JSON"));
+    assert.equal(result.pitfallEntries.length, 1);
+    assert.ok(result.pitfallEntries[0].hypothesis.includes("did not produce valid JSON"));
+    assert.equal(result.pitfallEntries[0].taskId, "UT-SMOKE-1");
+  } finally {
+    try { fs.unlinkSync(criticalPathFile); } catch { /* ignore */ }
+  }
+});
+
+test("runSmokeTests: empty stdout produces no-output failure", async () => {
+  const criticalPathFile = path.join(process.cwd(), ".va-auto-pilot", "test-smoke-empty.yaml");
+  fs.mkdirSync(path.dirname(criticalPathFile), { recursive: true });
+  fs.writeFileSync(criticalPathFile, "steps: []\n", "utf8");
+
+  const fakeRunner = writeFakeRunner("");
+  const { configFile } = writeSmokeConfig({
+    smokeTest: {
+      enabled: true,
+      criticalPaths: [criticalPathFile]
+    }
+  });
+
+  try {
+    const result = await runSmokeTests({
+      configPath: configFile,
+      smokeTestScript: fakeRunner,
+      taskId: "UT-SMOKE-2"
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.passed, false);
+    assert.equal(result.gateResults.length, 1);
+    assert.ok(result.gateResults[0].output.includes("produced no output"));
+    assert.equal(result.pitfallEntries.length, 1);
+    assert.ok(result.pitfallEntries[0].hypothesis.includes("exited without producing JSON"));
+  } finally {
+    try { fs.unlinkSync(criticalPathFile); } catch { /* ignore */ }
+  }
+});
+
+test("runSmokeTests: failed smoke test with detailed step reporting", async () => {
+  const criticalPathFile = path.join(process.cwd(), ".va-auto-pilot", "test-smoke-fail.yaml");
+  fs.mkdirSync(path.dirname(criticalPathFile), { recursive: true });
+  fs.writeFileSync(criticalPathFile, "steps: []\n", "utf8");
+
+  const gateResult = {
+    gate: "smoke-test",
+    type: "smoke-test",
+    passed: false,
+    criticalPath: "test-smoke-fail",
+    output: "2 steps failed",
+    durationMs: 1234,
+    hangDetected: true,
+    crashDetected: false,
+    stepResults: [
+      { step: "login", passed: true },
+      { step: "navigate", passed: false, error: "timeout waiting for selector", screenshotPath: "/tmp/nav.png" },
+      { step: "submit", passed: false, error: "element not found", screenshotPath: "/tmp/sub.png" }
+    ],
+    screenshots: [{ path: "/tmp/nav.png" }, { path: "/tmp/sub.png" }]
+  };
+  const fakeRunner = writeFakeRunner(JSON.stringify(gateResult));
+  const { configFile } = writeSmokeConfig({
+    smokeTest: {
+      enabled: true,
+      criticalPaths: [criticalPathFile]
+    }
+  });
+
+  try {
+    const result = await runSmokeTests({
+      configPath: configFile,
+      smokeTestScript: fakeRunner,
+      taskId: "UT-SMOKE-3"
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.passed, false);
+    assert.equal(result.gateResults.length, 1);
+    assert.equal(result.gateResults[0].passed, false);
+    assert.equal(result.gateResults[0].hangDetected, true);
+    // Check pitfall entries
+    assert.equal(result.pitfallEntries.length, 1);
+    const pitfall = result.pitfallEntries[0];
+    assert.equal(pitfall.taskId, "UT-SMOKE-3");
+    assert.ok(pitfall.hypothesis.includes("hang detected"));
+    assert.ok(pitfall.attempted.includes("navigate"));
+    assert.ok(pitfall.missingContext.includes("/tmp/nav.png"));
+  } finally {
+    try { fs.unlinkSync(criticalPathFile); } catch { /* ignore */ }
+  }
+});
+
+test("runSmokeTests: successful smoke test returns passed", async () => {
+  const criticalPathFile = path.join(process.cwd(), ".va-auto-pilot", "test-smoke-ok.yaml");
+  fs.mkdirSync(path.dirname(criticalPathFile), { recursive: true });
+  fs.writeFileSync(criticalPathFile, "steps: []\n", "utf8");
+
+  const gateResult = {
+    gate: "smoke-test",
+    type: "smoke-test",
+    passed: true,
+    criticalPath: "test-smoke-ok",
+    output: "all steps passed",
+    durationMs: 500,
+    hangDetected: false,
+    crashDetected: false,
+    stepResults: [
+      { step: "login", passed: true },
+      { step: "navigate", passed: true }
+    ],
+    screenshots: []
+  };
+  const fakeRunner = writeFakeRunner(JSON.stringify(gateResult));
+  const { configFile } = writeSmokeConfig({
+    smokeTest: {
+      enabled: true,
+      criticalPaths: [criticalPathFile]
+    }
+  });
+
+  try {
+    const result = await runSmokeTests({
+      configPath: configFile,
+      smokeTestScript: fakeRunner,
+      taskId: "UT-SMOKE-4"
+    });
+    assert.equal(result.skipped, false);
+    assert.equal(result.passed, true);
+    assert.equal(result.gateResults.length, 1);
+    assert.equal(result.gateResults[0].passed, true);
+    assert.equal(result.pitfallEntries.length, 0);
+  } finally {
+    try { fs.unlinkSync(criticalPathFile); } catch { /* ignore */ }
+  }
 });

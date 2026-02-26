@@ -27,5 +27,20 @@ export default [
       "prefer-const": "error",
     }
   },
+  {
+    files: ["website/**/*.js"],
+    languageOptions: {
+      globals: {
+        // Browser globals
+        document: "readonly",
+        window: "readonly",
+        navigator: "readonly",
+        localStorage: "readonly",
+        IntersectionObserver: "readonly",
+        HTMLElement: "readonly",
+        Event: "readonly",
+      }
+    }
+  },
   { ignores: ["node_modules/", "dist/", "templates/"] }
 ];

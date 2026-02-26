@@ -295,6 +295,17 @@ export async function runSmokeTests(options = {}) {
     // criticalPaths entries are paths to YAML smoke-test config files
     const configFilePath = path.resolve(criticalPathConfig);
     const configLabel = path.basename(criticalPathConfig, path.extname(criticalPathConfig));
+    const projectRoot = process.cwd();
+    if (!configFilePath.startsWith(projectRoot + path.sep) && configFilePath !== projectRoot) {
+      allPassed = false;
+      gateResults.push({
+        gate: "smoke-test", type: "smoke-test", passed: false,
+        criticalPath: configLabel,
+        output: `Path escapes project directory: ${configFilePath}`,
+        durationMs: 0, hangDetected: false, crashDetected: false, stepResults: [],
+      });
+      continue;
+    }
 
     let rawOutput = "";
     let exitCode = 0;
@@ -314,13 +325,16 @@ export async function runSmokeTests(options = {}) {
 
         execFile(process.execPath, args, { encoding: "utf8" }, (err, stdout, stderr) => {
           if (err) {
-            exitCode = err.code ?? 1;
+            exitCode = typeof err.code === "number" ? err.code : 1;
             // Detect missing Puppeteer from stderr before trying to parse stdout
             if (
               stderr.includes("Puppeteer is not installed") ||
               stderr.includes("puppeteer-core") ||
               stderr.includes("Cannot find package 'puppeteer'") ||
-              stderr.includes("Cannot find package 'puppeteer-core'")
+              stderr.includes("Cannot find package 'puppeteer-core'") ||
+              stderr.includes("Could not find Chrome") ||
+              stderr.includes("Could not find Chromium") ||
+              stderr.includes("Failed to launch the browser process")
             ) {
               puppeteerMissing = true;
             }
@@ -341,7 +355,6 @@ export async function runSmokeTests(options = {}) {
         hangDetected: false,
         crashDetected: false,
         stepResults: [],
-        screenshots: []
       });
       pitfallEntries.push({
         taskId,
@@ -383,7 +396,6 @@ export async function runSmokeTests(options = {}) {
         hangDetected: false,
         crashDetected: false,
         stepResults: [],
-        screenshots: []
       });
       pitfallEntries.push({
         taskId,
@@ -408,7 +420,6 @@ export async function runSmokeTests(options = {}) {
         hangDetected: false,
         crashDetected: false,
         stepResults: [],
-        screenshots: []
       };
       gateResults.push(syntheticResult);
       pitfallEntries.push({

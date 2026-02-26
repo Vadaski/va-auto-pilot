@@ -64,12 +64,29 @@ async function loadPuppeteer() {
 }
 
 // ---------------------------------------------------------------------------
-// Screenshot comparison (pixel-level via PNG buffer equality)
+// Path traversal protection
 // ---------------------------------------------------------------------------
 
-function buffersEqual(a, b) {
-  if (a.length !== b.length) return false;
-  return a.equals(b);
+const projectRoot = process.cwd();
+
+function assertWithinProject(resolvedPath) {
+  if (!resolvedPath.startsWith(projectRoot + path.sep) && resolvedPath !== projectRoot) {
+    console.error(`Error: Path escapes project directory: ${resolvedPath}`);
+    process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Localhost-only URL validation
+// ---------------------------------------------------------------------------
+
+const ALLOWED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]"];
+
+function assertLocalhostUrl(url) {
+  const parsed = new URL(url);
+  if (!ALLOWED_HOSTS.includes(parsed.hostname)) {
+    throw new Error(`Navigation restricted to localhost. Blocked: ${url}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -84,15 +101,16 @@ function launchApp(launchConfig) {
 
   const child = spawn(cmd, args, {
     stdio: ["ignore", "pipe", "pipe"],
-    shell: true,
+    shell: false,
     detached: false,
   });
 
-  // Collect output for debugging
+  // Collect output for debugging (capped at 10 MB)
+  const MAX_OUTPUT = 10 * 1024 * 1024;
   let stdout = "";
   let stderr = "";
-  child.stdout.on("data", (d) => { stdout += d.toString(); });
-  child.stderr.on("data", (d) => { stderr += d.toString(); });
+  child.stdout.on("data", (d) => { if (stdout.length < MAX_OUTPUT) stdout += d.toString(); });
+  child.stderr.on("data", (d) => { if (stderr.length < MAX_OUTPUT) stderr += d.toString(); });
 
   return { child, getOutput: () => ({ stdout, stderr }) };
 }
@@ -133,13 +151,17 @@ async function executeStep(page, step, timeoutMs) {
       await delay(step.duration || 1000);
       break;
 
-    case "navigate":
+    case "navigate": {
+      assertLocalhostUrl(step.url);
       await page.goto(step.url, { waitUntil: "networkidle2", timeout: stepTimeout });
       break;
+    }
 
-    case "evaluate":
-      await page.evaluate(step.expression);
+    case "evaluate": {
+      const result = await page.evaluate(step.expression);
+      if (!result) throw new Error(`Expression evaluated to falsy: ${step.expression}`);
       break;
+    }
 
     default:
       throw new Error(`Unknown action: ${step.action}`);
@@ -167,13 +189,14 @@ function startHangDetection(page, config) {
   const timer = setInterval(async () => {
     try {
       const buf = await page.screenshot({ encoding: "binary" });
-      if (lastBuffer && buffersEqual(Buffer.from(buf), Buffer.from(lastBuffer))) {
+      if (lastBuffer && Buffer.from(buf).equals(Buffer.from(lastBuffer))) {
         sameCount++;
         if (sameCount >= maxSameFrames) {
           hung = true;
         }
       } else {
         sameCount = 0;
+        hung = false;
       }
       lastBuffer = buf;
     } catch {
@@ -241,13 +264,31 @@ async function run() {
     process.exit(1);
   }
 
+  // Path traversal protection
+  assertWithinProject(configPath);
+
   const configText = fs.readFileSync(configPath, "utf8");
   const config = parseYaml(configText);
+
+  // YAML config validation
+  if (!config || typeof config !== "object") {
+    console.error("Error: Invalid YAML config — expected an object");
+    process.exit(1);
+  }
+  if (config.steps && !Array.isArray(config.steps)) {
+    console.error("Error: config.steps must be an array");
+    process.exit(1);
+  }
+  if (config.launch && typeof config.launch.command !== "string") {
+    console.error("Error: config.launch.command must be a string");
+    process.exit(1);
+  }
 
   // Set up screenshot directory
   const screenshotDir = path.resolve(
     opts.screenshotDir || ".va-auto-pilot/screenshots"
   );
+  assertWithinProject(screenshotDir);
   fs.mkdirSync(screenshotDir, { recursive: true });
 
   const startTime = Date.now();
@@ -261,7 +302,6 @@ async function run() {
     hangDetected: false,
     crashDetected: false,
     stepResults: [],
-    screenshots: [],
     durationMs: 0,
     output: "",
   };
@@ -270,21 +310,43 @@ async function run() {
   let appProcess = null;
   let browser = null;
 
+  // Signal handlers for cleanup
+  const cleanup = async () => {
+    if (browser) { try { await browser.close(); } catch {} }
+    if (appProcess) { try { appProcess.kill("SIGKILL"); } catch {} }
+    process.exit(130);
+  };
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
+
   try {
     if (config.launch && config.launch.command) {
       const app = launchApp(config.launch);
       appProcess = app.child;
 
-      // Wait for the app to start
-      const waitFor = config.launch.waitFor || 5000;
-      await delay(waitFor);
+      // Poll for app readiness instead of blind delay
+      const waitFor = Math.min(config.launch.waitFor || 5000, 120000);
+      const url = config.launch?.url || "http://localhost:3000";
+      const deadline = Date.now() + waitFor;
+      let appReady = false;
+      while (Date.now() < deadline) {
+        try {
+          const resp = await fetch(url);
+          if (resp.ok || resp.status < 500) { appReady = true; break; }
+        } catch { /* not ready yet */ }
+        await delay(500);
+      }
+      // If app process died during startup, detect it
+      if (appProcess && appProcess.exitCode !== null) {
+        throw new Error(`App process exited with code ${appProcess.exitCode} during startup`);
+      }
     }
 
     // Load Puppeteer and open browser
     const puppeteer = await loadPuppeteer();
     browser = await puppeteer.default.launch({
       headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: [],
     });
 
     const page = await browser.newPage();
@@ -292,8 +354,9 @@ async function run() {
     // Set up crash detection
     const crashDetector = setupCrashDetection(page);
 
-    // Navigate to URL
+    // Navigate to URL (localhost-only)
     const url = config.launch?.url || "http://localhost:3000";
+    assertLocalhostUrl(url);
     await page.goto(url, { waitUntil: "networkidle2", timeout: opts.timeout });
 
     // Start hang detection
@@ -349,11 +412,7 @@ async function run() {
         ...(stepError ? { error: stepError } : {}),
       });
 
-      gateResult.screenshots.push({
-        type: "screenshot",
-        path: screenshotFile,
-        description: `Step: ${stepName}`,
-      });
+
 
       // Stop on crash
       if (crashDetector.isCrashed()) {
@@ -395,21 +454,16 @@ async function run() {
       }
     }
 
-    // Clean up application process
+    // Clean up application process (synchronous — no orphans)
     if (appProcess) {
       try {
         appProcess.kill("SIGTERM");
-        // Give it a moment, then force kill
-        setTimeout(() => {
-          try {
-            appProcess.kill("SIGKILL");
-          } catch {
-            // already dead
-          }
-        }, 3000);
-      } catch {
-        // already dead
-      }
+      } catch { /* already dead */ }
+      // Wait briefly for graceful shutdown, then force kill
+      await delay(1000);
+      try {
+        appProcess.kill("SIGKILL");
+      } catch { /* already dead */ }
     }
   }
 

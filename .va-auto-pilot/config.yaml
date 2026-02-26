@@ -8,6 +8,12 @@ qualityGate:
   buildCommand: "npm run check:all"
   reviewCommand: "codex review --uncommitted"
   acceptanceTestCommand: "npm run validate:distribution"
+  smokeTestCommand: "node scripts/smoke-test-runner.mjs --config"
+  smokeTest:
+    enabled: true
+    timeout: 30000
+    screenshotDir: ".va-auto-pilot/screenshots"
+    criticalPaths: []
 review:
   domainRoleName: "Domain Expert"
   domainPrompt: "You are the domain expert for this product. Review behavioral correctness, user impact, and product consistency."

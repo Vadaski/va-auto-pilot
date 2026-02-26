@@ -328,11 +328,10 @@ async function run() {
       const waitFor = Math.min(config.launch.waitFor || 5000, 120000);
       const url = config.launch?.url || "http://localhost:3000";
       const deadline = Date.now() + waitFor;
-      let appReady = false;
       while (Date.now() < deadline) {
         try {
           const resp = await fetch(url);
-          if (resp.ok || resp.status < 500) { appReady = true; break; }
+          if (resp.ok || resp.status < 500) { break; }
         } catch { /* not ready yet */ }
         await delay(500);
       }

@@ -50,11 +50,6 @@ const NEVER_OVERWRITE = new Set([
   "docs/todo/sprint.md"
 ]);
 
-// Files under scripts/ are always safe to overwrite (single source of truth).
-function isScriptFile(relativePath) {
-  return relativePath.startsWith("scripts/") || relativePath.startsWith("scripts\\");
-}
-
 // ---------------------------------------------------------------------------
 // Help
 // ---------------------------------------------------------------------------

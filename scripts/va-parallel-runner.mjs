@@ -9,6 +9,7 @@ import {
   parseArgv,
   requireOption
 } from "./lib/sprint-utils.mjs";
+import { ColonyBridge } from "./lib/colony-bridge.mjs";
 
 const VALID_STATES = new Set(["Backlog", "In Progress", "Review", "Testing", "Failed", "Done"]);
 const DEFAULT_MAX_WORKERS = 4;
@@ -35,6 +36,7 @@ Options:
   --journal-file <path>       Run journal path
   --skip-state-update         Do not write task state updates
   --dry-run                   Print planned commands, do not execute
+  --use-colony                Dispatch via va-agent-protocol Colony (opt-in)
   --json                      Print result as JSON
   --help                      Show help
 
@@ -350,6 +352,16 @@ async function spawnTracks(parsed) {
     command: buildTrackCommand(track, agentTemplate)
   }));
 
+  // Initialise ColonyBridge (uses Colony only when --use-colony is set)
+  const bridge = new ColonyBridge({
+    workDir: process.cwd(),
+    useColony: parsed.flags.has("use-colony"),
+  });
+  const colonyReady = await bridge.init();
+  if (parsed.flags.has("use-colony") && !colonyReady) {
+    console.error("Warning: --use-colony requested but Colony not available. Falling back to spawn.");
+  }
+
   let results;
   if (parsed.flags.has("dry-run")) {
     results = tracks.map((track) => ({
@@ -366,8 +378,9 @@ async function spawnTracks(parsed) {
   } else {
     results = await runWithWorkerPool(tracks, maxWorkers, async (track) => {
       const logFile = path.join(logDir, `${track.taskId}.log`);
-      return runTrack(track, track.command, logFile, trackTimeoutMs);
+      return bridge.dispatch(track, agentTemplate, logFile, trackTimeoutMs);
     });
+    await bridge.shutdown();
   }
 
   const shouldUpdateState = !parsed.flags.has("skip-state-update");
@@ -414,7 +427,7 @@ async function spawnTracks(parsed) {
 }
 
 async function main() {
-  const parsed = parseArgv(process.argv.slice(2), new Set(["json", "help", "dry-run", "skip-state-update"]));
+  const parsed = parseArgv(process.argv.slice(2), new Set(["json", "help", "dry-run", "skip-state-update", "use-colony"]));
   if (!parsed.command || parsed.flags.has("help") || parsed.command === "help") {
     printHelp();
     return 0;

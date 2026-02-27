@@ -801,6 +801,163 @@ test("runSmokeTests: failed smoke test with detailed step reporting", async () =
   }
 });
 
+// ---------------------------------------------------------------------------
+// ColonyBridge — unit tests
+// ---------------------------------------------------------------------------
+import {
+  ColonyBridge,
+  isColonyAvailable,
+  trackToTaskUnit,
+  colonyResultToRunnerResult,
+} from "./lib/colony-bridge.mjs";
+
+test("isColonyAvailable returns a boolean", () => {
+  const result = isColonyAvailable();
+  assert.equal(typeof result, "boolean");
+});
+
+test("ColonyBridge: constructor defaults useColony=false when Colony unavailable and useColony not set", () => {
+  // Even if Colony IS available, passing useColony:false should disable it
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  assert.equal(bridge.useColony, false);
+  assert.equal(bridge.colony, null);
+});
+
+test("ColonyBridge: init() returns false when useColony is disabled", async () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  const result = await bridge.init();
+  assert.equal(result, false);
+  assert.equal(bridge.colony, null);
+});
+
+test("ColonyBridge: registeredAdapters starts empty", () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp" });
+  assert.deepEqual(bridge.registeredAdapters, []);
+});
+
+test("trackToTaskUnit: converts minimal track (string taskId only)", () => {
+  const track = { taskId: "AP-001", command: "" };
+  const task = trackToTaskUnit(track, "/project");
+  assert.equal(task.id, "AP-001");
+  assert.equal(task.objective, "AP-001"); // falls back to taskId
+  assert.deepEqual(task.acceptanceCriteria, ["Task completes successfully"]);
+  assert.deepEqual(task.constraints, []);
+  assert.deepEqual(task.context, { codebaseRoot: "/project" });
+});
+
+test("trackToTaskUnit: uses title when available", () => {
+  const track = { taskId: "AP-002", command: "echo hi", title: "Fix bug in parser" };
+  const task = trackToTaskUnit(track, "/proj");
+  assert.equal(task.objective, "Fix bug in parser");
+});
+
+test("trackToTaskUnit: uses command when title is absent", () => {
+  const track = { taskId: "AP-003", command: "npm test" };
+  const task = trackToTaskUnit(track, "/proj");
+  assert.equal(task.objective, "npm test");
+});
+
+test("trackToTaskUnit: includes verification as acceptanceCriteria", () => {
+  const track = {
+    taskId: "AP-004",
+    command: "",
+    verification: ["All tests pass", "No lint errors"],
+  };
+  const task = trackToTaskUnit(track, "/proj");
+  assert.deepEqual(task.acceptanceCriteria, ["All tests pass", "No lint errors"]);
+});
+
+test("trackToTaskUnit: includes notes as constraints", () => {
+  const track = { taskId: "AP-005", command: "", notes: "Must not modify public API" };
+  const task = trackToTaskUnit(track, "/proj");
+  assert.deepEqual(task.constraints, ["Must not modify public API"]);
+});
+
+test("colonyResultToRunnerResult: completed state maps to success=true, exitCode=0", () => {
+  const result = colonyResultToRunnerResult("AP-001", "echo ok", 5000, "/tmp/ap.log", {
+    state: "completed",
+    evidence: { taskId: "AP-001", status: "completed", verification: "ok" },
+  });
+  assert.equal(result.taskId, "AP-001");
+  assert.equal(result.command, "echo ok");
+  assert.equal(result.success, true);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.signal, "");
+  assert.equal(result.durationMs, 5000);
+  assert.equal(result.timedOut, false);
+  assert.equal(result.logFile, "/tmp/ap.log");
+  assert.ok(result.evidence);
+});
+
+test("colonyResultToRunnerResult: failed state maps to success=false, exitCode=1", () => {
+  const result = colonyResultToRunnerResult("AP-002", "npm test", 3000, "/tmp/ap2.log", {
+    state: "failed",
+    evidence: {
+      taskId: "AP-002",
+      status: "failed",
+      failureDetail: { failureType: "crash", attempted: "exec", hypothesis: "boom" },
+    },
+  });
+  assert.equal(result.success, false);
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.timedOut, false);
+});
+
+test("colonyResultToRunnerResult: timeout failureType sets timedOut=true", () => {
+  const result = colonyResultToRunnerResult("AP-003", "cmd", 60000, "/tmp/ap3.log", {
+    state: "failed",
+    evidence: {
+      taskId: "AP-003",
+      status: "failed",
+      failureDetail: { failureType: "timeout", attempted: "Colony dispatch", hypothesis: "too slow" },
+    },
+  });
+  assert.equal(result.timedOut, true);
+  assert.equal(result.success, false);
+});
+
+test("colonyResultToRunnerResult: null pollResult maps to failed", () => {
+  const result = colonyResultToRunnerResult("AP-004", "cmd", 100, "/tmp/x.log", null);
+  assert.equal(result.success, false);
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.timedOut, false);
+});
+
+test("ColonyBridge: dispatchViaSpawn runs a real command and returns result", async () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-test-"));
+  const logFile = path.join(tmpDir, "test.log");
+  const track = { taskId: "CB-001", command: "echo hello-colony" };
+  const result = await bridge.dispatchViaSpawn(track, "", logFile, 10_000);
+  assert.equal(result.taskId, "CB-001");
+  assert.equal(result.success, true);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.timedOut, false);
+  assert.ok(result.durationMs >= 0);
+  assert.equal(result.logFile, logFile);
+  // Verify log file was written
+  const logContent = fs.readFileSync(logFile, "utf8");
+  assert.ok(logContent.includes("hello-colony"), `log should contain output, got: ${logContent}`);
+});
+
+test("ColonyBridge: dispatch falls back to spawn when colony is null", async () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  await bridge.init();
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-fb-"));
+  const logFile = path.join(tmpDir, "fallback.log");
+  const track = { taskId: "CB-002", command: "echo fallback-works" };
+  const result = await bridge.dispatch(track, "", logFile, 10_000);
+  assert.equal(result.success, true);
+  assert.equal(result.taskId, "CB-002");
+});
+
+test("ColonyBridge: shutdown is safe to call when colony is null", async () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  // Should not throw
+  await bridge.shutdown();
+  assert.equal(bridge.colony, null);
+});
+
 test("runSmokeTests: successful smoke test returns passed", async () => {
   const criticalPathFile = path.join(process.cwd(), ".va-auto-pilot", "test-smoke-ok.yaml");
   fs.mkdirSync(path.dirname(criticalPathFile), { recursive: true });

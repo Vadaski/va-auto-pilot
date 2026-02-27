@@ -276,10 +276,6 @@ export class ColonyBridge {
         resolve(result);
       };
 
-      // Wire up Colony callbacks for this specific task
-      const originalOnCompleted = this.colony.getOrchestrator?.()?.options?.onCompleted;
-      const originalOnFailed = this.colony.getOrchestrator?.()?.options?.onFailed;
-
       // We use a simpler approach: submit, start, then poll manually
       this.colony.submitTasks(taskUnit);
       this.colony.start();

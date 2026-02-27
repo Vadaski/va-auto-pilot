@@ -652,7 +652,6 @@ test("runSmokeTests: detects path escape outside project directory", async () =>
 
 test("runSmokeTests: detects missing Puppeteer from stderr", async () => {
   // Create a criticalPaths entry that is a real file inside the project
-  const _tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-smoke-pp-"));
   const criticalPathFile = path.join(process.cwd(), ".va-auto-pilot", "test-smoke-pp.yaml");
   // Ensure the directory exists
   fs.mkdirSync(path.dirname(criticalPathFile), { recursive: true });

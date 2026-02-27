@@ -116,6 +116,7 @@ function appendLog(logFile, message) {
  * @param {string} logFile    - path to the track log file
  * @param {number} timeoutMs  - max allowed run time in ms (0 = unlimited)
  */
+// eslint-disable-next-line no-unused-vars -- retained for non-Colony fallback path
 function runTrack(track, command, logFile, timeoutMs) {
   const startedAt = Date.now();
   appendLog(

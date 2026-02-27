@@ -77,7 +77,7 @@ async function isBinaryAvailable(bin) {
  *
  * @param {{ taskId: string, command?: string, title?: string, verification?: string[], notes?: string }} track
  * @param {string} workDir
- * @returns {{ id: string, objective: string, acceptanceCriteria: string[], constraints: string[], context: object }}
+ * @returns {{ id: string, objective: string, acceptanceCriteria: string[], constraints: string[], context: object, timeout?: number }}
  */
 export function trackToTaskUnit(track, workDir) {
   return {
@@ -351,7 +351,7 @@ export class ColonyBridge {
   /**
    * Raw spawn — mirrors the existing runTrack logic from va-parallel-runner.mjs.
    *
-   * @param {{ taskId: string, command: string }} track
+   * @param {{ taskId: string, command?: string, title?: string, verification?: string[], notes?: string }} track
    * @param {string} agentTemplate
    * @param {string} logFile
    * @param {number} timeoutMs

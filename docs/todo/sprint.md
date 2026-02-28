@@ -1,6 +1,6 @@
 # Sprint Board
 
-> Last updated: 2026-02-27 by VA Auto-Pilot
+> Last updated: 2026-02-28 by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:
@@ -32,7 +32,7 @@
 ## Review
 | ID | Task | Implementer | Security | QA | Domain | Architect |
 |----|------|-------------|----------|----|--------|-----------|
-| - | - | - | - | - | - | - |
+| UT-001 | Task | claude | pass | ok | core | approved |
 
 ## Testing
 | ID | Task | Test Flow | MUST Pass Rate | SHOULD Pass Rate |
@@ -42,9 +42,9 @@
 ## Done
 | ID | Task | Completed | Verification |
 |----|------|-----------|--------------|
-| UT-001 | Dep | - | - |
+| - | - | - | - |
 
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| P2 | UT-002 | Dependent task | UT-001 | - | - |
+| - | - | - | - | - | - |

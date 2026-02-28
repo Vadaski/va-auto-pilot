@@ -957,6 +957,635 @@ test("ColonyBridge: shutdown is safe to call when colony is null", async () => {
   assert.equal(bridge.colony, null);
 });
 
+// ---------------------------------------------------------------------------
+// readQualityGateConfig — unit tests
+// ---------------------------------------------------------------------------
+import { readQualityGateConfig } from "./lib/sprint-utils.mjs";
+
+test("readQualityGateConfig: returns {} for missing file", () => {
+  const result = readQualityGateConfig("/nonexistent/qg-config.yaml");
+  assert.deepEqual(result, {});
+});
+
+test("readQualityGateConfig: returns {} when no qualityGate section", () => {
+  const yaml = `sprint:\n  stateFile: s.json\n`;
+  const { filePath } = withTempFile(yaml);
+  const result = readQualityGateConfig(filePath);
+  assert.deepEqual(result, {});
+});
+
+test("readQualityGateConfig: returns qualityGate section", () => {
+  const yaml = `qualityGate:\n  buildCommand: npm run build\n  smokeTest:\n    enabled: true\n    timeout: 5000\n    criticalPaths:\n      - path1.yaml\n`;
+  const { filePath } = withTempFile(yaml);
+  const result = readQualityGateConfig(filePath);
+  assert.equal(result.buildCommand, "npm run build");
+  assert.equal(result.smokeTest.enabled, true);
+  assert.equal(result.smokeTest.timeout, 5000);
+  assert.deepEqual(result.smokeTest.criticalPaths, ["path1.yaml"]);
+});
+
+test("readQualityGateConfig: returns {} for invalid YAML", () => {
+  const { filePath } = withTempFile("::invalid yaml: [[[");
+  const result = readQualityGateConfig(filePath);
+  assert.deepEqual(result, {});
+});
+
+test("readQualityGateConfig: returns {} when qualityGate is not an object", () => {
+  const yaml = `qualityGate: just-a-string\n`;
+  const { filePath } = withTempFile(yaml);
+  const result = readQualityGateConfig(filePath);
+  assert.deepEqual(result, {});
+});
+
+// ---------------------------------------------------------------------------
+// readSprintPathsFromConfig — additional edge cases
+// ---------------------------------------------------------------------------
+test("readSprintPathsFromConfig: returns {} for invalid YAML syntax", () => {
+  const { filePath } = withTempFile("::invalid yaml: [[[");
+  const result = readSprintPathsFromConfig(filePath);
+  assert.deepEqual(result, {});
+});
+
+test("readSprintPathsFromConfig: filters out non-string values from sprint section", () => {
+  const yaml = `sprint:\n  stateFile: s.json\n  nested:\n    deep: value\n  num: 42\n`;
+  const { filePath } = withTempFile(yaml);
+  const result = readSprintPathsFromConfig(filePath);
+  assert.equal(result.stateFile, "s.json");
+  assert.equal(result.nested, undefined);
+  assert.equal(result.num, undefined);
+});
+
+test("readSprintPathsFromConfig: returns {} when sprint is not an object", () => {
+  const yaml = `sprint: just-a-string\n`;
+  const { filePath } = withTempFile(yaml);
+  const result = readSprintPathsFromConfig(filePath);
+  assert.deepEqual(result, {});
+});
+
+// ---------------------------------------------------------------------------
+// stripYamlValue — additional edge cases
+// ---------------------------------------------------------------------------
+test("stripYamlValue: mismatched quotes are partially stripped", () => {
+  const result = stripYamlValue('"hello\'');
+  assert.equal(result, "hello");
+});
+
+test("stripYamlValue: whitespace-only string becomes empty", () => {
+  assert.equal(stripYamlValue("   "), "");
+});
+
+// ---------------------------------------------------------------------------
+// parseArgv — additional edge cases
+// ---------------------------------------------------------------------------
+test("parseArgv: non-flag token after command is silently skipped", () => {
+  const { command, options } = parseArgv(["cmd", "extra"]);
+  assert.equal(command, "cmd");
+  assert.deepEqual(options, {});
+});
+
+test("parseArgv: empty argv returns empty command", () => {
+  const { command, options, flags } = parseArgv([]);
+  assert.equal(command, "");
+  assert.deepEqual(options, {});
+  assert.equal(flags.size, 0);
+});
+
+test("parseArgv: multiple --key=value pairs", () => {
+  const { options } = parseArgv(["cmd", "--a=1", "--b=2"]);
+  assert.equal(options.a, "1");
+  assert.equal(options.b, "2");
+});
+
+test("parseArgv: --key=value with empty value", () => {
+  const { options } = parseArgv(["cmd", "--name="]);
+  assert.equal(options.name, "");
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: escapeCell edge cases (tested via render)
+// ---------------------------------------------------------------------------
+test("render: escapes newlines in task titles as <br>", () => {
+  const { stateFile, tmpDir } = writeTmpState([
+    { id: "UT-001", title: "Line1\nLine2", priority: "P1", state: "Backlog", dependsOn: [] }
+  ]);
+  const boardFile = path.join(tmpDir, "sprint.md");
+  const r = runBoard(["render", "--board-file", boardFile], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const md = fs.readFileSync(boardFile, "utf8");
+  assert.ok(md.includes("<br>"), "newline in title must be escaped as <br>");
+});
+
+test("render: empty task list produces placeholder rows", () => {
+  const { stateFile, tmpDir } = writeTmpState([]);
+  const boardFile = path.join(tmpDir, "sprint.md");
+  const r = runBoard(["render", "--board-file", boardFile], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const md = fs.readFileSync(boardFile, "utf8");
+  assert.ok(md.includes("# Sprint Board"), "must have heading");
+  // Each section should have a placeholder row with dashes
+  assert.ok(md.includes("| - |"), "empty sections should have placeholder dash rows");
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: normalizeTask tested via add with minimal fields
+// ---------------------------------------------------------------------------
+test("add: task gets default fields (owner, source, review, testing)", () => {
+  const { stateFile } = writeTmpState([]);
+  runBoard(["add", "--title", "Minimal", "--priority", "P2"], stateFile);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const task = state.tasks[0];
+  assert.equal(task.owner, "");
+  assert.equal(task.source, "");
+  assert.equal(task.failCount, 0);
+  assert.deepEqual(task.review, { implementer: "", security: "", qa: "", domain: "", architect: "" });
+  assert.deepEqual(task.testing, { flow: "", mustPassRate: "", shouldPassRate: "" });
+  assert.deepEqual(task.dependsOn, []);
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: update --reset-fail-count
+// ---------------------------------------------------------------------------
+test("update: --reset-fail-count resets failCount to 0", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Failed task", priority: "P1", state: "Failed", failCount: 3, lastFailedAt: "2026-01-01T00:00:00Z", dependsOn: [] }
+  ]);
+  const r = runBoard(["update", "--id", "UT-001", "--state", "Backlog", "--reset-fail-count"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(state.tasks[0].failCount, 0);
+  assert.equal(state.tasks[0].lastFailedAt, "");
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: update --note appending
+// ---------------------------------------------------------------------------
+test("update: --note appends to existing notes with semicolon", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "In Progress", notes: "First note", dependsOn: [] }
+  ]);
+  const r = runBoard(["update", "--id", "UT-001", "--note", "Second note"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(state.tasks[0].notes, "First note; Second note");
+});
+
+test("update: --note on empty notes sets directly", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "Backlog", notes: "", dependsOn: [] }
+  ]);
+  const r = runBoard(["update", "--id", "UT-001", "--note", "Only note"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(state.tasks[0].notes, "Only note");
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: update with --failure-type structured metadata
+// ---------------------------------------------------------------------------
+test("update: state Failed with --failure-type stores failureDetail", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "In Progress", dependsOn: [] }
+  ]);
+  const r = runBoard([
+    "update", "--id", "UT-001", "--state", "Failed",
+    "--failure-type", "gate", "--attempted", "npm test", "--hypothesis", "Test broken"
+  ], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const task = state.tasks[0];
+  assert.equal(task.failureDetail.failureType, "gate");
+  assert.equal(task.failureDetail.attempted, "npm test");
+  assert.equal(task.failureDetail.hypothesis, "Test broken");
+});
+
+test("update: state Failed with invalid --failure-type rejects", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "In Progress", dependsOn: [] }
+  ]);
+  const r = runBoard([
+    "update", "--id", "UT-001", "--state", "Failed",
+    "--failure-type", "bogus", "--attempted", "x", "--hypothesis", "y"
+  ], stateFile);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("Invalid --failure-type"), r.stderr);
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: update other fields
+// ---------------------------------------------------------------------------
+test("update: --owner, --source, --verification, --reason are persisted", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "In Progress", dependsOn: [] }
+  ]);
+  const r = runBoard([
+    "update", "--id", "UT-001",
+    "--owner", "claude", "--source", "review", "--verification", "tests pass", "--reason", "needed"
+  ], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const task = state.tasks[0];
+  assert.equal(task.owner, "claude");
+  assert.equal(task.source, "review");
+  assert.equal(task.verification, "tests pass");
+  assert.equal(task.reason, "needed");
+});
+
+test("update: --depends-on updates dependency list", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-002", title: "Other", priority: "P1", state: "Done", dependsOn: [] }
+  ]);
+  const r = runBoard(["update", "--id", "UT-001", "--depends-on", "UT-002"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.deepEqual(state.tasks[0].dependsOn, ["UT-002"]);
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: next with --json flag
+// ---------------------------------------------------------------------------
+test("next --json: returns JSON output", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "Backlog", dependsOn: [] }
+  ]);
+  const r = runBoard(["next", "--json"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const parsed = JSON.parse(r.stdout);
+  assert.equal(parsed.task.id, "UT-001");
+  assert.equal(parsed.action, "start-task");
+});
+
+test("next --json: returns null when no task available", () => {
+  const { stateFile } = writeTmpState([]);
+  const r = runBoard(["next", "--json"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "null");
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: next picks different state priorities
+// ---------------------------------------------------------------------------
+test("next: Testing task gets run-acceptance action", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Testing task", priority: "P1", state: "Testing", dependsOn: [] }
+  ]);
+  const r = runBoard(["next", "--json"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const parsed = JSON.parse(r.stdout);
+  assert.equal(parsed.action, "run-acceptance");
+});
+
+test("next: Review task gets run-review action", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Review task", priority: "P1", state: "Review", dependsOn: [] }
+  ]);
+  const r = runBoard(["next", "--json"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const parsed = JSON.parse(r.stdout);
+  assert.equal(parsed.action, "run-review");
+});
+
+test("next: In Progress task gets continue-implementation action", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "WIP task", priority: "P1", state: "In Progress", dependsOn: [] }
+  ]);
+  const r = runBoard(["next", "--json"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const parsed = JSON.parse(r.stdout);
+  assert.equal(parsed.action, "continue-implementation");
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: plan edge cases
+// ---------------------------------------------------------------------------
+test("plan: --max-parallel 0 returns no parallel tracks", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "A", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-002", title: "B", priority: "P2", state: "Backlog", dependsOn: [] }
+  ]);
+  const r = runBoard(["plan", "--json", "--max-parallel", "0"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const plan = JSON.parse(r.stdout);
+  assert.deepEqual(plan.parallelTracks, []);
+});
+
+test("plan: non-parallel action (Failed) returns empty tracks", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Failed task", priority: "P1", state: "Failed", dependsOn: [] },
+    { id: "UT-002", title: "Backlog task", priority: "P2", state: "Backlog", dependsOn: [] }
+  ]);
+  const r = runBoard(["plan", "--json"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const plan = JSON.parse(r.stdout);
+  assert.equal(plan.primaryAction, "fix-and-retest");
+  assert.deepEqual(plan.parallelTracks, []);
+});
+
+test("plan: parallel tracks exclude tasks depending on primary", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Primary", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-002", title: "Depends on primary", priority: "P2", state: "Backlog", dependsOn: ["UT-001"] },
+    { id: "UT-003", title: "Independent", priority: "P2", state: "Backlog", dependsOn: [] }
+  ]);
+  const r = runBoard(["plan", "--json", "--max-parallel", "5"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const plan = JSON.parse(r.stdout);
+  assert.ok(!plan.parallelTracks.includes("UT-002"), "task depending on primary should be excluded");
+  assert.ok(plan.parallelTracks.includes("UT-003"), "independent task should be parallel");
+});
+
+test("plan: empty backlog returns null in JSON mode", () => {
+  const { stateFile } = writeTmpState([]);
+  const r = runBoard(["plan", "--json"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "null");
+});
+
+test("plan: text mode output for empty backlog", () => {
+  const { stateFile } = writeTmpState([]);
+  const r = runBoard(["plan"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes("No actionable task"), r.stdout);
+});
+
+test("plan: invalid --max-parallel value errors", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "A", priority: "P1", state: "Backlog", dependsOn: [] }
+  ]);
+  const r = runBoard(["plan", "--max-parallel", "abc"], stateFile);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("Invalid --max-parallel"), r.stderr);
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: nextTaskId edge cases
+// ---------------------------------------------------------------------------
+test("add: handles non-sequential existing IDs", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-005", title: "Skipped", priority: "P1", state: "Done", dependsOn: [] },
+    { id: "UT-002", title: "Earlier", priority: "P1", state: "Done", dependsOn: [] }
+  ]);
+  const r = runBoard(["add", "--title", "Next", "--priority", "P1"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const newTask = state.tasks.find((t) => t.title === "Next");
+  assert.equal(newTask.id, "UT-006", "should be max + 1");
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: unknown command
+// ---------------------------------------------------------------------------
+test("unknown command exits non-zero with error message", () => {
+  const { stateFile } = writeTmpState([]);
+  const r = runBoard(["foobar"], stateFile);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("Unknown command"), r.stderr);
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: help
+// ---------------------------------------------------------------------------
+test("--help prints usage and exits 0", () => {
+  const r = runBoard(["--help"], undefined);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes("sprint-board"), r.stdout);
+  assert.ok(r.stdout.includes("Usage:"), r.stdout);
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: pitfall commands
+// ---------------------------------------------------------------------------
+test("pitfall add + resolve + list cycle works end-to-end", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-pitfall-test-"));
+  const pitfallsFile = path.join(tmpDir, "pitfalls.json");
+  const { stateFile } = writeTmpState([]);
+
+  // Add a pitfall
+  let r = runBoard([
+    "pitfall", "--task", "UT-001", "--failure-type", "gate",
+    "--attempted", "npm test", "--hypothesis", "tests broken",
+    "--missing-context", "no coverage report",
+    "--pitfalls-file", pitfallsFile
+  ], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes("PF-001"), r.stdout);
+
+  // List pitfalls
+  r = runBoard(["pitfall", "--list", "--pitfalls-file", pitfallsFile], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes("1 entries"), r.stdout);
+  assert.ok(r.stdout.includes("unresolved"), r.stdout);
+
+  // List as JSON
+  r = runBoard(["pitfall", "--list", "--json", "--pitfalls-file", pitfallsFile], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const entries = JSON.parse(r.stdout);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].id, "PF-001");
+
+  // Resolve the pitfall
+  r = runBoard([
+    "pitfall", "--resolve", "PF-001", "--resolution", "Fixed the tests",
+    "--pitfalls-file", pitfallsFile
+  ], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes("Pitfall resolved"), r.stdout);
+
+  // List --unresolved should be empty
+  r = runBoard(["pitfall", "--list", "--unresolved", "--pitfalls-file", pitfallsFile], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes("No pitfall entries"), r.stdout);
+});
+
+test("pitfall resolve: unknown ID exits non-zero", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-pitfall-unk-"));
+  const pitfallsFile = path.join(tmpDir, "pitfalls.json");
+  fs.writeFileSync(pitfallsFile, JSON.stringify({ version: 1, entries: [] }), "utf8");
+  const { stateFile } = writeTmpState([]);
+  const r = runBoard([
+    "pitfall", "--resolve", "PF-999", "--resolution", "fix",
+    "--pitfalls-file", pitfallsFile
+  ], stateFile);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("Pitfall not found"), r.stderr);
+});
+
+test("pitfall add: invalid failure-type rejects", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-pitfall-inv-"));
+  const pitfallsFile = path.join(tmpDir, "pitfalls.json");
+  const { stateFile } = writeTmpState([]);
+  const r = runBoard([
+    "pitfall", "--task", "UT-001", "--failure-type", "invalid",
+    "--attempted", "x", "--hypothesis", "y",
+    "--pitfalls-file", pitfallsFile
+  ], stateFile);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("Invalid --failure-type"), r.stderr);
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: summary edge cases
+// ---------------------------------------------------------------------------
+test("summary: reports blocked backlog when dependencies unsatisfied", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Blocked", priority: "P1", state: "Backlog", dependsOn: ["UT-999"] }
+  ]);
+  const r = runBoard(["summary"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes("blocked by dependencies"), r.stdout);
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: add with --depends-on multiple IDs
+// ---------------------------------------------------------------------------
+test("add: --depends-on with comma-separated multiple IDs", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Dep1", priority: "P1", state: "Done", dependsOn: [] },
+    { id: "UT-002", title: "Dep2", priority: "P1", state: "Done", dependsOn: [] }
+  ]);
+  const r = runBoard(
+    ["add", "--title", "Multi dep", "--priority", "P2", "--depends-on", "UT-001,UT-002"],
+    stateFile
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const task = state.tasks.find((t) => t.title === "Multi dep");
+  assert.deepEqual(task.dependsOn, ["UT-001", "UT-002"]);
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: add with --source
+// ---------------------------------------------------------------------------
+test("add: --source stores source field", () => {
+  const { stateFile } = writeTmpState([]);
+  const r = runBoard(["add", "--title", "Sourced", "--priority", "P1", "--source", "dogfood"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(state.tasks[0].source, "dogfood");
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: update review/testing fields
+// ---------------------------------------------------------------------------
+test("update: review and testing fields are persisted", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "Review", dependsOn: [] }
+  ]);
+  const r = runBoard([
+    "update", "--id", "UT-001",
+    "--implementer", "claude", "--security", "pass", "--qa", "ok",
+    "--domain", "core", "--architect", "approved",
+    "--flow", "e2e", "--must-rate", "100%", "--should-rate", "90%"
+  ], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const task = state.tasks[0];
+  assert.equal(task.review.implementer, "claude");
+  assert.equal(task.review.security, "pass");
+  assert.equal(task.review.qa, "ok");
+  assert.equal(task.review.domain, "core");
+  assert.equal(task.review.architect, "approved");
+  assert.equal(task.testing.flow, "e2e");
+  assert.equal(task.testing.mustPassRate, "100%");
+  assert.equal(task.testing.shouldPassRate, "90%");
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: journal with files and signals
+// ---------------------------------------------------------------------------
+test("journal: includes files and signals in output", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-journal-fs-"));
+  const journalFile = path.join(tmpDir, "journal.md");
+
+  const r = spawnSync(
+    "node",
+    [BOARD_SCRIPT, "journal", "--task", "UT-001", "--summary", "Test",
+     "--files", "src/a.ts,src/b.ts", "--signals", "lint-fail,test-pass",
+     "--journal-file", journalFile],
+    { encoding: "utf8", timeout: 10_000 }
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const content = fs.readFileSync(journalFile, "utf8");
+  assert.ok(content.includes("`src/a.ts`"), content);
+  assert.ok(content.includes("`src/b.ts`"), content);
+  assert.ok(content.includes("lint-fail"), content);
+  assert.ok(content.includes("test-pass"), content);
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: readState with invalid tasks field
+// ---------------------------------------------------------------------------
+test("readState: rejects state file where tasks is not an array", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-state-inv-"));
+  const stateFile = path.join(tmpDir, "state.json");
+  fs.writeFileSync(stateFile, JSON.stringify({ tasks: "not-an-array" }), "utf8");
+  const r = runBoard(["summary"], stateFile);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("PARSE_ERROR") || r.stderr.includes("tasks must be an array"), r.stderr);
+});
+
+// ---------------------------------------------------------------------------
+// ColonyBridge — additional edge cases
+// ---------------------------------------------------------------------------
+test("ColonyBridge: constructor with no options defaults workDir to cwd", () => {
+  const bridge = new ColonyBridge();
+  assert.equal(bridge.workDir, process.cwd());
+  assert.deepEqual(bridge.registeredAdapters, []);
+});
+
+test("trackToTaskUnit: empty verification array passes through as empty", () => {
+  const track = { taskId: "AP-010", command: "echo", verification: [] };
+  const task = trackToTaskUnit(track, "/proj");
+  assert.deepEqual(task.acceptanceCriteria, []);
+});
+
+test("colonyResultToRunnerResult: non-timeout failureType keeps timedOut false", () => {
+  const result = colonyResultToRunnerResult("AP-010", "cmd", 1000, "/tmp/x.log", {
+    state: "failed",
+    evidence: {
+      taskId: "AP-010",
+      status: "failed",
+      failureDetail: { failureType: "crash", attempted: "exec", hypothesis: "segfault" },
+    },
+  });
+  assert.equal(result.timedOut, false);
+  assert.equal(result.success, false);
+});
+
+test("ColonyBridge: dispatchViaSpawn handles command failure (exit code != 0)", async () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-fail-"));
+  const logFile = path.join(tmpDir, "fail.log");
+  const track = { taskId: "CB-FAIL", command: "exit 42" };
+  const result = await bridge.dispatchViaSpawn(track, "", logFile, 10_000);
+  assert.equal(result.taskId, "CB-FAIL");
+  assert.equal(result.success, false);
+  assert.equal(result.exitCode, 42);
+  assert.equal(result.timedOut, false);
+});
+
+test("ColonyBridge: dispatchViaSpawn with timeout 0 does not set timer", async () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-notimer-"));
+  const logFile = path.join(tmpDir, "notimer.log");
+  const track = { taskId: "CB-NT", command: "echo no-timer" };
+  const result = await bridge.dispatchViaSpawn(track, "", logFile, 0);
+  assert.equal(result.success, true);
+  assert.equal(result.timedOut, false);
+});
+
+test("ColonyBridge: dispatch uses agentTemplate when track has no command", async () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-tmpl-"));
+  const logFile = path.join(tmpDir, "tmpl.log");
+  const track = { taskId: "CB-TMPL" };
+  const result = await bridge.dispatch(track, "echo template-used", logFile, 10_000);
+  assert.equal(result.success, true);
+  assert.equal(result.command, "echo template-used");
+  const logContent = fs.readFileSync(logFile, "utf8");
+  assert.ok(logContent.includes("template-used"), logContent);
+});
+
 test("runSmokeTests: successful smoke test returns passed", async () => {
   const criticalPathFile = path.join(process.cwd(), ".va-auto-pilot", "test-smoke-ok.yaml");
   fs.mkdirSync(path.dirname(criticalPathFile), { recursive: true });

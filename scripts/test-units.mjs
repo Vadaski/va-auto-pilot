@@ -1629,3 +1629,8 @@ test("runSmokeTests: successful smoke test returns passed", async () => {
     try { fs.unlinkSync(criticalPathFile); } catch { /* ignore */ }
   }
 });
+
+// ---------------------------------------------------------------------------
+// Import additional coverage tests
+// ---------------------------------------------------------------------------
+import "./test-units-coverage.mjs";

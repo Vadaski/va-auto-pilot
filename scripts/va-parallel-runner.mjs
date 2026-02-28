@@ -36,7 +36,7 @@ Options:
   --journal-file <path>       Run journal path
   --skip-state-update         Do not write task state updates
   --dry-run                   Print planned commands, do not execute
-  --use-colony                Dispatch via va-agent-protocol Colony (opt-in)
+  --no-colony                 Disable Colony dispatch (use raw spawn instead)
   --json                      Print result as JSON
   --help                      Show help
 
@@ -294,6 +294,10 @@ function applyStateTransitions(state, tracks, resultsByTaskId) {
       // Review so the manager agent can complete multi-perspective review.
       task.state = "Review";
       task.reason = "";
+      // Propagate Colony evidence (verification, artifacts) to sprint state
+      if (result.evidence?.verification) {
+        task.verification = result.evidence.verification;
+      }
       continue;
     }
 
@@ -303,6 +307,10 @@ function applyStateTransitions(state, tracks, resultsByTaskId) {
     task.reason = result.timedOut
       ? `parallel track timed out after ${result.durationMs}ms`
       : `parallel track exited with code ${result.exitCode}`;
+    // Propagate Colony failure detail to sprint state
+    if (result.evidence?.failureDetail) {
+      task.failureDetail = result.evidence.failureDetail;
+    }
   }
 
   state.updatedAt = timestamp;
@@ -353,14 +361,15 @@ async function spawnTracks(parsed) {
     command: buildTrackCommand(track, agentTemplate)
   }));
 
-  // Initialise ColonyBridge (uses Colony only when --use-colony is set)
+  // Initialise ColonyBridge (Colony is default; --no-colony disables it)
+  const useColony = !parsed.flags.has("no-colony");
   const bridge = new ColonyBridge({
     workDir: process.cwd(),
-    useColony: parsed.flags.has("use-colony"),
+    useColony,
   });
   const colonyReady = await bridge.init();
-  if (parsed.flags.has("use-colony") && !colonyReady) {
-    console.error("Warning: --use-colony requested but Colony not available. Falling back to spawn.");
+  if (useColony && !colonyReady) {
+    console.error("Info: Colony not available (no agents detected). Falling back to spawn.");
   }
 
   let results;
@@ -428,7 +437,7 @@ async function spawnTracks(parsed) {
 }
 
 async function main() {
-  const parsed = parseArgv(process.argv.slice(2), new Set(["json", "help", "dry-run", "skip-state-update", "use-colony"]));
+  const parsed = parseArgv(process.argv.slice(2), new Set(["json", "help", "dry-run", "skip-state-update", "no-colony"]));
   if (!parsed.command || parsed.flags.has("help") || parsed.command === "help") {
     printHelp();
     return 0;

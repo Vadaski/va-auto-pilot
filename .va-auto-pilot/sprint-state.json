@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-03-02T04:15:10.004Z",
+  "updatedAt": "2026-03-02T06:42:39.033Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -448,6 +448,95 @@
       "createdAt": "2026-03-02",
       "startedAt": "",
       "completedAt": "2026-03-02T04:15:10.003Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-017",
+      "title": "va-lives: 固化 tsx 依赖，消除 spawn 脚本对 npx 临时拉包的依赖",
+      "priority": "P0",
+      "state": "Done",
+      "owner": "",
+      "source": "笃 自检",
+      "createdAt": "2026-03-02",
+      "startedAt": "",
+      "completedAt": "2026-03-02T06:29:20.138Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-018",
+      "title": "va-hub Awakener: 检测 va-lives 中的 du/wu/yan agent 并通过 Colony 分发任务",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "瓦 方向二",
+      "createdAt": "2026-03-02",
+      "startedAt": "",
+      "completedAt": "2026-03-02T06:42:39.032Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-017"
+      ]
+    },
+    {
+      "id": "AP-019",
+      "title": "va-auto-pilot: 验证质量门 typecheck/lint/test/codex-review 实际执行情况",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "瓦 方向三",
+      "createdAt": "2026-03-02",
+      "startedAt": "",
+      "completedAt": "2026-03-02T06:33:34.025Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",

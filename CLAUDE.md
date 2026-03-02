@@ -31,7 +31,7 @@ npm run build && npm run lint && npm test
 
 ### Core Principles
 1. **能并发就并发** — If tasks are independent, run them in parallel. Research, implementation, and verification can ALL happen concurrently.
-2. **能委派就委派** — Codex CLI, Gemini CLI, Kimi CLI have abundant tokens and good models. Use them for: grep-and-replace, test writing, file scanning, boilerplate generation, any mechanical work.
+2. **能委派就委派** — Codex CLI, Gemini CLI, Kimi CLI, OpenCode (default: glm/glm-5). Delegate mechanical work.
 3. **大任务必须拆分** — Break large tasks into independent subtasks. Dispatch each to the best-fit agent via va-agent-protocol Colony.
 4. **Three-phase parallelism** — For any non-trivial task:
    - **Research phase**: Launch multiple agents to explore different aspects simultaneously
@@ -52,3 +52,4 @@ type: feat | fix | refactor | docs | test | chore
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 ```
+

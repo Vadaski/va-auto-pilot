@@ -15,32 +15,43 @@ node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
 rm -rf "$tmp"
 ```
 
-2. Read these files in order before taking action:
+2. **Preferred: use the autonomous loop.**
 
+```bash
+node scripts/auto-pilot-loop.mjs --max-cycles 10
+```
+
+This automates the full Decision Loop: human-board check → pitfall load → next task → dispatch → quality gates → state update → journal.
+
+Options:
+- `--dry-run` — print plan without executing
+- `--max-cycles <n>` — limit iterations (default: 20)
+- `--no-colony` — skip Colony, use raw spawn
+- `--agent-template <cmd>` — agent command (default: "claude --task {taskId}")
+- `--json` — machine-readable output
+
+3. **Manual fallback** (when you need fine-grained control):
+
+Read these files in order before taking action:
 - `docs/operations/va-auto-pilot-protocol.md`
 - `docs/todo/human-board.md`
 - `docs/todo/run-journal.md`
 - `docs/todo/sprint.md`
 
-3. Follow the state machine strictly:
+Follow the state machine strictly: `Backlog -> In Progress -> Review -> Testing -> Done`
 
-`Backlog -> In Progress -> Review -> Testing -> Done`
-
-4. Resolve and update state via CLI:
-
+Resolve and update state via CLI:
 - `node scripts/sprint-board.mjs next`
-- `node scripts/sprint-board.mjs plan --json --max-parallel 3` (when parallel tracks are possible)
+- `node scripts/sprint-board.mjs plan --json --max-parallel 3`
 - `node scripts/sprint-board.mjs update ...`
 - `node scripts/sprint-board.mjs journal ...`
 
-5. Always run gates from `.va-auto-pilot/config.yaml`:
-
+4. Always run gates from `.va-auto-pilot/config.yaml`:
 - `qualityGate.buildCommand`
 - `qualityGate.reviewCommand`
 - `qualityGate.acceptanceTestCommand`
 
-6. Never skip gate failures. Fix, re-run, then update state.
-7. If stop condition is hit, pause and ask human for decision.
-8. Default to model-native CLI orchestration for parallel tracks.
-9. Use `scripts/va-parallel-runner.mjs` only if human explicitly requests the experimental external runner path.
-10. Report concise status after each loop: task, state change, gate results, next action.
+5. Never skip gate failures. Fix, re-run, then update state.
+6. If stop condition is hit, pause and ask human for decision.
+7. Default to model-native CLI orchestration for parallel tracks.
+8. Report concise status after each loop: task, state change, gate results, next action.

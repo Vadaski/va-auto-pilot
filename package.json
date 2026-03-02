@@ -20,7 +20,8 @@
     "check:coverage": "c8 --reporter=text node --test scripts/test-units.mjs",
     "typecheck": "npx tsc --noEmit",
     "check:all": "npm run check && npm run check:sprint && npm run check:units && npm run check:cli-flows && npm run validate:distribution",
-    "validate:distribution": "node ./scripts/validate-distribution.mjs"
+    "validate:distribution": "node ./scripts/validate-distribution.mjs",
+    "auto-pilot": "node scripts/auto-pilot-loop.mjs"
   },
   "dependencies": {
     "yaml": "^2.8.1"

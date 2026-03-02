@@ -60,11 +60,22 @@ function printHelp() {
 Usage:
   va-auto-pilot init [target-dir] [options]
   va-auto-pilot upgrade [target-dir] [options]
+  va-auto-pilot run [target-dir] [options]
   va-auto-pilot --help
 
 Commands:
   init      Scaffold a new VA Auto-Pilot project
   upgrade   Update scripts, protocol docs, and templates to the latest version
+  run       Execute the autonomous decision loop
+
+Options (run):
+  --max-cycles <n>        Maximum loop iterations (default: 20)
+  --max-parallel <n>      Parallel track count (default: 3)
+  --agent-template <cmd>  Agent command template (default: "claude --task {taskId}")
+  --dry-run               Print plan without executing
+  --no-colony             Skip Colony, use raw spawn
+  --track-timeout <ms>    Per-task timeout in ms (default: 600000)
+  --json                  JSON output
 
 Options (init):
   --project-prefix <prefix>     Task ID prefix (default: ${DEFAULTS.PROJECT_PREFIX})
@@ -88,6 +99,9 @@ Examples:
   va-auto-pilot upgrade .
   va-auto-pilot upgrade . --dry-run
   va-auto-pilot upgrade . --force
+  va-auto-pilot run .
+  va-auto-pilot run . --max-cycles 5 --dry-run
+  va-auto-pilot run . --no-colony --agent-template "codex exec {taskId}"
 `);
 }
 
@@ -115,7 +129,7 @@ function parseArgv(argv) {
       continue;
     }
 
-    if (token === "--force" || token === "--dry-run") {
+    if (token === "--force" || token === "--dry-run" || token === "--no-colony" || token === "--json") {
       result.flags.add(token.slice(2));
       i += 1;
       continue;
@@ -628,6 +642,49 @@ function runUpgrade(parsed) {
 }
 
 // ---------------------------------------------------------------------------
+// Run command — delegates to scripts/auto-pilot-loop.mjs
+// ---------------------------------------------------------------------------
+
+async function runAutoLoop(parsed) {
+  const dryRun = parsed.flags.has("dry-run");
+  const targetDir = path.resolve(process.cwd(), parsed.targetDir);
+
+  // Verify this is a VA Auto-Pilot project
+  const configPath = path.join(targetDir, ".va-auto-pilot/config.yaml");
+  if (!fs.existsSync(configPath)) {
+    console.error("Error: No VA Auto-Pilot installation detected. Run 'va-auto-pilot init' first.");
+    process.exit(1);
+  }
+
+  // Build args to forward to auto-pilot-loop.mjs
+  const loopScript = path.join(scriptsRoot, "auto-pilot-loop.mjs");
+  const args = [loopScript];
+  if (dryRun) args.push("--dry-run");
+  if (parsed.flags.has("force")) args.push("--no-colony");
+
+  for (const key of ["max-cycles", "max-parallel", "agent-template", "track-timeout"]) {
+    if (parsed.options[key]) {
+      args.push(`--${key}`, parsed.options[key]);
+    }
+  }
+
+  // Forward --json and --no-colony flags
+  if (parsed.flags.has("json")) args.push("--json");
+  if (parsed.flags.has("no-colony")) args.push("--no-colony");
+
+  // Spawn in the target directory
+  const { spawn: spawnChild } = await import("node:child_process");
+  const child = spawnChild(process.execPath, args, {
+    cwd: targetDir,
+    stdio: "inherit",
+  });
+
+  child.on("close", (code) => {
+    process.exit(code ?? 0);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -652,6 +709,11 @@ function main() {
 
   if (parsed.command === "upgrade") {
     runUpgrade(parsed);
+    return;
+  }
+
+  if (parsed.command === "run") {
+    runAutoLoop(parsed);
     return;
   }
 

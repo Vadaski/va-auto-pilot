@@ -1,6 +1,6 @@
 # Sprint Board
 
-> Last updated: 2026-03-02 by VA Auto-Pilot
+> Last updated: 2026-03-03 by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:
@@ -22,7 +22,7 @@
 ## In Progress
 | ID | Task | Owner | Started | Notes |
 |----|------|-------|---------|-------|
-| AP-004 | Add unit test suite for sprint-board.mjs pure functions | - | 2026-02-23 | - |
+| - | - | - | - | - |
 
 ## Failed
 | ID | Task | Fail Count | Reason | Last Failed |
@@ -46,6 +46,7 @@
 | AP-017 | va-lives: 固化 tsx 依赖，消除 spawn 脚本对 npx 临时拉包的依赖 | 2026-03-02 | - |
 | AP-001 | Upgrade multi-perspective review to dynamic perspective selection | 2026-02-23 | Two cross-reviews (adversarial + protocol designer), 6 CRITICALs resolved, templates synced |
 | AP-003 | Add sprint-board.mjs add command to create tasks via CLI without hand-editing JSON | 2026-02-23 | add command implemented: auto-ID (AP-NNN), validation, depends-on, regex-safe prefix; printHelp updated; templates mirrored; all gates pass |
+| AP-004 | Add unit test suite for sprint-board.mjs pure functions | 2026-02-23 | 41/41 unit tests pass via node:test; check:units added to check:all; all gates pass |
 | AP-006 | Expand test-flows to cover add, update, journal, and next CLI commands | 2026-02-23 | sprint-board-cli.yaml added (9 flows, 18 MUST/3 SHOULD); test-cli-flows.mjs runner with isolated_state/isolated_journal; check:cli-flows added to check:all; all gates pass |
 | AP-009 | Add Strategic Decomposition phase to protocol for high-level goals | 2026-02-23 | Strategic Decomposition section added to both protocol files. Specifies strategic vs tactical detection, parallel dimension-scan with independence constraint, structured audit report format, convergence step with run-journal schema, and transition back to tactical loop. Concurrency follows existing Concurrency Contract. Guards are bounded. npm run check:all and npm run validate:distribution pass. |
 | AP-010 | Add mandatory post-sprint independent adversarial review phase to protocol | 2026-02-23 | Sprint Completion Gate section added to both protocol files. Specifies adversarial reviewer setup (fresh context, diff-only), manager-assigned specific perspective grounded in what changed, structured finding report format, CRITICAL-blocks / WARNING-requires-disposition enforcement, and guard with control-downgrade semantics (not just disclosure) when fresh context is unavailable. npm run check:all and npm run validate:distribution pass. |
@@ -64,4 +65,8 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| - | - | - | - | - | - |
+| P0 | AP-020 | AP-020: va-anima 语义记忆升级 | - | - | 笃夜间研究 |
+| P1 | AP-021 | AP-021: Awakener 端到端集成测试 | - | - | AP-017/018 后续验证 |
+| P1 | AP-022 | va-anima recall: 中文分词支持（query '陷阱 cli 工具' 无法匹配 tag '陷阱'） | - | - | dogfood |
+| P2 | AP-023 | va-anima reflect: 去重（多 tag 条目在 reflect 中重复出现） | - | - | dogfood |
+| P2 | AP-024 | va-anima autoRecall: 双语 tag/triggerConditions 支持（中文 context 无法命中英文 trigger） | - | - | dogfood |

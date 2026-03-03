@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-03-02T06:42:39.033Z",
+  "updatedAt": "2026-03-03T01:19:17.816Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -537,6 +537,151 @@
       "createdAt": "2026-03-02",
       "startedAt": "",
       "completedAt": "2026-03-02T06:33:34.025Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-020",
+      "title": "AP-020: va-anima 语义记忆升级",
+      "priority": "P0",
+      "state": "Backlog",
+      "owner": "",
+      "source": "笃夜间研究",
+      "createdAt": "2026-03-03",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-021",
+      "title": "AP-021: Awakener 端到端集成测试",
+      "priority": "P1",
+      "state": "Backlog",
+      "owner": "",
+      "source": "AP-017/018 后续验证",
+      "createdAt": "2026-03-03",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-022",
+      "title": "va-anima recall: 中文分词支持（query '陷阱 cli 工具' 无法匹配 tag '陷阱'）",
+      "priority": "P1",
+      "state": "Backlog",
+      "owner": "",
+      "source": "dogfood",
+      "createdAt": "2026-03-03",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-023",
+      "title": "va-anima reflect: 去重（多 tag 条目在 reflect 中重复出现）",
+      "priority": "P2",
+      "state": "Backlog",
+      "owner": "",
+      "source": "dogfood",
+      "createdAt": "2026-03-03",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-024",
+      "title": "va-anima autoRecall: 双语 tag/triggerConditions 支持（中文 context 无法命中英文 trigger）",
+      "priority": "P2",
+      "state": "Backlog",
+      "owner": "",
+      "source": "dogfood",
+      "createdAt": "2026-03-03",
+      "startedAt": "",
+      "completedAt": "",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",

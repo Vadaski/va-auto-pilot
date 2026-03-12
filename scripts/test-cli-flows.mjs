@@ -37,7 +37,6 @@ import { parse as parseYaml } from "yaml";
 const ROOT = process.cwd();
 const REAL_STATE_FILE = path.join(ROOT, ".va-auto-pilot", "sprint-state.json");
 const REAL_JOURNAL_FILE = path.join(ROOT, "docs", "todo", "run-journal.md");
-const REAL_PITFALLS_FILE = path.join(ROOT, ".va-auto-pilot", "pitfalls.json");
 
 // ---------------------------------------------------------------------------
 // Assertion evaluator
@@ -141,11 +140,9 @@ function makeTempJournalFile() {
 function makeTempPitfallsFile() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-cli-pitfalls-"));
   const tmpPitfalls = path.join(tmpDir, "pitfalls.json");
-  if (fs.existsSync(REAL_PITFALLS_FILE)) {
-    fs.copyFileSync(REAL_PITFALLS_FILE, tmpPitfalls);
-  } else {
-    fs.writeFileSync(tmpPitfalls, JSON.stringify({ version: 1, entries: [] }, null, 2) + "\n", "utf8");
-  }
+  // Pitfall flows must start from a clean slate so assertions do not depend on
+  // whatever unresolved entries happen to exist in the repo.
+  fs.writeFileSync(tmpPitfalls, JSON.stringify({ version: 1, entries: [] }, null, 2) + "\n", "utf8");
   return tmpPitfalls;
 }
 

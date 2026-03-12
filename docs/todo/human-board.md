@@ -44,6 +44,40 @@
 
 - [x] **website 国际化修复**：检查 website/ 中的文案是否与最新 README 的定位一致。特别是 tagline（应该是 "CLI-first autonomous multi-agent engineering loop"，不是 "USB interface"）、对比表信息、Frontier Models 章节是否在 landing page 有体现。
 
+- [x] **[HUB-16] CLI-Anything 集成 — va-auto-pilot pitfall guide + va-hub Awakener + video-factory CLI harness**
+> Processed 2026-03-11: Task A (va-auto-pilot): PF-001/002/003 注入 pitfall guide — artifact magic bytes 验证、真实后端强依赖、失败响亮原则，check:all 全绿。Task B (va-hub): 新增 cli-anything-discovery.ts / harness-cli-adapter.ts / awakener-agent-registry.ts，discoverHarnessCliTools() 扫描 PATH 中 cli-anything-* 并注册为 cli-harness:* Colony agent，270/270 tests 全绿。Task C (video-factory): cli-anything-blender Python harness，7阶段完成，Click CLI + blender --background subprocess backend，48 passed 2 skipped（blender 未装时正确 skip，FORCE_INSTALLED=1 时正确 fail），_resolve_cli 实现官方 fallback 模式。
+
+  背景：调研了 HKUDS/CLI-Anything（6k stars）。这是「让任意 GUI 软件变 Agent-Native CLI」的 7 阶段方法论插件，已验证 11 个真实软件（GIMP/Blender/LibreOffice等），1508 tests 100% pass。
+
+  本次要落地的三件事（**独立可并行，优先级从高到低**）：
+
+  **Task A（P0）— va-auto-pilot pitfall guide 吸收 HARNESS.md 教训**
+  将 CLI-Anything HARNESS.md 中的硬教训注入 va-auto-pilot pitfall guide（`sprint-board.mjs pitfall` CLI 新增3条）：
+  1. "Use the real software — no reimplementation": 验收要检验真实 artifact（magic bytes / ZIP 结构），不能只看 exit code 0
+  2. "The Rendering Gap": Worker 生成中间文件后必须调用真实后端渲染，pipeline 中间节点的输出必须有 artifact verification
+  3. "Fail loudly and clearly — no silent degradation": 外部工具缺失时必须 error with install instructions，禁止 fallback 到劣化实现
+
+  **Task B（P1）— va-hub Awakener _resolve_cli 模式**
+  Awakener 中增加桌面软件 CLI 自动发现能力（参考 CLI-Anything 的 `_resolve_cli` 模式）：
+  - `which cli-anything-<software>` 检测已安装的 harness CLI
+  - 未安装时给出清晰 install 指引（`pip install -e <harness-path>`），不静默跳过
+  - 发现的 harness CLI 作为可选 Colony agent 路由能力注册
+  - TypeScript，接 va-hub 现有 Awakener 结构
+
+  **Task C（P2）— video-factory cli-anything-blender harness（最小可用版）**
+  在 `va-project/packages/video-factory/` 下，用 CLI-Anything 7 阶段方法论生成 `cli-anything-blender`：
+  - Phase 1-3: 分析 blender bpy API，设计 CLI（project/scene/object/render/export 命令组），实现 Click CLI + subprocess blender --background 后端
+  - Phase 4-5: 测试计划 TEST.md + 实现（unit + e2e-backend + subprocess，目标 ≥30 tests）
+  - 验收：`cli-anything-blender --help` ✓，`--json scene new` 返回合法 JSON，`render execute --output out.png` 真实调用 blender 生成 PNG（≥1KB）
+  - Python，pip install -e . 可用，blender 为硬依赖（不在则 error，不 fallback）
+
+  **验收门（全部）**：
+  - Task A: `node scripts/sprint-board.mjs pitfall --list` 新增 3 条有效 pitfall 条目，内容具体可操作
+  - Task B: `npm run build && npm run lint && npm test` 全绿，Awakener 单测覆盖 _resolve_cli 路径
+  - Task C: `CLI_ANYTHING_FORCE_INSTALLED=1 python3 -m pytest cli_anything/blender/tests/ -v` 全绿，artifact 验证到 PNG magic bytes
+
+  委派对象：Codex CLI（Task A 在 va-auto-pilot 仓，Task B 在 va-hub 仓，Task C 在 va-project 仓 — 三者可并行）。
+
 ## Feedback (to fold into next cycle)
 - npm publish 时 tarball 含 53 个文件、340KB，偏大。优化 .npmignore 后应显著缩小。
 - va-auto-pilot 和 va-agent-protocol 的关系需要在两个 README 和 website 中都讲清楚，避免用户困惑。

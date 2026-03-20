@@ -24,6 +24,10 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { parseArgv, nowIso, readQualityGateConfig } from "./lib/sprint-utils.mjs";
+import {
+  resolveHumanBoardPath,
+  readHumanBoardInstructions
+} from "./lib/human-board.mjs";
 import { ColonyBridge } from "./lib/colony-bridge.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -67,16 +71,52 @@ async function sprintBoard(args) {
  * @returns {string[]}
  */
 function readHumanBoard(boardPath) {
-  const resolved = path.resolve(boardPath);
-  if (!fs.existsSync(resolved)) return [];
-  const raw = fs.readFileSync(resolved, "utf8");
-  const lines = raw.split("\n");
-  const unchecked = [];
-  for (const line of lines) {
-    const m = line.match(/^- \[ \]\s+(.+)/);
-    if (m) unchecked.push(m[1].trim());
+  return readHumanBoardInstructions(boardPath).map((item) => item.text);
+}
+
+/**
+ * Safely parse a JSON string and report whether parsing succeeded.
+ * @param {string} raw
+ * @returns {{ parsed: true, value: unknown } | { parsed: false, value: null }}
+ */
+function tryParseJson(raw) {
+  try {
+    return { parsed: true, value: JSON.parse(raw) };
+  } catch {
+    return { parsed: false, value: null };
   }
-  return unchecked;
+}
+
+/**
+ * Extracts a structured error payload from `next --json` output.
+ * @param {string} stdout
+ * @returns {{ code?: string, message?: string, context?: Record<string, unknown> } | null}
+ */
+function extractNextError(stdout) {
+  const parsed = tryParseJson(stdout.trim());
+  if (!parsed.parsed || !parsed.value || typeof parsed.value !== "object") {
+    return null;
+  }
+
+  const error = "error" in parsed.value ? parsed.value.error : parsed.value;
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  return /** @type {{ code?: string, message?: string, context?: Record<string, unknown> } } */ (error);
+}
+
+/**
+ * Formats a clear human-board blocked message for loop termination.
+ * @param {{ code?: string, message?: string, context?: Record<string, unknown> } } error
+ * @returns {string}
+ */
+function formatHumanBoardBlockedDetails(error) {
+  const instructionCount = Array.isArray(error.context?.instructions)
+    ? error.context.instructions.length
+    : 0;
+  const suffix = instructionCount > 0 ? ` (${instructionCount} unchecked instruction(s))` : "";
+  return `${error.code ?? "HUMAN_BOARD_BLOCKED"}: ${error.message ?? "human board is blocking progress"}${suffix}. Process docs/todo/human-board.md first.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -246,21 +286,60 @@ async function transitionToFailed(task, gate, output, opts) {
  */
 async function runCycle(bridge, pitfalls, gateConfig, opts) {
   // 1. Get next task
-  const { stdout, exitCode } = await sprintBoard(["next", "--json"]);
-  if (exitCode !== 0 || !stdout.trim()) {
+  const { stdout, stderr, exitCode } = await sprintBoard(["next", "--json"]);
+  const nextError = extractNextError(stdout);
+  const trimmed = stdout.trim();
+
+  if (exitCode !== 0) {
+    if (nextError?.code === "HUMAN_BOARD_BLOCKED") {
+      return {
+        done: true,
+        task: null,
+        action: "human-board-blocked",
+        details: formatHumanBoardBlockedDetails(nextError)
+      };
+    }
+
+    const errorDetails = nextError?.message ?? stderr.trim() ?? `exit code ${exitCode}`;
+    throw new Error(`sprint-board next --json failed: ${errorDetails}`);
+  }
+
+  if (!trimmed) {
     return { done: true, task: null, action: "sprint-complete", details: "No actionable tasks remaining." };
   }
 
-  let next;
-  try {
-    next = JSON.parse(stdout.trim());
-  } catch {
+  if (nextError?.code === "HUMAN_BOARD_BLOCKED") {
+    return {
+      done: true,
+      task: null,
+      action: "human-board-blocked",
+      details: formatHumanBoardBlockedDetails(nextError)
+    };
+  }
+
+  const nextParse = tryParseJson(trimmed);
+  if (!nextParse.parsed) {
     return { done: true, task: null, action: "parse-error", details: `Could not parse next output: ${stdout.slice(0, 200)}` };
   }
+
+  const next = nextParse.value;
 
   // sprint-board next returns null when no actionable tasks remain
   if (next === null || next === undefined) {
     return { done: true, task: null, action: "sprint-complete", details: "All tasks are Done or no actionable tasks." };
+  }
+
+  if (typeof next === "object" && next !== null && "error" in next) {
+    const error = /** @type {{ code?: string, message?: string, context?: Record<string, unknown> } } */ (next.error);
+    if (error?.code === "HUMAN_BOARD_BLOCKED") {
+      return {
+        done: true,
+        task: null,
+        action: "human-board-blocked",
+        details: formatHumanBoardBlockedDetails(error)
+      };
+    }
+    throw new Error(`sprint-board next --json returned error: ${error?.message ?? "unknown error"}`);
   }
 
   const task = next.task ?? next;
@@ -379,7 +458,7 @@ async function runLoop(opts) {
   const gateConfig = readQualityGateConfig();
 
   // 1. Read human board
-  const boardPath = path.resolve("docs/todo/human-board.md");
+  const boardPath = resolveHumanBoardPath();
   const uncheckedInstructions = readHumanBoard(boardPath);
   if (uncheckedInstructions.length > 0) {
     log(opts, `\n⚠ Human board has ${uncheckedInstructions.length} unchecked instruction(s):`);

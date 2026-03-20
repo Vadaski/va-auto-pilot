@@ -8,6 +8,10 @@ import {
   parseArgv,
   requireOption
 } from "./lib/sprint-utils.mjs";
+import {
+  resolveHumanBoardPath,
+  readHumanBoardInstructions
+} from "./lib/human-board.mjs";
 import { VAPilotError } from "./lib/errors.mjs";
 
 /**
@@ -133,6 +137,65 @@ Global options:
   --journal-file <path>
   --pitfalls-file <path>
 `);
+}
+
+/**
+ * @param {string} code
+ * @param {string} message
+ * @param {Record<string, unknown>} [context]
+ * @returns {VAPilotError}
+ */
+function humanBoardBlockedError(code, message, context) {
+  return new VAPilotError(code, message, context);
+}
+
+/**
+ * @param {boolean} jsonMode
+ * @param {VAPilotError | Error} error
+ * @returns {void}
+ */
+function printCommandError(jsonMode, error) {
+  if (jsonMode) {
+    const payload = error instanceof VAPilotError
+      ? error.toJSON()
+      : { code: "ERROR", message: error instanceof Error ? error.message : String(error), context: undefined };
+    console.log(JSON.stringify({ error: payload }, null, 2));
+    return;
+  }
+
+  if (error instanceof VAPilotError && error.code === "HUMAN_BOARD_BLOCKED") {
+    console.error(`Error: [${error.code}] ${error.message}`);
+    const context = error.context ?? {};
+    if (context.boardFile) {
+      console.error(`Human board: ${context.boardFile}`);
+    }
+    if (Array.isArray(context.instructions) && context.instructions.length > 0) {
+      console.error("Unprocessed Instructions:");
+      for (const instruction of context.instructions) {
+        const lineNumber = instruction?.lineNumber ?? "?";
+        const text = instruction?.text ?? "";
+        console.error(`  - line ${lineNumber}: ${text}`);
+      }
+    }
+    console.error("Process the human-board Instructions, mark them [x], then run next again.");
+    return;
+  }
+
+  const prefix = error instanceof VAPilotError ? `[${error.code}] ` : "";
+  console.error(`Error: ${prefix}${error instanceof Error ? error.message : String(error)}`);
+}
+
+/**
+ * @param {string} boardFile
+ * @param {{ lineNumber: number, text: string }[]} instructions
+ * @returns {VAPilotError}
+ */
+function buildHumanBoardBlockError(boardFile, instructions) {
+  const message = `human-board Instructions contain ${instructions.length} unprocessed item(s).`;
+  return humanBoardBlockedError("HUMAN_BOARD_BLOCKED", message, {
+    boardFile,
+    instructions
+  });
 }
 
 /**
@@ -912,6 +975,7 @@ function main() {
   const boardFile = path.resolve(parsed.options["board-file"] ?? DEFAULTS.boardFile);
   const journalFile = path.resolve(parsed.options["journal-file"] ?? DEFAULTS.journalFile);
   const pitfallsFile = path.resolve(parsed.options["pitfalls-file"] ?? DEFAULT_PITFALLS_FILE);
+  const humanBoardFile = resolveHumanBoardPath(stateFile);
 
   if (parsed.command === "journal") {
     appendJournal(journalFile, parsed.options);
@@ -919,14 +983,22 @@ function main() {
     return;
   }
 
-  const state = readState(stateFile);
-
   if (parsed.command === "summary") {
+    const state = readState(stateFile);
     printSummary(state, pitfallsFile);
     return;
   }
 
   if (parsed.command === "next") {
+    const uncheckedInstructions = readHumanBoardInstructions(humanBoardFile);
+    if (uncheckedInstructions.length > 0) {
+      const error = buildHumanBoardBlockError(humanBoardFile, uncheckedInstructions);
+      printCommandError(parsed.flags.has("json"), error);
+      process.exitCode = 1;
+      return;
+    }
+
+    const state = readState(stateFile);
     const next = findNextTask(state.tasks);
 
     if (parsed.flags.has("json")) {
@@ -955,6 +1027,7 @@ function main() {
       throw new Error("Invalid --max-parallel value. Expected a non-negative integer.");
     }
 
+    const state = readState(stateFile);
     const plan = buildParallelPlan(state.tasks, maxParallel);
 
     if (!plan) {
@@ -982,12 +1055,14 @@ function main() {
   }
 
   if (parsed.command === "render") {
+    const state = readState(stateFile);
     writeBoard(boardFile, state);
     console.log(`Sprint board rendered: ${path.relative(process.cwd(), boardFile)}`);
     return;
   }
 
   if (parsed.command === "add") {
+    const state = readState(stateFile);
     const task = addTask(state, parsed.options);
     writeState(stateFile, state);
     writeBoard(boardFile, state);
@@ -998,6 +1073,7 @@ function main() {
   }
 
   if (parsed.command === "update") {
+    const state = readState(stateFile);
     const task = updateTask(state, parsed.options, parsed.flags);
     writeState(stateFile, state);
     writeBoard(boardFile, state);
@@ -1053,8 +1129,7 @@ function main() {
 try {
   main();
 } catch (error) {
-  const msg = error instanceof Error ? error.message : String(error);
-  const prefix = error instanceof VAPilotError ? `[${error.code}] ` : "";
-  console.error(`Error: ${prefix}${msg}`);
+  const wantsJson = process.argv.slice(2).some((token) => token === "--json" || token.startsWith("--json="));
+  printCommandError(wantsJson, error instanceof Error ? error : new Error(String(error)));
   process.exit(1);
 }

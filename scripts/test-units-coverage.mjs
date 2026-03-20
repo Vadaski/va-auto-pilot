@@ -53,10 +53,23 @@ function writeTmpState(tasks, prefix = "CV") {
 
 function runBoard(args, stateFile) {
   const allArgs = stateFile ? [...args, "--state-file", stateFile] : args;
+  const env = { ...process.env };
+
+  if (stateFile && fs.existsSync(stateFile)) {
+    const tempRoot = path.dirname(stateFile);
+    const tempBoardFile = path.join(tempRoot, "docs", "todo", "sprint.md");
+    const tempHumanBoardFile = path.join(tempRoot, "docs", "todo", "human-board.md");
+    fs.mkdirSync(path.dirname(tempHumanBoardFile), { recursive: true });
+    if (!fs.existsSync(tempHumanBoardFile)) {
+      fs.writeFileSync(tempHumanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+    }
+    env.AUTO_PILOT_SPRINT_BOARD_FILE = tempBoardFile;
+  }
+
   return spawnSync("node", [BOARD_SCRIPT, ...allArgs], {
     encoding: "utf8",
     timeout: 10_000,
-    env: { ...process.env },
+    env,
   });
 }
 
@@ -185,7 +198,7 @@ test("plan: detects 3-node dependency cycle", () => {
   ]);
   const r = runBoard(["plan", "--json"], stateFile);
   assert.notEqual(r.status, 0);
-  assert.ok(r.stderr.includes("CYCLE_DETECTED"), r.stderr);
+  assert.ok(r.stdout.includes("CYCLE_DETECTED"), r.stdout);
 });
 
 test("plan: no cycle in valid dependency chain", () => {

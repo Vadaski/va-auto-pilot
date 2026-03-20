@@ -22,6 +22,10 @@ import {
   requireOption,
   runSmokeTests
 } from "./lib/sprint-utils.mjs";
+import {
+  resolveHumanBoardPath,
+  readHumanBoardInstructions
+} from "./lib/human-board.mjs";
 
 // ---------------------------------------------------------------------------
 // Import pure functions from sprint-board via a thin re-export shim.
@@ -111,6 +115,62 @@ test("readSprintPathsFromConfig ignores sections other than sprint", () => {
   const result = readSprintPathsFromConfig(filePath);
   assert.equal(result.stateFile, "s.json");
   assert.equal(result.host, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// human-board helpers
+// ---------------------------------------------------------------------------
+test("resolveHumanBoardPath anchors human-board.md to the sprint-state project root", () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "va-human-board-root-"));
+  const stateFile = path.join(tmpRoot, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(tmpRoot, "nested", "boards", "sprint.md");
+
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ tasks: [] }), "utf8");
+  fs.writeFileSync(boardFile, "# Sprint Board\n", "utf8");
+
+  const previousStateFile = process.env.AUTO_PILOT_SPRINT_STATE_FILE;
+  process.env.AUTO_PILOT_SPRINT_STATE_FILE = stateFile;
+
+  try {
+    assert.equal(
+      resolveHumanBoardPath(stateFile),
+      path.join(tmpRoot, "docs", "todo", "human-board.md")
+    );
+  } finally {
+    if (previousStateFile === undefined) {
+      delete process.env.AUTO_PILOT_SPRINT_STATE_FILE;
+    } else {
+      process.env.AUTO_PILOT_SPRINT_STATE_FILE = previousStateFile;
+    }
+  }
+});
+
+test("readHumanBoardInstructions returns unchecked items under Instructions only", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-human-board-"));
+  const boardPath = path.join(tmpDir, "human-board.md");
+  fs.writeFileSync(boardPath, [
+    "# Title",
+    "",
+    "## Instructions (highest priority)",
+    "- [x] already handled",
+    "- [ ] still pending",
+    "- plain bullet should block",
+    "",
+    "### Nested notes",
+    "- [ ] nested pending",
+    "",
+    "## Feedback",
+    "- [ ] ignored outside instructions"
+  ].join("\n"), "utf8");
+
+  const unchecked = readHumanBoardInstructions(boardPath);
+  assert.deepEqual(unchecked, [
+    { lineNumber: 5, text: "[ ] still pending" },
+    { lineNumber: 6, text: "plain bullet should block" },
+    { lineNumber: 9, text: "[ ] nested pending" }
+  ]);
 });
 
 // ---------------------------------------------------------------------------
@@ -209,10 +269,23 @@ function writeTmpState(tasks, prefix = "UT") {
 
 function runBoard(args, stateFile) {
   const allArgs = stateFile ? [...args, "--state-file", stateFile] : args;
+  const env = { ...process.env };
+
+  if (stateFile && fs.existsSync(stateFile)) {
+    const tempRoot = path.dirname(stateFile);
+    const tempBoardFile = path.join(tempRoot, "docs", "todo", "sprint.md");
+    const tempHumanBoardFile = path.join(tempRoot, "docs", "todo", "human-board.md");
+    fs.mkdirSync(path.dirname(tempHumanBoardFile), { recursive: true });
+    if (!fs.existsSync(tempHumanBoardFile)) {
+      fs.writeFileSync(tempHumanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+    }
+    env.AUTO_PILOT_SPRINT_BOARD_FILE = tempBoardFile;
+  }
+
   return spawnSync("node", [BOARD_SCRIPT, ...allArgs], {
     encoding: "utf8",
     timeout: 10_000,
-    env: { ...process.env }
+    env
   });
 }
 
@@ -501,7 +574,7 @@ test("VAPilotError: sprint-board uses CYCLE_DETECTED for dependency cycles", () 
   ]);
   const r = runBoard(["plan", "--json"], stateFile);
   assert.notEqual(r.status, 0);
-  assert.ok(r.stderr.includes("CYCLE_DETECTED"), `expected CYCLE_DETECTED in: ${r.stderr}`);
+  assert.ok(r.stdout.includes("CYCLE_DETECTED"), `expected CYCLE_DETECTED in: ${r.stdout}`);
 });
 
 test("VAPilotError: sprint-board uses CONFIG_ERROR for invalid priority", () => {

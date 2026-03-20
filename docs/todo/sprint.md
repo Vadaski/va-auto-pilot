@@ -1,6 +1,6 @@
 # Sprint Board
 
-> Last updated: 2026-03-12 by VA Auto-Pilot
+> Last updated: 2026-03-20 by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:

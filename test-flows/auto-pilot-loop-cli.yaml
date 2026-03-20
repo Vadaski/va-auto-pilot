@@ -2,7 +2,7 @@ name: Auto-Pilot Loop CLI
 # Regression flow for scripts/auto-pilot-loop.mjs.
 
 flows:
-  - name: "loop: stops when human-board is blocked"
+  - name: "loop: injects human-board instructions without blocking"
     command: "bash"
     args:
       - "-lc"
@@ -36,6 +36,9 @@ flows:
     assert:
       must:
         - exit_code: 0
-        - stdout_contains: ["HUMAN_BOARD_BLOCKED", "handle this first", "docs/todo/human-board.md"]
-        - stdout_not_contains: ["sprint-complete"]
+        - stdout_contains:
+            - "human-board instruction(s) injected into delegate prompt"
+            - "[dry-run] injected human-board instructions:"
+            - "handle this first"
+        - stdout_not_contains: ["HUMAN_BOARD_BLOCKED", "sprint-complete"]
       should: []

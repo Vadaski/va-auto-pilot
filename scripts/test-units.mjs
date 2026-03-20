@@ -26,6 +26,10 @@ import {
   resolveHumanBoardPath,
   readHumanBoardInstructions
 } from "./lib/human-board.mjs";
+import {
+  appendHumanBoardAuditEntry,
+  extractHumanBoardAcknowledgments
+} from "./auto-pilot-loop.mjs";
 
 // ---------------------------------------------------------------------------
 // Import pure functions from sprint-board via a thin re-export shim.
@@ -173,6 +177,65 @@ test("readHumanBoardInstructions returns unchecked items under Instructions only
   ]);
 });
 
+test("extractHumanBoardAcknowledgments parses Colony-style evidence objects", () => {
+  const instructions = [
+    { lineNumber: 21, text: "Update docs" },
+    { lineNumber: 22, text: "Fix tests" },
+    { lineNumber: 23, text: "Record audit" }
+  ];
+  const source = {
+    evidence: {
+      output: [
+        "Human Board Acknowledgments",
+        "1. ADDRESSED (docs updated)",
+        "2. SUPERSEDED (covered by existing test)",
+      ].join("\n")
+    }
+  };
+
+  const acknowledgments = extractHumanBoardAcknowledgments(source, instructions);
+  assert.deepEqual(acknowledgments, [
+    { index: 1, status: "ADDRESSED", reason: "docs updated" },
+    { index: 2, status: "SUPERSEDED", reason: "covered by existing test" },
+    {
+      index: 3,
+      status: "STILL_PENDING",
+      reason: "no explicit acknowledgment captured for line 23: Record audit"
+    }
+  ]);
+});
+
+test("extractHumanBoardAcknowledgments skips Colony-style results without agent output", () => {
+  const instructions = [
+    { lineNumber: 31, text: "Keep audit trail accurate" }
+  ];
+
+  const acknowledgments = extractHumanBoardAcknowledgments(
+    { logFile: "/tmp/colony-routing-only.log" },
+    instructions
+  );
+
+  assert.equal(acknowledgments, null);
+});
+
+test("appendHumanBoardAuditEntry writes the extracted acknowledgment list", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-human-board-audit-"));
+  const journalFile = path.join(tmpDir, "run-journal.md");
+  const task = { id: "UT-424" };
+  const acknowledgments = [
+    { index: 1, status: "ADDRESSED", reason: "done" },
+    { index: 2, status: "STILL_PENDING", reason: "needs follow-up" }
+  ];
+
+  appendHumanBoardAuditEntry(journalFile, task, acknowledgments, "/tmp/agent.log");
+
+  const journal = fs.readFileSync(journalFile, "utf8");
+  assert.ok(journal.includes("UT-424 human-board"), journal);
+  assert.ok(journal.includes("1. ADDRESSED (done)"), journal);
+  assert.ok(journal.includes("2. STILL_PENDING (needs follow-up)"), journal);
+  assert.ok(journal.includes("/tmp/agent.log"), journal);
+});
+
 // ---------------------------------------------------------------------------
 // sprint-utils: parseArgv
 // ---------------------------------------------------------------------------
@@ -287,6 +350,13 @@ function runBoard(args, stateFile) {
     timeout: 10_000,
     env
   });
+}
+
+function writeTempHumanBoardFromState(stateFile, lines) {
+  const tempRoot = path.dirname(stateFile);
+  const tempHumanBoardFile = path.join(tempRoot, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(tempHumanBoardFile), { recursive: true });
+  fs.writeFileSync(tempHumanBoardFile, lines.join("\n"), "utf8");
 }
 
 // ---------------------------------------------------------------------------
@@ -1286,6 +1356,61 @@ test("next --json: returns JSON output", () => {
   const parsed = JSON.parse(r.stdout);
   assert.equal(parsed.task.id, "UT-001");
   assert.equal(parsed.action, "start-task");
+});
+
+test("next --json: includes human_board_instructions without blocking", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "Backlog", dependsOn: [] }
+  ]);
+  writeTempHumanBoardFromState(stateFile, [
+    "# Human Board",
+    "",
+    "## Instructions",
+    "",
+    "- [ ] handle this first",
+    "- [x] already handled"
+  ]);
+  const r = runBoard(["next", "--json"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const parsed = JSON.parse(r.stdout);
+  assert.equal(parsed.task.id, "UT-001");
+  assert.equal(parsed.human_board_instructions.length, 1);
+  assert.deepEqual(parsed.human_board_instructions[0], { lineNumber: 5, text: "[ ] handle this first" });
+});
+
+test("next: warns on unchecked human-board instructions and continues", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "Backlog", dependsOn: [] }
+  ]);
+  writeTempHumanBoardFromState(stateFile, [
+    "# Human Board",
+    "",
+    "## Instructions",
+    "",
+    "- [ ] handle this first"
+  ]);
+  const r = runBoard(["next"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes("UT-001"), `expected task output, got: ${r.stdout}`);
+  assert.ok(r.stderr.includes("Warning: human-board Instructions contain"), `expected warning in stderr, got: ${r.stderr}`);
+});
+
+test("next --strict: hard-blocks unchecked human-board instructions", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "Backlog", dependsOn: [] }
+  ]);
+  writeTempHumanBoardFromState(stateFile, [
+    "# Human Board",
+    "",
+    "## Instructions",
+    "",
+    "- [ ] handle this first"
+  ]);
+  const r = runBoard(["next", "--json", "--strict"], stateFile);
+  assert.notEqual(r.status, 0);
+  const parsed = JSON.parse(r.stdout);
+  assert.equal(parsed.error.code, "HUMAN_BOARD_BLOCKED");
+  assert.ok(parsed.error.context.instructions.length > 0);
 });
 
 test("next --json: returns null when no task available", () => {

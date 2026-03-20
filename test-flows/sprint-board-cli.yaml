@@ -133,7 +133,7 @@ flows:
         - stdout_json_parseable: true
       should: []
 
-  - name: "next: blocks when human-board Instructions are unchecked"
+  - name: "next with unprocessed instructions"
     command: "bash"
     args:
       - "-lc"
@@ -165,6 +165,45 @@ flows:
         - [x] already handled
         EOF
         AUTO_PILOT_SPRINT_STATE_FILE="$tmpdir/.va-auto-pilot/sprint-state.json" node scripts/sprint-board.mjs next --json
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_json_parseable: true
+        - stdout_contains: ["human_board_instructions", "handle this first", "AP-001"]
+      should: []
+
+  - name: "next --strict with unprocessed instructions"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {
+          "projectPrefix": "AP",
+          "updatedAt": "2026-01-01T00:00:00.000Z",
+          "tasks": [
+            {
+              "id": "AP-001",
+              "title": "Smoke task",
+              "priority": "P1",
+              "state": "Backlog",
+              "dependsOn": []
+            }
+          ]
+        }
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        - [ ] handle this first
+        - [x] already handled
+        EOF
+        AUTO_PILOT_SPRINT_STATE_FILE="$tmpdir/.va-auto-pilot/sprint-state.json" node scripts/sprint-board.mjs next --json --strict
     assert:
       must:
         - exit_code_nonzero: true

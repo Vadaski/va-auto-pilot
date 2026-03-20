@@ -74,6 +74,7 @@ Options (run):
   --agent-template <cmd>  Agent command template (default: "claude --task {taskId}")
   --dry-run               Print plan without executing
   --no-colony             Skip Colony, use raw spawn
+  --strict                Keep human-board Instructions as a hard block
   --track-timeout <ms>    Per-task timeout in ms (default: 600000)
   --json                  JSON output
 
@@ -129,7 +130,7 @@ function parseArgv(argv) {
       continue;
     }
 
-    if (token === "--force" || token === "--dry-run" || token === "--no-colony" || token === "--json") {
+    if (token === "--force" || token === "--dry-run" || token === "--no-colony" || token === "--json" || token === "--strict") {
       result.flags.add(token.slice(2));
       i += 1;
       continue;
@@ -661,6 +662,7 @@ async function runAutoLoop(parsed) {
   const args = [loopScript];
   if (dryRun) args.push("--dry-run");
   if (parsed.flags.has("force")) args.push("--no-colony");
+  if (parsed.flags.has("strict")) args.push("--strict");
 
   for (const key of ["max-cycles", "max-parallel", "agent-template", "track-timeout"]) {
     if (parsed.options[key]) {

@@ -257,7 +257,11 @@ export class ColonyBridge {
 
     return new Promise((resolve) => {
       const child = spawn("bash", ["-lc", command], {
-        env: { ...process.env, VA_TASK_ID: track.taskId },
+        env: {
+          ...process.env,
+          VA_TASK_ID: track.taskId,
+          VA_TASK_NOTES: track.notes ?? ""
+        },
       });
       let timedOut = false;
       let killTimer = null;

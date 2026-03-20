@@ -30,6 +30,7 @@ import { VAPilotError } from "./lib/errors.mjs";
  * @property {string} state
  * @property {string} action
  * @property {Task} task
+ * @property {{ lineNumber: number, text: string }[]} [human_board_instructions]
  */
 
 /**
@@ -76,7 +77,7 @@ function printHelp() {
 
 Usage:
   node scripts/sprint-board.mjs summary [--state-file <path>]
-  node scripts/sprint-board.mjs next [--json] [--state-file <path>]
+  node scripts/sprint-board.mjs next [--json] [--strict] [--state-file <path>]
   node scripts/sprint-board.mjs plan [--json] [--max-parallel <n>] [--state-file <path>]
   node scripts/sprint-board.mjs render [--state-file <path>] [--board-file <path>]
   node scripts/sprint-board.mjs add --title <text> --priority <P0|P1|P2|P3> [options]
@@ -129,6 +130,9 @@ Options (pitfall):
   --resolution <text>       Resolution text (used with --resolve)
   --list                    List pitfall entries
   --unresolved              Filter --list to unresolved entries only
+
+Options (next):
+  --strict                  Keep human-board Instructions as a hard block
 
 Global options:
   --max-parallel <n>
@@ -183,6 +187,22 @@ function printCommandError(jsonMode, error) {
 
   const prefix = error instanceof VAPilotError ? `[${error.code}] ` : "";
   console.error(`Error: ${prefix}${error instanceof Error ? error.message : String(error)}`);
+}
+
+/**
+ * @param {{ lineNumber: number, text: string }[]} instructions
+ * @returns {string}
+ */
+function formatHumanBoardWarning(instructions) {
+  const lines = [
+    `Warning: human-board Instructions contain ${instructions.length} unprocessed item(s).`,
+    "Continuing because --strict was not provided.",
+    "Unprocessed Instructions:"
+  ];
+  for (const instruction of instructions) {
+    lines.push(`  - line ${instruction.lineNumber}: ${instruction.text}`);
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -964,7 +984,7 @@ function listPitfalls(pitfallsFile, options, flags) {
 
 function main() {
   const argv = process.argv.slice(2);
-  const parsed = parseArgv(argv, new Set(["json", "help", "reset-fail-count", "unresolved", "list"]));
+  const parsed = parseArgv(argv, new Set(["json", "help", "reset-fail-count", "unresolved", "list", "strict"]));
 
   if (!parsed.command || parsed.flags.has("help") || parsed.command === "help") {
     printHelp();
@@ -991,18 +1011,30 @@ function main() {
 
   if (parsed.command === "next") {
     const uncheckedInstructions = readHumanBoardInstructions(humanBoardFile);
-    if (uncheckedInstructions.length > 0) {
+    const strictMode = parsed.flags.has("strict");
+    if (uncheckedInstructions.length > 0 && strictMode) {
       const error = buildHumanBoardBlockError(humanBoardFile, uncheckedInstructions);
       printCommandError(parsed.flags.has("json"), error);
       process.exitCode = 1;
       return;
     }
 
+    if (uncheckedInstructions.length > 0 && !parsed.flags.has("json")) {
+      console.error(formatHumanBoardWarning(uncheckedInstructions));
+    }
+
     const state = readState(stateFile);
     const next = findNextTask(state.tasks);
 
     if (parsed.flags.has("json")) {
-      console.log(JSON.stringify(next, null, 2));
+      if (next && uncheckedInstructions.length > 0) {
+        console.log(JSON.stringify({
+          ...next,
+          human_board_instructions: uncheckedInstructions
+        }, null, 2));
+      } else {
+        console.log(JSON.stringify(next, null, 2));
+      }
       return;
     }
 

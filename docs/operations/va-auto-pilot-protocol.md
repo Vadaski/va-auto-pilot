@@ -257,7 +257,11 @@ node scripts/sprint-board.mjs next --json
 node scripts/sprint-board.mjs update --id AP-XXX --state "In Progress"
 node scripts/sprint-board.mjs pitfall --list --unresolved
 # delegate to sub-agent (see Delegation Prompt below)
-npm run check:all && codex review --uncommitted && npm run validate:distribution
+# Run project-specific quality gates (see Quality Gates section)
+# If .va-auto-pilot/quality-gates.yaml exists, run gates from there
+# Otherwise fall back to defaults based on project type detection
+# Example (TypeScript): npm run check:all && codex review --uncommitted
+# Example (Godot): godot --headless --script tests/validate_all_scripts.gd && codex review --uncommitted
 node scripts/sprint-board.mjs update --id AP-XXX --state "Done"
 node scripts/sprint-board.mjs journal --task AP-XXX --summary "what changed and why"
 # on failure:
@@ -282,13 +286,120 @@ The manager defines WHAT must be true and HOW to verify it. The sub-agent decide
 
 ## Quality Gates
 
-### Gate 1: Build and Static Quality
+Quality gates are **pluggable** — each project defines its own gate commands. The protocol defines the gate *types* and *semantics*; the project provides the *commands*.
 
-```bash
-npm run check:all
+### Gate Configuration
+
+Projects declare their gates in `.va-auto-pilot/quality-gates.yaml` (or fall back to defaults):
+
+```yaml
+# .va-auto-pilot/quality-gates.yaml
+gates:
+  build:
+    command: "npm run check:all"          # TypeScript default
+    required: true
+    description: "Build and static quality check"
+  review:
+    command: "codex review --uncommitted"
+    required: true
+    description: "Code review"
+  acceptance:
+    command: "npm run validate:distribution"
+    required: false
+    description: "Distribution validation"
 ```
 
-### Gate 2: Code Review
+#### Example: Godot Project
+
+```yaml
+# .va-auto-pilot/quality-gates.yaml (Godot)
+gates:
+  build:
+    command: "godot --headless --script tests/validate_all_scripts.gd"
+    required: true
+    description: "GDScript compilation check — all scripts must load without error"
+  runtime:
+    command: "godot --headless --quit-after 120"
+    required: true
+    description: "Runtime stability — game runs 120 frames without crash"
+  review:
+    command: "codex review --uncommitted"
+    required: true
+    description: "Code review"
+```
+
+#### Example: TypeScript Project (default)
+
+```yaml
+gates:
+  build:
+    command: "npm run check:all"
+    required: true
+  review:
+    command: "codex review --uncommitted"
+    required: true
+  acceptance:
+    command: "npm run validate:distribution"
+    required: false
+```
+
+#### Example: Python Project
+
+```yaml
+gates:
+  build:
+    command: "python -m py_compile *.py && ruff check ."
+    required: true
+  test:
+    command: "pytest --tb=short"
+    required: true
+  review:
+    command: "codex review --uncommitted"
+    required: true
+```
+
+#### Example: Mixed Project (TypeScript + Godot)
+
+```yaml
+gates:
+  ts-build:
+    command: "pnpm build"
+    required: true
+    description: "TypeScript compilation"
+  godot-scripts:
+    command: "godot --headless --script godot/tests/validate_all_scripts.gd"
+    required: true
+    description: "GDScript compilation"
+  godot-runtime:
+    command: "godot --headless --quit-after 60"
+    required: true
+    description: "Godot runtime stability"
+  review:
+    command: "codex review --uncommitted"
+    required: true
+```
+
+### Gate Resolution
+
+1. If `.va-auto-pilot/quality-gates.yaml` exists → use it
+2. If `package.json` exists with `check:all` script → use TypeScript defaults
+3. If `project.godot` exists → use Godot defaults
+4. Otherwise → only `codex review --uncommitted`
+
+### Gate Semantics
+
+Regardless of configuration, all gates share these semantics:
+
+#### Gate: Build (required)
+
+The build gate verifies that all source code compiles/parses without errors. This is the **minimum bar** — nothing proceeds without it.
+
+- **TypeScript**: `npm run check:all` (tsc + biome + vitest)
+- **GDScript**: `godot --headless --script tests/validate_all_scripts.gd`
+- **Python**: `python -m py_compile + ruff/mypy`
+- **Rust**: `cargo check`
+
+#### Gate: Review (required)
 
 ```bash
 codex review --uncommitted
@@ -299,16 +410,75 @@ Review findings policy:
 - `CRITICAL` / `BUG` / `VIOLATION`: must fix and re-review
 - style-only nits: optional, non-blocking
 
-### Gate 3: Acceptance
+This gate is **technology-agnostic** — codex can review any language.
 
-```bash
-npm run validate:distribution
-```
+#### Gate: Acceptance (optional)
+
+Project-specific acceptance criteria. Examples:
+
+- **TypeScript**: `npm run validate:distribution`
+- **Godot**: `godot --headless --quit-after 120` (runs 120 frames without crash)
+- **API service**: `curl -sf http://localhost:3000/health`
 
 Pass criteria:
 
 - MUST assertions: 100% pass
 - SHOULD assertions: >= 80% pass
+
+### Fallback Defaults by Project Type
+
+| Detected file | Project type | Default build gate |
+|---------------|-------------|-------------------|
+| `package.json` | Node/TypeScript | `npm run check:all` |
+| `project.godot` | Godot | `godot --headless --quit` |
+| `Cargo.toml` | Rust | `cargo check && cargo test` |
+| `pyproject.toml` / `setup.py` | Python | `python -m pytest` |
+| `go.mod` | Go | `go build ./... && go test ./...` |
+
+### Creating a Godot Validation Script
+
+For Godot projects, create `tests/validate_all_scripts.gd`:
+
+```gdscript
+@tool
+extends SceneTree
+
+var _error_count := 0
+var _checked_count := 0
+
+func _init() -> void:
+    var timer := Timer.new()
+    root.add_child(timer)
+    timer.wait_time = 0.5
+    timer.one_shot = true
+    timer.timeout.connect(_run_checks)
+    timer.start()
+
+func _run_checks() -> void:
+    print("=== GDScript Validation ===")
+    _scan_directory("res://scripts")
+    print("Checked: %d | Errors: %d" % [_checked_count, _error_count])
+    quit(1 if _error_count > 0 else 0)
+
+func _scan_directory(path: String) -> void:
+    var dir := DirAccess.open(path)
+    if not dir: return
+    dir.list_dir_begin()
+    var f := dir.get_next()
+    while f != "":
+        var full := path.path_join(f)
+        if dir.current_is_dir() and not f.begins_with("."):
+            _scan_directory(full)
+        elif f.ends_with(".gd"):
+            _checked_count += 1
+            var s: GDScript = load(full) as GDScript
+            if s == null:
+                printerr("FAIL: %s" % full)
+                _error_count += 1
+            else:
+                print("  OK: %s" % full)
+        f = dir.get_next()
+```
 
 ---
 

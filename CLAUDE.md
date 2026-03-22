@@ -21,9 +21,19 @@ CLI agents (codex, claude, gemini, kimi, glm) → bottom-layer execution
 - Named exports only
 
 ## Quality Gate
+
+Quality gates are **pluggable per project** — see `docs/operations/va-auto-pilot-protocol.md` Quality Gates section.
+
+For va-auto-pilot itself (TypeScript):
 ```bash
 npm run build && npm run lint && npm test
 ```
+
+For target projects, gates are defined in `.va-auto-pilot/quality-gates.yaml` or auto-detected:
+- `package.json` → `npm run check:all`
+- `project.godot` → `godot --headless --script tests/validate_all_scripts.gd`
+- `Cargo.toml` → `cargo check && cargo test`
+- `pyproject.toml` → `pytest`
 
 ## Parallel Execution & Delegation Doctrine
 

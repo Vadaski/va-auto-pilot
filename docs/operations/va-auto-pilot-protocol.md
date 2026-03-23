@@ -480,6 +480,117 @@ func _scan_directory(path: String) -> void:
         f = dir.get_next()
 ```
 
+### Adaptive Quality Gates
+
+Static gate configuration covers known scenarios. But the manager agent encounters unknown technology stacks and novel failure patterns. The adaptive protocol handles both.
+
+#### Principle: Gates are Learnable
+
+Quality gates are not only configured — they are **discovered, created, and refined** by the manager agent during execution. The gate configuration file is a living document that the agent updates.
+
+#### Trigger 1: Unknown Technology Stack (Setup Phase)
+
+When the manager encounters a project with no `quality-gates.yaml` and no recognized project files, it must **investigate before delegating**:
+
+```
+1. Scan project root for build system indicators:
+   - Makefile, CMakeLists.txt, build.gradle, mix.exs, Gemfile, etc.
+2. Read README/CONTRIBUTING for build instructions
+3. Ask: "What command verifies this project compiles without errors?"
+4. Ask: "What command runs tests?"
+5. Create .va-auto-pilot/quality-gates.yaml with discovered gates
+6. Record reasoning in run-journal.md
+```
+
+The manager does NOT skip quality gates for unknown stacks — it **creates them first**.
+
+#### Trigger 2: Failure Pattern → New Gate (Runtime Learning)
+
+When a task fails due to a bug category not caught by existing gates, the manager must:
+
+```
+1. Classify the failure:
+   - Compilation error not caught → build gate is incomplete
+   - Runtime crash → need runtime stability gate
+   - Type error → need stricter type checking gate
+   - Resource reference broken → need asset integrity gate
+   - Performance regression → need perf benchmark gate
+
+2. Create or update the gate:
+   gates:
+     asset-integrity:                          # ← NEW gate
+       command: "godot --headless --script tests/validate_resources.gd"
+       required: true
+       description: "Added after broken .tscn references caused crash (PF-003)"
+       added_by: "auto-pilot learning"
+       triggered_by: "pitfall PF-003"
+
+3. Record in pitfall + run-journal:
+   pitfall: "GDScript .get() returns Variant → Godot 4.6 treats as error"
+   resolution: "Added build gate: validate_all_scripts.gd"
+   learning: "quality-gates.yaml updated with new gate"
+```
+
+#### Trigger 3: Manager Judgment (Proactive)
+
+The manager should proactively add gates when it recognizes risk patterns:
+
+| Pattern observed | Gate to add |
+|-----------------|-------------|
+| Agent generates file references (paths, imports) | Asset/import integrity check |
+| Project uses dynamic typing (GDScript, Python, JS) | Stricter lint/type check |
+| Project has UI/visual output | Screenshot comparison gate |
+| Project has network/API calls | Integration test gate |
+| Project mixes multiple languages | Per-language build gate |
+| Large delegation (>5 files changed) | Smoke test gate |
+
+The manager adds these **before delegating**, not after failure.
+
+#### Gate Lifecycle
+
+```
+Discovery → Creation → Validation → Refinement → Retirement
+
+1. Discovery: Agent encounters new stack or failure pattern
+2. Creation: Agent writes gate command + adds to yaml
+3. Validation: Gate runs and catches real issues (or false positives)
+4. Refinement: Gate command adjusted based on experience
+5. Retirement: Gate removed when no longer relevant (stack changed)
+```
+
+#### Example: Learning from Fate Weaver
+
+The Fate Weaver project taught us this sequence:
+
+```
+Cycle 1: No Godot gates → codex output has GDScript errors → human finds crash
+  Learning: Need GDScript compilation gate
+  Action: Created validate_all_scripts.gd + added to gates
+
+Cycle 2: Headless check passes but editor fails → human finds Variant warning
+  Learning: headless --quit doesn't compile all scripts
+  Action: Created full-scan script that loads every .gd
+
+Cycle 3: Scripts compile but runtime crash on scene transition
+  Learning: Need runtime stability gate
+  Action: Added godot --headless --quit-after 120
+
+Each failure made the gate configuration stronger.
+Future Godot projects inherit all these gates.
+```
+
+#### Cross-Project Gate Inheritance
+
+When a manager starts a new project of a known type, it should check if similar projects have quality-gates.yaml and inherit proven gates:
+
+```
+New Godot project → check existing Godot projects for quality-gates.yaml
+  → Inherit: validate_all_scripts.gd + runtime stability + asset integrity
+  → Skip: project-specific acceptance tests
+```
+
+This is how the system **accumulates knowledge** — not in documentation, but in executable gate configurations.
+
 ---
 
 ## Multi-Perspective Review

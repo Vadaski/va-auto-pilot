@@ -69,10 +69,12 @@ Commands:
   run       Execute the autonomous decision loop
 
 Options (run):
-  --max-cycles <n>        Maximum loop iterations (default: 20)
+  --max-cycles <n>        Maximum task cycles (default: 50)
   --max-parallel <n>      Parallel track count (default: 3)
   --agent-template <cmd>  Agent command template (default: "claude --task {taskId}")
+  --single-cycle          Run exactly one task cycle, then exit
   --dry-run               Print plan without executing
+  --no-commit             Skip git add/git commit after gates pass
   --no-colony             Skip Colony, use raw spawn
   --strict                Keep human-board Instructions as a hard block
   --track-timeout <ms>    Per-task timeout in ms (default: 600000)
@@ -130,7 +132,7 @@ function parseArgv(argv) {
       continue;
     }
 
-    if (token === "--force" || token === "--dry-run" || token === "--no-colony" || token === "--json" || token === "--strict") {
+    if (token === "--force" || token === "--dry-run" || token === "--single-cycle" || token === "--no-commit" || token === "--no-colony" || token === "--json" || token === "--strict") {
       result.flags.add(token.slice(2));
       i += 1;
       continue;
@@ -661,6 +663,8 @@ async function runAutoLoop(parsed) {
   const loopScript = path.join(scriptsRoot, "auto-pilot-loop.mjs");
   const args = [loopScript];
   if (dryRun) args.push("--dry-run");
+  if (parsed.flags.has("single-cycle")) args.push("--single-cycle");
+  if (parsed.flags.has("no-commit")) args.push("--no-commit");
   if (parsed.flags.has("force")) args.push("--no-colony");
   if (parsed.flags.has("strict")) args.push("--strict");
 

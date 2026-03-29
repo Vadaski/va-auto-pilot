@@ -8,8 +8,8 @@
       "attempted": "Worker 生成中间文件后报告完成，未调用真实渲染后端",
       "hypothesis": "exit code 0 不等于 artifact 正确。验收必须检查 magic bytes（PDF: %PDF-, PNG: \\x89PNG, ZIP/DOCX: PK\\x03\\x04），文件 size > 0，以及真实后端（LibreOffice/Blender/melt）的调用日志",
       "missingContext": "来源：CLI-Anything HARNESS.md — The Rendering Gap。GUI 软件的效果在渲染时才应用，跳过真实后端会静默丢失所有 effects",
-      "resolution": "",
-      "resolvedAt": null,
+      "resolution": "blender_backend.py 新增 validate_artifact_magic_bytes()，在 render_scene() 完成后验证 PNG/EXR magic bytes。5个专项测试 pass。commit 8c71719。",
+      "resolvedAt": "2026-03-25T16:39:53.175Z",
       "createdAt": "2026-03-12T04:44:07.622Z"
     },
     {
@@ -19,8 +19,8 @@
       "attempted": "外部工具（CLI agent / binary）不存在时静默跳过或 fallback 到劣化实现",
       "hypothesis": "静默降级产生不可见的质量损失，Agent 无法自我纠正。正确方案：工具不存在时立即 error，输出 'X not found. Install with: <precise command>'，硬退出",
       "missingContext": "来源：CLI-Anything HARNESS.md — Fail loudly and clearly。参考 _resolve_cli 模式：shutil.which 找到就用，找不到 raise RuntimeError with install instructions",
-      "resolution": "",
-      "resolvedAt": null,
+      "resolution": "conftest.py 将 ~/Library/Python/3.9/bin 前置 PATH，shutil.which('cli-anything-blender') 正确命中。FORCE_INSTALLED=1 的6个e2e测试全绿。commit 8c71719。",
+      "resolvedAt": "2026-03-25T16:39:53.253Z",
       "createdAt": "2026-03-12T04:44:07.774Z"
     },
     {
@@ -30,8 +30,8 @@
       "attempted": "Worker 用 Python 重新实现渲染逻辑（如用 Pillow 替代 GIMP，用 custom XML 生成替代 LibreOffice）",
       "hypothesis": "重实现会遗漏 90% 的真实软件能力，且与原软件行为必然漂移。正确方案：生成合法 project 文件（ODF/MLT XML/.blend），然后调用真实软件 CLI（libreoffice --headless, blender --background, melt）",
       "missingContext": "来源：CLI-Anything HARNESS.md Rule #1 — Use the real software。软件是硬依赖，不是可选项",
-      "resolution": "",
-      "resolvedAt": null,
+      "resolution": "blender_backend.py 已调用 blender --background --python 真实后端，无任何 Python 重实现。PF 条件在 HUB-16 Task C 中已作为硬约束落地。",
+      "resolvedAt": "2026-03-25T16:21:36.024Z",
       "createdAt": "2026-03-12T04:44:07.797Z"
     }
   ]

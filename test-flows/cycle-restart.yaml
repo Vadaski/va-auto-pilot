@@ -1,0 +1,206 @@
+name: Cycle Restart + Auto Commit
+
+flows:
+  - name: "loop: restarts across backlog and auto-commits each completed task"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        repo_root="$(pwd)"
+        tmpdir="$(mktemp -d)"
+        cd "$tmpdir"
+        git init -q
+        git config user.name "VA Test"
+        git config user.email "va-test@example.com"
+        git commit --allow-empty -m "chore(test): init" >/dev/null
+        mkdir -p .va-auto-pilot docs/todo
+        cat > .va-auto-pilot/sprint-state.json <<'EOF'
+        {
+          "projectPrefix": "AP",
+          "updatedAt": "2026-03-29T00:00:00.000Z",
+          "tasks": [
+            {
+              "id": "AP-001",
+              "title": "First task",
+              "priority": "P1",
+              "state": "Backlog",
+              "dependsOn": []
+            },
+            {
+              "id": "AP-002",
+              "title": "Second task",
+              "priority": "P1",
+              "state": "Backlog",
+              "dependsOn": []
+            }
+          ]
+        }
+        EOF
+        cat > .va-auto-pilot/pitfalls.json <<'EOF'
+        { "version": 1, "entries": [] }
+        EOF
+        cat > docs/todo/human-board.md <<'EOF'
+        # Human Board
+
+        ## Instructions
+        EOF
+        cat > docs/todo/run-journal.md <<'EOF'
+        # Run Journal
+
+        ## Codebase Signals
+        - Add reusable patterns and gotchas here.
+
+        ## Entries
+        EOF
+        agent_cmd=$(cat <<'CMD'
+        node -e "require('node:fs').appendFileSync(process.env.VA_TASK_ID + '.txt', process.env.VA_TASK_ID + '\n')"
+        CMD
+        )
+        node "$repo_root/scripts/auto-pilot-loop.mjs" --no-colony --agent-template "$agent_cmd" --max-cycles 2
+        states="$(node -e 'const fs=require("node:fs"); const state=JSON.parse(fs.readFileSync(".va-auto-pilot/sprint-state.json","utf8")); console.log(state.tasks.map((task) => task.state).join(","));')"
+        echo "HEAD_COUNT=$(git rev-list --count HEAD)"
+        echo "STATES=$states"
+        echo "CYCLE_BOUNDARIES=$(grep -c 'cycle-boundary:' docs/todo/run-journal.md)"
+        echo "WORKTREE=$(test -z "$(git status --short)" && echo clean || echo dirty)"
+        echo "HEAD_FILES"
+        git show --pretty= --name-only HEAD | sort
+        echo "PREV_FILES"
+        git show --pretty= --name-only HEAD~1 | sort
+        git log --pretty=%s -n 2
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains:
+            - "Cycle 1 of 2 (max)"
+            - "Cycle 2 of 2 (max)"
+            - "HEAD_COUNT=4"
+            - "STATES=Done,Done"
+            - "CYCLE_BOUNDARIES=2"
+            - "WORKTREE=clean"
+            - "HEAD_FILES"
+            - ".va-auto-pilot/sprint-state.json"
+            - "docs/todo/run-journal.md"
+            - "docs/todo/sprint.md"
+            - "AP-002.txt"
+            - "PREV_FILES"
+            - "AP-001.txt"
+            - "feat(ap): First task"
+            - "feat(ap): Second task"
+      should: []
+
+  - name: "loop: --single-cycle completes one task and stops"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        repo_root="$(pwd)"
+        tmpdir="$(mktemp -d)"
+        cd "$tmpdir"
+        git init -q
+        git config user.name "VA Test"
+        git config user.email "va-test@example.com"
+        git commit --allow-empty -m "chore(test): init" >/dev/null
+        mkdir -p .va-auto-pilot docs/todo
+        cat > .va-auto-pilot/sprint-state.json <<'EOF'
+        {
+          "projectPrefix": "AP",
+          "updatedAt": "2026-03-29T00:00:00.000Z",
+          "tasks": [
+            { "id": "AP-001", "title": "First task", "priority": "P1", "state": "Backlog", "dependsOn": [] },
+            { "id": "AP-002", "title": "Second task", "priority": "P1", "state": "Backlog", "dependsOn": [] }
+          ]
+        }
+        EOF
+        cat > .va-auto-pilot/pitfalls.json <<'EOF'
+        { "version": 1, "entries": [] }
+        EOF
+        cat > docs/todo/human-board.md <<'EOF'
+        # Human Board
+
+        ## Instructions
+        EOF
+        cat > docs/todo/run-journal.md <<'EOF'
+        # Run Journal
+
+        ## Codebase Signals
+        - Add reusable patterns and gotchas here.
+
+        ## Entries
+        EOF
+        agent_cmd=$(cat <<'CMD'
+        node -e "require('node:fs').appendFileSync(process.env.VA_TASK_ID + '.txt', process.env.VA_TASK_ID + '\n')"
+        CMD
+        )
+        node "$repo_root/scripts/auto-pilot-loop.mjs" --no-colony --agent-template "$agent_cmd" --single-cycle
+        states="$(node -e 'const fs=require("node:fs"); const state=JSON.parse(fs.readFileSync(".va-auto-pilot/sprint-state.json","utf8")); console.log(state.tasks.map((task) => task.state).join(","));')"
+        echo "HEAD_COUNT=$(git rev-list --count HEAD)"
+        echo "STATES=$states"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains:
+            - "Cycle 1 of 1 (max)"
+            - "HEAD_COUNT=3"
+            - "STATES=Done,Backlog"
+            - "Single-cycle mode enabled. Stopping after one cycle."
+      should: []
+
+  - name: "loop: --max-cycles 1 matches single-cycle behavior"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        repo_root="$(pwd)"
+        tmpdir="$(mktemp -d)"
+        cd "$tmpdir"
+        git init -q
+        git config user.name "VA Test"
+        git config user.email "va-test@example.com"
+        git commit --allow-empty -m "chore(test): init" >/dev/null
+        mkdir -p .va-auto-pilot docs/todo
+        cat > .va-auto-pilot/sprint-state.json <<'EOF'
+        {
+          "projectPrefix": "AP",
+          "updatedAt": "2026-03-29T00:00:00.000Z",
+          "tasks": [
+            { "id": "AP-001", "title": "First task", "priority": "P1", "state": "Backlog", "dependsOn": [] },
+            { "id": "AP-002", "title": "Second task", "priority": "P1", "state": "Backlog", "dependsOn": [] }
+          ]
+        }
+        EOF
+        cat > .va-auto-pilot/pitfalls.json <<'EOF'
+        { "version": 1, "entries": [] }
+        EOF
+        cat > docs/todo/human-board.md <<'EOF'
+        # Human Board
+
+        ## Instructions
+        EOF
+        cat > docs/todo/run-journal.md <<'EOF'
+        # Run Journal
+
+        ## Codebase Signals
+        - Add reusable patterns and gotchas here.
+
+        ## Entries
+        EOF
+        agent_cmd=$(cat <<'CMD'
+        node -e "require('node:fs').appendFileSync(process.env.VA_TASK_ID + '.txt', process.env.VA_TASK_ID + '\n')"
+        CMD
+        )
+        node "$repo_root/scripts/auto-pilot-loop.mjs" --no-colony --agent-template "$agent_cmd" --max-cycles 1
+        states="$(node -e 'const fs=require("node:fs"); const state=JSON.parse(fs.readFileSync(".va-auto-pilot/sprint-state.json","utf8")); console.log(state.tasks.map((task) => task.state).join(","));')"
+        echo "HEAD_COUNT=$(git rev-list --count HEAD)"
+        echo "STATES=$states"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains:
+            - "Cycle 1 of 1 (max)"
+            - "HEAD_COUNT=3"
+            - "STATES=Done,Backlog"
+            - "Max cycles (1) reached. Stopping."
+      should: []

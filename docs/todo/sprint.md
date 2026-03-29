@@ -1,6 +1,6 @@
 # Sprint Board
 
-> Last updated: 2026-03-20 by VA Auto-Pilot
+> Last updated: 2026-03-29 by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:
@@ -22,6 +22,8 @@
 ## In Progress
 | ID | Task | Owner | Started | Notes |
 |----|------|-------|---------|-------|
+| AP-027 | 循环自驱：auto-pilot-loop 完成一轮后自动检测 backlog 并重启下一轮 | - | 2026-03-29 | - |
+| AP-028 | Auto commit：gate 通过后自动 stage + commit，消除变更堆积 | - | 2026-03-29 | - |
 | AP-004 | Add unit test suite for sprint-board.mjs pure functions | - | 2026-02-23 | - |
 
 ## Failed
@@ -44,6 +46,7 @@
 |----|------|-----------|--------------|
 | AP-013 | Rewrite website copy with marketing conviction — hooks, not features | 2026-02-23 | All gates pass: node --check, npm run check:all, npm run validate:distribution. Codex review: no CRITICAL/BUG findings (P2 sprint.md board artifact only). Adversarial review (burned-by-hype-marketing perspective): no CRITICAL findings, 2 WARNINGs accepted with rationale. |
 | AP-017 | va-lives: 固化 tsx 依赖，消除 spawn 脚本对 npx 临时拉包的依赖 | 2026-03-02 | - |
+| AP-020 | AP-020: va-anima 语义记忆升级 | 2026-03-25 | va-anima 213 tests pass, build pass. Ebbinghaus遗忘曲线+语义记忆升级 committed at 40696e5 |
 | AP-001 | Upgrade multi-perspective review to dynamic perspective selection | 2026-02-23 | Two cross-reviews (adversarial + protocol designer), 6 CRITICALs resolved, templates synced |
 | AP-003 | Add sprint-board.mjs add command to create tasks via CLI without hand-editing JSON | 2026-02-23 | add command implemented: auto-ID (AP-NNN), validation, depends-on, regex-safe prefix; printHelp updated; templates mirrored; all gates pass |
 | AP-006 | Expand test-flows to cover add, update, journal, and next CLI commands | 2026-02-23 | sprint-board-cli.yaml added (9 flows, 18 MUST/3 SHOULD); test-cli-flows.mjs runner with isolated_state/isolated_journal; check:cli-flows added to check:all; all gates pass |
@@ -56,16 +59,22 @@
 | AP-016 | 为 va-lives 五大生命补充认识论立场（哥德尔多视角架构） | 2026-03-02 | - |
 | AP-018 | va-hub Awakener: 检测 va-lives 中的 du/wu/yan agent 并通过 Colony 分发任务 | 2026-03-02 | - |
 | AP-019 | va-auto-pilot: 验证质量门 typecheck/lint/test/codex-review 实际执行情况 | 2026-03-02 | - |
+| AP-021 | AP-021: Awakener 端到端集成测试 | 2026-03-25 | harness-e2e.test.ts 存在(204行), va-hub 332/332 tests pass; test-harness-chain.sh 存在于 va-project/projects/video-factory/scripts/ |
+| AP-022 | va-anima recall: 中文分词支持（query '陷阱 cli 工具' 无法匹配 tag '陷阱'） | 2026-03-25 | fix: 三项记忆系统缺陷修复 commit 1b4eba2 — 中文分词 MemoryTokenizer 已实现，213 tests pass |
+| AP-025 | Resolve PF-001: blender_backend.py render 后添加 magic bytes artifact 验证 | 2026-03-25 | blender_backend.py 新增 validate_artifact_magic_bytes()，test_core.py 新增5个 magic bytes 测试，54/54 pass (2 skip for GPU render) |
+| AP-026 | Resolve PF-002: cli-anything-blender PATH 修复，FORCE_INSTALLED=1 e2e 测试全绿 | 2026-03-25 | conftest.py PATH 前置修复，FORCE_INSTALLED=1 全部6个原失败e2e测试通过，54 passed 2 skipped |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
+| AP-023 | va-anima reflect: 去重（多 tag 条目在 reflect 中重复出现） | 2026-03-25 | fix: 三项记忆系统缺陷修复 commit 1b4eba2 — reflect 去重已修复，213 tests pass |
+| AP-024 | va-anima autoRecall: 双语 tag/triggerConditions 支持（中文 context 无法命中英文 trigger） | 2026-03-25 | fix: 三项记忆系统缺陷修复 commit 1b4eba2 — autoRecall 双语支持已修复，213 tests pass |
 | AP-007 | Correct 'human-out-of-the-loop' framing to 'human-on-the-loop' across docs and website | 2026-02-23 | docs/human-on-the-loop.md created with updated framing; old file removed; README.md and README.zh.md references updated; all gates pass |
 
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| P0 | AP-020 | AP-020: va-anima 语义记忆升级 | - | - | 笃夜间研究 |
-| P1 | AP-021 | AP-021: Awakener 端到端集成测试 | - | - | AP-017/018 后续验证 |
-| P1 | AP-022 | va-anima recall: 中文分词支持（query '陷阱 cli 工具' 无法匹配 tag '陷阱'） | - | - | dogfood |
-| P2 | AP-023 | va-anima reflect: 去重（多 tag 条目在 reflect 中重复出现） | - | - | dogfood |
-| P2 | AP-024 | va-anima autoRecall: 双语 tag/triggerConditions 支持（中文 context 无法命中英文 trigger） | - | - | dogfood |
+| P1 | AP-029 | 错误恢复策略：失败分类器 + 策略表（build/lint/test/review 各有不同恢复路径）+ 升级机制 | - | - | gap-analysis-3 |
+| P1 | AP-030 | Review 决策结构化：finding → 自动创建 fix task + 历史修复模式库 + pitfall 自动注入 delegation | - | - | gap-analysis-2 |
+| P2 | AP-031 | 自适应质量门：pitfall → suggest gate + 自动写入 quality-gates.yaml + 跨项目 gate 继承 | - | - | gap-analysis-5 |
+| P2 | AP-032 | 默认并行执行：auto-pilot-loop 从单任务循环改为任务池循环，plan 命令输出自动执行 | - | - | gap-analysis-6 |
+| P3 | AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | - | - | gap-analysis-7 |

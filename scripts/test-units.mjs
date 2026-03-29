@@ -28,7 +28,13 @@ import {
 } from "./lib/human-board.mjs";
 import {
   appendHumanBoardAuditEntry,
-  extractHumanBoardAcknowledgments
+  extractHumanBoardAcknowledgments,
+  deriveCommitType,
+  deriveCommitScope,
+  buildCommitHeader,
+  detectStopCondition,
+  autoCommitTask,
+  finalizeDoneTaskCommit
 } from "./auto-pilot-loop.mjs";
 
 // ---------------------------------------------------------------------------
@@ -236,6 +242,249 @@ test("appendHumanBoardAuditEntry writes the extracted acknowledgment list", () =
   assert.ok(journal.includes("/tmp/agent.log"), journal);
 });
 
+test("deriveCommitType infers docs, test, and fix task categories", () => {
+  assert.equal(deriveCommitType({ source: "docs/operations/va-auto-pilot-protocol.md", title: "Update protocol" }), "docs");
+  assert.equal(deriveCommitType({ source: "", title: "Add CLI flow coverage" }), "test");
+  assert.equal(deriveCommitType({ source: "", title: "Fix restart regression" }), "fix");
+});
+
+test("buildCommitHeader uses normalized scope and task title", () => {
+  const task = {
+    id: "AP-027",
+    source: "scripts/auto-pilot-loop.mjs",
+    title: "Transform loop runner"
+  };
+
+  assert.equal(deriveCommitScope(task), "scripts-auto-pilot-loop");
+  assert.equal(buildCommitHeader(task), "feat(scripts-auto-pilot-loop): Transform loop runner");
+});
+
+test("autoCommitTask commits all files changed relative to HEAD and leaves the tree clean", async () => {
+  const repoDir = createTempGitRepo({
+    ".va-auto-pilot/sprint-state.json": JSON.stringify({ projectPrefix: "AP", tasks: [] }, null, 2) + "\n",
+    "docs/todo/sprint.md": "# Sprint Board\n",
+    "docs/todo/run-journal.md": "# Run Journal\n\n## Entries\n",
+    "feature.txt": "before\n"
+  });
+
+  fs.appendFileSync(path.join(repoDir, ".va-auto-pilot/sprint-state.json"), "  \n", "utf8");
+  fs.appendFileSync(path.join(repoDir, ".va-auto-pilot/sprint-state.json"), "{\"updated\":true}\n", "utf8");
+  fs.appendFileSync(path.join(repoDir, "docs/todo/sprint.md"), "Updated board\n", "utf8");
+  fs.appendFileSync(path.join(repoDir, "docs/todo/run-journal.md"), "\n## 2026-03-29 - AP-001\n- Summary: done\n", "utf8");
+  fs.appendFileSync(path.join(repoDir, "feature.txt"), "after\n", "utf8");
+
+  const commitResult = await autoCommitTask(
+    { id: "AP-001", title: "Fix commit ordering", source: "feature.txt" },
+    {
+      dryRun: false,
+      noCommit: false,
+      json: true,
+      workDir: repoDir,
+      taskBaselines: new Map()
+    }
+  );
+
+  assert.equal(commitResult.committed, true);
+  assert.deepEqual(commitResult.files, [
+    ".va-auto-pilot/sprint-state.json",
+    "docs/todo/run-journal.md",
+    "docs/todo/sprint.md",
+    "feature.txt"
+  ]);
+  assert.equal(runGit(["status", "--short"], repoDir), "");
+
+  const committedFiles = runGit(["show", "--pretty=", "--name-only", "HEAD"], repoDir)
+    .split("\n")
+    .filter(Boolean)
+    .sort();
+
+  assert.deepEqual(committedFiles, [
+    ".va-auto-pilot/sprint-state.json",
+    "docs/todo/run-journal.md",
+    "docs/todo/sprint.md",
+    "feature.txt"
+  ]);
+});
+
+test("autoCommitTask syncs pre-existing dirty files in a separate commit before the task commit", async () => {
+  const repoDir = createTempGitRepo({
+    "pending.txt": "clean\n",
+    "feature.txt": "before\n"
+  });
+
+  fs.writeFileSync(path.join(repoDir, "pending.txt"), "baseline\n", "utf8");
+  const baseline = {
+    files: new Set(["pending.txt"]),
+    snapshots: new Map([
+      ["pending.txt", { exists: true, content: Buffer.from("baseline\n", "utf8") }]
+    ])
+  };
+
+  fs.writeFileSync(path.join(repoDir, "pending.txt"), "baseline\ntask\n", "utf8");
+  fs.writeFileSync(path.join(repoDir, "feature.txt"), "after\n", "utf8");
+
+  const commitResult = await autoCommitTask(
+    { id: "AP-002", title: "Fix isolated commit scope", source: "feature.txt" },
+    {
+      dryRun: false,
+      noCommit: false,
+      json: true,
+      workDir: repoDir,
+      taskBaselines: new Map([["AP-002", baseline]])
+    }
+  );
+
+  assert.equal(commitResult.committed, true);
+  assert.deepEqual(commitResult.baselineCommit.files, ["pending.txt"]);
+  assert.deepEqual(commitResult.files.sort(), ["feature.txt", "pending.txt"]);
+  assert.equal(runGit(["status", "--short"], repoDir), "");
+
+  const subjects = runGit(["log", "--pretty=%s", "-2"], repoDir).split("\n");
+  assert.equal(subjects[0], "fix(feature): Fix isolated commit scope");
+  assert.equal(subjects[1], "chore: sync pending changes");
+
+  const headFiles = runGit(["show", "--pretty=", "--name-only", "HEAD"], repoDir)
+    .split("\n")
+    .filter(Boolean)
+    .sort();
+  assert.deepEqual(headFiles, ["feature.txt", "pending.txt"]);
+
+  const syncFiles = runGit(["show", "--pretty=", "--name-only", "HEAD^"], repoDir)
+    .split("\n")
+    .filter(Boolean)
+    .sort();
+  assert.deepEqual(syncFiles, ["pending.txt"]);
+});
+
+test("autoCommitTask rolls back the baseline sync commit when the task commit fails", async () => {
+  const repoDir = createTempGitRepo({
+    "pending.txt": "clean\n",
+    "feature.txt": "before\n"
+  });
+
+  fs.writeFileSync(path.join(repoDir, "pending.txt"), "baseline\n", "utf8");
+  const baseline = {
+    files: new Set(["pending.txt"]),
+    snapshots: new Map([
+      ["pending.txt", { exists: true, content: Buffer.from("baseline\n", "utf8") }]
+    ])
+  };
+
+  fs.writeFileSync(path.join(repoDir, "pending.txt"), "baseline\ntask\n", "utf8");
+  fs.writeFileSync(path.join(repoDir, "feature.txt"), "after\n", "utf8");
+  const hookPath = path.join(repoDir, ".git", "hooks", "commit-msg");
+  fs.writeFileSync(
+    hookPath,
+    "#!/bin/sh\ncount=$(git rev-list --count HEAD)\nif [ \"$count\" -ge 2 ]; then\n  echo 'task commit rejected' >&2\n  exit 1\nfi\nexit 0\n",
+    "utf8"
+  );
+  fs.chmodSync(hookPath, 0o755);
+
+  await assert.rejects(() => autoCommitTask(
+    { id: "AP-002", title: "Fix isolated commit scope", source: "feature.txt" },
+    {
+      dryRun: false,
+      noCommit: false,
+      json: true,
+      workDir: repoDir,
+      taskBaselines: new Map([["AP-002", baseline]])
+    }
+  ), /task commit rejected/);
+
+  assert.equal(runGit(["rev-list", "--count", "HEAD"], repoDir), "1");
+  assert.equal(runGit(["log", "--pretty=%s", "-1"], repoDir), "chore(test): init");
+  assert.equal(runGit(["diff", "--cached", "--name-only", "--relative"], repoDir), "feature.txt\npending.txt");
+});
+
+test("detectStopCondition trips after three failures", () => {
+  const result = detectStopCondition({
+    tasks: [
+      { id: "AP-001", failCount: 2, state: "Failed" },
+      { id: "AP-002", failCount: 3, state: "Failed" }
+    ]
+  });
+
+  assert.equal(result.stop, true);
+  assert.equal(result.code, "FAIL_LIMIT_REACHED");
+  assert.ok(result.reason.includes("AP-002"), result.reason);
+});
+
+test("detectStopCondition ignores completed tasks even when failCount reached the limit", () => {
+  const result = detectStopCondition({
+    tasks: [
+      { id: "AP-001", failCount: 3, state: "Done" },
+      { id: "AP-002", failCount: 2, state: "Failed" }
+    ]
+  });
+
+  assert.deepEqual(result, { stop: false, code: "", reason: "" });
+});
+
+test("finalizeDoneTaskCommit rolls a task back to Failed when git commit fails", async () => {
+  const repoDir = createTempGitRepo({
+    ".va-auto-pilot/sprint-state.json": JSON.stringify({
+      projectPrefix: "AP",
+      updatedAt: "2026-03-29T00:00:00.000Z",
+      tasks: [
+        {
+          id: "AP-001",
+          title: "Task",
+          priority: "P1",
+          state: "Done",
+          failCount: 0,
+          dependsOn: [],
+          completedAt: "2026-03-29T00:00:00.000Z",
+          verification: "Auto-pilot loop: all gates passed"
+        }
+      ]
+    }, null, 2) + "\n",
+    "docs/todo/sprint.md": "# Sprint Board\n",
+    "docs/todo/run-journal.md": "# Run Journal\n\n## Entries\n",
+    "feature.txt": "before\n"
+  });
+
+  runGit(["config", "--unset", "user.name"], repoDir);
+  runGit(["config", "--unset", "user.email"], repoDir);
+  fs.writeFileSync(path.join(repoDir, "feature.txt"), "after\n", "utf8");
+
+  const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), "va-git-no-identity-"));
+  const finalizeResult = await finalizeDoneTaskCommit(
+    { id: "AP-001", title: "Task", source: "feature.txt" },
+    {
+      dryRun: false,
+      noCommit: false,
+      json: true,
+      workDir: repoDir,
+      stateFile: path.join(repoDir, ".va-auto-pilot", "sprint-state.json"),
+      boardFile: path.join(repoDir, "docs", "todo", "sprint.md"),
+      journalFile: path.join(repoDir, "docs", "todo", "run-journal.md"),
+      taskBaselines: new Map(),
+      env: {
+        ...process.env,
+        HOME: isolatedHome,
+        XDG_CONFIG_HOME: path.join(isolatedHome, "xdg"),
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_AUTHOR_NAME: "",
+        GIT_AUTHOR_EMAIL: "",
+        GIT_COMMITTER_NAME: "",
+        GIT_COMMITTER_EMAIL: ""
+      }
+    }
+  );
+
+  assert.equal(finalizeResult.ok, false);
+  assert.match(finalizeResult.details, /Auto-commit failed after Done transition:/);
+
+  const state = JSON.parse(fs.readFileSync(path.join(repoDir, ".va-auto-pilot", "sprint-state.json"), "utf8"));
+  const task = state.tasks[0];
+  assert.equal(task.state, "Failed");
+  assert.equal(task.failCount, 1);
+  assert.ok(task.lastFailedAt);
+  assert.equal(task.completedAt, "");
+  assert.equal(task.verification, "");
+  assert.equal(state.tasks.filter((item) => item.state !== "Done").length, 1);
+});
+
 // ---------------------------------------------------------------------------
 // sprint-utils: parseArgv
 // ---------------------------------------------------------------------------
@@ -311,6 +560,34 @@ test("requireOption throws when value is empty string", () => {
 // sprint-board pure functions — tested via CLI child process
 // ---------------------------------------------------------------------------
 import { spawnSync } from "node:child_process";
+
+function runGit(args, cwd) {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    timeout: 10_000
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return result.stdout.trim();
+}
+
+function createTempGitRepo(files) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-auto-commit-"));
+  runGit(["init", "-q"], tmpDir);
+  runGit(["config", "user.name", "VA Test"], tmpDir);
+  runGit(["config", "user.email", "va-test@example.com"], tmpDir);
+
+  for (const [file, content] of Object.entries(files)) {
+    const filePath = path.join(tmpDir, file);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, content, "utf8");
+  }
+
+  runGit(["add", "."], tmpDir);
+  runGit(["commit", "-m", "chore(test): init"], tmpDir);
+  return tmpDir;
+}
 
 const BOARD_SCRIPT = new URL("../scripts/sprint-board.mjs", import.meta.url).pathname;
 const STATE_TEMPLATE = {
@@ -495,6 +772,16 @@ test("update: state Done sets completedAt", () => {
   runBoard(["update", "--id", "UT-001", "--state", "Done"], stateFile);
   const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   assert.ok(state.tasks[0].completedAt, "completedAt should be set");
+});
+
+test("update: state Done resets failCount to 0", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "Testing", failCount: 3, dependsOn: [] }
+  ]);
+  const r = runBoard(["update", "--id", "UT-001", "--state", "Done"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(state.tasks[0].failCount, 0);
 });
 
 test("update: rejects invalid state", () => {

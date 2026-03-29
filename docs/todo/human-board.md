@@ -78,6 +78,14 @@
 
   委派对象：Codex CLI（Task A 在 va-auto-pilot 仓，Task B 在 va-hub 仓，Task C 在 va-project 仓 — 三者可并行）。
 
+## [ ] **Sprint Complete — 新 Sprint 方向待定（2026-03-25）**
+
+Sprint 24 tasks Done，Backlog 清零。待解决：
+- PF-001/002/003（CLI-Anything artifact验证/硬依赖/禁止静默降级）仍 unresolved
+- 新 Sprint 方向由瓦决定，请在此写入 Instructions
+
+---
+
 ## Feedback (to fold into next cycle)
 - npm publish 时 tarball 含 53 个文件、340KB，偏大。优化 .npmignore 后应显著缩小。
 - va-auto-pilot 和 va-agent-protocol 的关系需要在两个 README 和 website 中都讲清楚，避免用户困惑。

@@ -730,6 +730,7 @@ function updateTask(state, options, flags) {
     }
 
     if (task.state === "Done") {
+      task.failCount = 0;
       task.completedAt = nowIso();
     }
   }

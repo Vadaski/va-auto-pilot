@@ -23,8 +23,9 @@
 | ID | Task | Owner | Started | Notes |
 |----|------|-------|---------|-------|
 | AP-004 | Add unit test suite for sprint-board.mjs pure functions | - | 2026-02-23 | - |
-| AP-029 | 错误恢复策略：失败分类器 + 策略表（build/lint/test/review 各有不同恢复路径）+ 升级机制 | - | 2026-03-29 | - |
-| AP-030 | Review 决策结构化：finding → 自动创建 fix task + 历史修复模式库 + pitfall 自动注入 delegation | - | 2026-03-29 | - |
+| AP-031 | 自适应质量门：pitfall → suggest gate + 自动写入 quality-gates.yaml + 跨项目 gate 继承 | - | 2026-03-29 | - |
+| AP-032 | 默认并行执行：auto-pilot-loop 从单任务循环改为任务池循环，plan 命令输出自动执行 | - | 2026-03-29 | - |
+| AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | - | 2026-03-29 | - |
 
 ## Failed
 | ID | Task | Fail Count | Reason | Last Failed |
@@ -65,6 +66,8 @@
 | AP-022 | va-anima recall: 中文分词支持（query '陷阱 cli 工具' 无法匹配 tag '陷阱'） | 2026-03-25 | fix: 三项记忆系统缺陷修复 commit 1b4eba2 — 中文分词 MemoryTokenizer 已实现，213 tests pass |
 | AP-025 | Resolve PF-001: blender_backend.py render 后添加 magic bytes artifact 验证 | 2026-03-25 | blender_backend.py 新增 validate_artifact_magic_bytes()，test_core.py 新增5个 magic bytes 测试，54/54 pass (2 skip for GPU render) |
 | AP-026 | Resolve PF-002: cli-anything-blender PATH 修复，FORCE_INSTALLED=1 e2e 测试全绿 | 2026-03-25 | conftest.py PATH 前置修复，FORCE_INSTALLED=1 全部6个原失败e2e测试通过，54 passed 2 skipped |
+| AP-029 | 错误恢复策略：失败分类器 + 策略表（build/lint/test/review 各有不同恢复路径）+ 升级机制 | 2026-03-29 | - |
+| AP-030 | Review 决策结构化：finding → 自动创建 fix task + 历史修复模式库 + pitfall 自动注入 delegation | 2026-03-29 | - |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
@@ -75,6 +78,4 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| P2 | AP-031 | 自适应质量门：pitfall → suggest gate + 自动写入 quality-gates.yaml + 跨项目 gate 继承 | - | - | gap-analysis-5 |
-| P2 | AP-032 | 默认并行执行：auto-pilot-loop 从单任务循环改为任务池循环，plan 命令输出自动执行 | - | - | gap-analysis-6 |
-| P3 | AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | - | - | gap-analysis-7 |
+| - | - | - | - | - | - |

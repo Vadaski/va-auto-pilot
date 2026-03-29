@@ -42,3 +42,64 @@ flows:
             - "handle this first"
         - stdout_not_contains: ["HUMAN_BOARD_BLOCKED", "sprint-complete"]
       should: []
+
+  - name: "loop: parallel cycle dispatches independent tasks in one cycle"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {
+          "projectPrefix": "AP",
+          "updatedAt": "2026-01-01T00:00:00.000Z",
+          "tasks": [
+            { "id": "AP-001", "title": "Task one", "priority": "P1", "state": "Backlog", "dependsOn": [] },
+            { "id": "AP-002", "title": "Task two", "priority": "P1", "state": "Backlog", "dependsOn": [] }
+          ]
+        }
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+        EOF
+        cat > "$tmpdir/agent.mjs" <<'EOF'
+        import fs from "node:fs";
+        import path from "node:path";
+        const file = path.join(process.cwd(), `${process.env.VA_TASK_ID}.txt`);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        fs.writeFileSync(file, process.env.VA_TASK_ID + "\n", "utf8");
+        EOF
+        git -C "$tmpdir" init >/dev/null
+        git -C "$tmpdir" config user.email test@example.com
+        git -C "$tmpdir" config user.name "Test User"
+        git -C "$tmpdir" add .
+        git -C "$tmpdir" commit -m init >/dev/null
+        start="$(node -e 'console.log(Date.now())')"
+        (
+          cd "$tmpdir"
+          AUTO_PILOT_SPRINT_STATE_FILE="$tmpdir/.va-auto-pilot/sprint-state.json" \
+          node "$OLDPWD/scripts/auto-pilot-loop.mjs" \
+            --no-colony \
+            --agent-template "node $tmpdir/agent.mjs {taskId}" \
+            --max-cycles 1 \
+            --max-parallel 2 \
+            --skip-sprint-review
+        )
+        end="$(node -e 'console.log(Date.now())')"
+        elapsed="$((end - start))"
+        states="$(node -e 'const fs=require("node:fs"); const state=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(state.tasks.map((task) => task.state).join(","));' "$tmpdir/.va-auto-pilot/sprint-state.json")"
+        echo "elapsed=${elapsed}"
+        echo "states=${states}"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains:
+            - "--- Cycle: AP-001 (Backlog) action=start-task ---"
+            - "--- Cycle: AP-002 (Backlog) action=start-task ---"
+            - "states=Done,Done"
+        - stdout_not_contains: ["track-error"]
+      should: []

@@ -2,12 +2,14 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { stringify as stringifyYaml } from "yaml";
 import {
   nowIso,
   resolveDefaults,
   parseArgv,
   requireOption
 } from "./lib/sprint-utils.mjs";
+import { suggestGatesFromPitfalls } from "./lib/adaptive-gates.mjs";
 import {
   resolveHumanBoardPath,
   readHumanBoardInstructions
@@ -79,6 +81,7 @@ Usage:
   node scripts/sprint-board.mjs summary [--state-file <path>]
   node scripts/sprint-board.mjs next [--json] [--strict] [--state-file <path>]
   node scripts/sprint-board.mjs plan [--json] [--max-parallel <n>] [--state-file <path>]
+  node scripts/sprint-board.mjs suggest-gate [--pitfalls-file <path>]
   node scripts/sprint-board.mjs render [--state-file <path>] [--board-file <path>]
   node scripts/sprint-board.mjs add --title <text> --priority <P0|P1|P2|P3> [options]
   node scripts/sprint-board.mjs update --id <TASK-ID> [--state <state>] [options]
@@ -1084,6 +1087,12 @@ function main() {
       console.log(`Parallel   : ${plan.parallelTracks.join(", ")}`);
     }
     console.log(`Sync Points: ${plan.syncPoints.join(", ")}`);
+    return;
+  }
+
+  if (parsed.command === "suggest-gate") {
+    const suggestions = suggestGatesFromPitfalls(readPitfalls(pitfallsFile).entries);
+    process.stdout.write(stringifyYaml(suggestions));
     return;
   }
 

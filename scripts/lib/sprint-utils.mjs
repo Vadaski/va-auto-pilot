@@ -60,6 +60,7 @@ import { parse as parseYaml } from "yaml";
  * @typedef {Object} SprintState
  * @property {string} [projectPrefix]
  * @property {string} [updatedAt]
+ * @property {string} [sprintStartCommit]
  * @property {Task[]} tasks
  */
 

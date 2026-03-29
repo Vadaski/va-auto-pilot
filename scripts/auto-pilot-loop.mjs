@@ -12,11 +12,14 @@
  * Options:
  *   --max-cycles <n>        Maximum task cycles (default: 50)
  *   --max-parallel <n>      Parallel track count (default: 3)
+ *   --parallel              Enable multi-track execution (default)
+ *   --no-parallel           Disable multi-track execution
  *   --agent-template <cmd>  Agent command template (default: "claude --task {taskId}")
  *   --single-cycle          Run exactly one task cycle, then exit
  *   --dry-run               Print plan without executing
  *   --no-commit             Skip git add/git commit after gates pass
  *   --no-colony             Skip Colony, use raw spawn
+ *   --skip-sprint-review    Skip isolated sprint completion review
  *   --track-timeout <ms>    Per-task timeout (default: 600000)
  *   --json                  JSON output
  */
@@ -27,6 +30,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { parseArgv, nowIso, readQualityGateConfig, resolveDefaults } from "./lib/sprint-utils.mjs";
+import { suggestGatesFromPitfalls } from "./lib/adaptive-gates.mjs";
 import {
   readHumanBoardInstructions,
   resolveHumanBoardPath
@@ -68,20 +72,105 @@ function appendSprintBoardOptions(args, opts = {}) {
 }
 
 async function sprintBoard(args, opts = {}) {
-  try {
-    const { stdout, stderr } = await execFileAsync(
-      process.execPath,
-      [SPRINT_BOARD, ...appendSprintBoardOptions(args, opts)],
-      { encoding: "utf8", timeout: 30_000, cwd: opts.workDir ?? process.cwd() }
-    );
-    return { stdout, stderr, exitCode: 0 };
-  } catch (err) {
-    return {
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? err.message,
-      exitCode: typeof err.code === "number" ? err.code : 1,
-    };
+  const run = async () => {
+    try {
+      const { stdout, stderr } = await execFileAsync(
+        process.execPath,
+        [SPRINT_BOARD, ...appendSprintBoardOptions(args, opts)],
+        { encoding: "utf8", timeout: 30_000, cwd: opts.workDir ?? process.cwd() }
+      );
+      return { stdout, stderr, exitCode: 0 };
+    } catch (err) {
+      return {
+        stdout: err.stdout ?? "",
+        stderr: err.stderr ?? err.message,
+        exitCode: typeof err.code === "number" ? err.code : 1,
+      };
+    }
+  };
+
+  const previous = opts.sprintBoardLock ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(run);
+  opts.sprintBoardLock = next.then(() => undefined, () => undefined);
+  return next;
+}
+
+function mapGateToFailureType(gateName) {
+  if (gateName === "review") return "review";
+  if (gateName === "acceptance" || gateName === "smoke-test") return "acceptance";
+  return "gate";
+}
+
+function parsePitfallIdFromStdout(stdout) {
+  const match = String(stdout ?? "").match(/Pitfall recorded:\s+(PF-\d+)/);
+  return match ? match[1] : null;
+}
+
+async function withStateMutationLock(opts, work) {
+  const previous = opts.stateMutationLock ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(work);
+  opts.stateMutationLock = next.then(() => undefined, () => undefined);
+  return next;
+}
+
+async function recordSprintStartCommit(opts) {
+  if (opts.dryRun) {
+    return "";
   }
+
+  return withStateMutationLock(opts, async () => {
+    const state = readSprintState(opts.stateFile);
+    if (state.sprintStartCommit) {
+      return String(state.sprintStartCommit);
+    }
+
+    let sprintStartCommit = "";
+    try {
+      const head = await git(["rev-parse", "HEAD"], opts);
+      sprintStartCommit = head.stdout.trim();
+    } catch {
+      sprintStartCommit = "";
+    }
+
+    state.sprintStartCommit = sprintStartCommit;
+    fs.writeFileSync(opts.stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    return sprintStartCommit;
+  });
+}
+
+async function recordPitfallAndSuggestGates(task, details, opts) {
+  if (opts.dryRun) {
+    return { pitfallId: null, suggestions: [] };
+  }
+
+  const args = [
+    "pitfall",
+    "--task", task.id,
+    "--failure-type", mapGateToFailureType(details.gateName),
+    "--attempted", String(details.attempted ?? `auto-pilot ${details.gateName}`),
+    "--hypothesis", String(details.hypothesis ?? details.output ?? "failure without detailed hypothesis")
+  ];
+
+  if (details.missingContext) {
+    args.push("--missing-context", String(details.missingContext));
+  }
+
+  const pitfallResult = await sprintBoard(args, opts);
+  const pitfallId = parsePitfallIdFromStdout(pitfallResult.stdout);
+  const pitfalls = await loadUnresolvedPitfalls(opts);
+  const suggestions = suggestGatesFromPitfalls(pitfalls)
+    .filter((suggestion) => !pitfallId || suggestion.triggeredBy === pitfallId);
+
+  if (pitfallId) {
+    const summary = suggestions.length > 0
+      ? `Pitfall ${pitfallId} recorded. Suggested new gate: ${suggestions.map((item) => `${item.name} -> ${item.command}`).join(" | ")}`
+      : `Pitfall ${pitfallId} recorded. Suggested new gate: none`;
+    await journalEntry(task, summary, opts, {
+      signals: [`pitfall:${pitfallId}`]
+    });
+  }
+
+  return { pitfallId, suggestions };
 }
 
 // ---------------------------------------------------------------------------
@@ -419,6 +508,7 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
 
 async function transitionToInProgress(task, opts) {
   if (opts.dryRun) return;
+  await recordSprintStartCommit(opts);
   await sprintBoard([
     "update", "--id", task.id, "--state", "In Progress",
   ], opts);
@@ -450,9 +540,9 @@ async function transitionToFailed(task, gate, output, opts) {
   if (opts.dryRun) return;
   await sprintBoard([
     "update", "--id", task.id, "--state", "Failed",
-    "--failure-type", "gate",
-    "--failure-attempted", `auto-pilot gate: ${gate}`,
-    "--failure-hypothesis", output.slice(0, 500),
+    "--failure-type", mapGateToFailureType(gate),
+    "--attempted", `auto-pilot ${gate}`,
+    "--hypothesis", output.slice(0, 500),
   ], opts);
 }
 
@@ -503,6 +593,13 @@ async function journalFailureRecoveryDecision(task, failureDetails, opts) {
 
 async function transitionToFailedWithRecovery(task, gateName, failureDetails, opts) {
   await transitionToFailed(task, gateName, failureDetails.output, opts);
+  await recordPitfallAndSuggestGates(task, {
+    gateName,
+    attempted: `auto-pilot ${gateName}`,
+    hypothesis: failureDetails.output?.slice(0, 500) ?? "",
+    output: failureDetails.output ?? "",
+    missingContext: failureDetails.stderr ? String(failureDetails.stderr).slice(0, 500) : ""
+  }, opts);
   return journalFailureRecoveryDecision(task, { ...failureDetails, gateName }, opts);
 }
 
@@ -858,15 +955,21 @@ async function finalizeDoneTaskCommit(task, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// Single cycle
+// Task execution
 // ---------------------------------------------------------------------------
 
-/**
- * Run one decision loop cycle.
- * @returns {Promise<{ done: boolean, task: object | null, action: string, details: string }>}
- */
-async function runCycle(bridge, pitfalls, gateConfig, opts) {
-  // 1. Get next task
+function actionForTaskState(task) {
+  switch (task.state) {
+    case "Failed": return "fix-and-retest";
+    case "Testing": return "run-acceptance";
+    case "Review": return "run-review";
+    case "In Progress": return "continue-implementation";
+    case "Backlog": return "start-task";
+    default: return "unknown";
+  }
+}
+
+async function resolveNextSelection(opts) {
   const nextArgs = ["next", "--json"];
   if (opts.strict) {
     nextArgs.push("--strict");
@@ -884,7 +987,6 @@ async function runCycle(bridge, pitfalls, gateConfig, opts) {
         details: formatHumanBoardBlockedDetails(nextError)
       };
     }
-
     const errorDetails = nextError?.message ?? stderr.trim() ?? `exit code ${exitCode}`;
     throw new Error(`sprint-board next --json failed: ${errorDetails}`);
   }
@@ -893,23 +995,12 @@ async function runCycle(bridge, pitfalls, gateConfig, opts) {
     return { done: true, task: null, action: "sprint-complete", details: "No actionable tasks remaining." };
   }
 
-  if (nextError?.code === "HUMAN_BOARD_BLOCKED") {
-    return {
-      done: true,
-      task: null,
-      action: "human-board-blocked",
-      details: formatHumanBoardBlockedDetails(nextError)
-    };
-  }
-
   const nextParse = tryParseJson(trimmed);
   if (!nextParse.parsed) {
     return { done: true, task: null, action: "parse-error", details: `Could not parse next output: ${stdout.slice(0, 200)}` };
   }
 
   const next = nextParse.value;
-
-  // sprint-board next returns null when no actionable tasks remain
   if (next === null || next === undefined) {
     return { done: true, task: null, action: "sprint-complete", details: "All tasks are Done or no actionable tasks." };
   }
@@ -927,35 +1018,52 @@ async function runCycle(bridge, pitfalls, gateConfig, opts) {
     throw new Error(`sprint-board next --json returned error: ${error?.message ?? "unknown error"}`);
   }
 
-  const humanBoardInstructions = Array.isArray(next.human_board_instructions)
-    ? next.human_board_instructions
-        .filter((item) => item && typeof item === "object")
-        .map((item) => ({
-          lineNumber: Number(item.lineNumber ?? 0),
-          text: String(item.text ?? "")
-        }))
+  return next;
+}
+
+function buildTaskSelection(taskId, opts) {
+  const state = readSprintState(opts.stateFile);
+  const task = findTaskById(state, taskId);
+  if (!task) {
+    return { done: true, task: null, action: "task-missing", details: `Task ${taskId} not found.` };
+  }
+
+  const humanBoardInstructions = readHumanBoardInstructions(resolveHumanBoardPath(opts.stateFile))
+    .map((item) => ({ lineNumber: Number(item.lineNumber ?? 0), text: String(item.text ?? "") }));
+
+  return {
+    task,
+    action: actionForTaskState(task),
+    human_board_instructions: humanBoardInstructions
+  };
+}
+
+async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) {
+  const humanBoardInstructions = Array.isArray(selection.human_board_instructions)
+    ? selection.human_board_instructions
     : [];
   const humanBoardBlock = formatHumanBoardInstructionBlock(humanBoardInstructions);
-  const task = next.task ?? next;
-  const action = next.action ?? "start-task";
+  const task = selection.task ?? selection;
+  const action = selection.action ?? actionForTaskState(task);
 
   log(opts, `\n--- Cycle: ${task.id} (${task.state ?? "Backlog"}) action=${action} ---`);
   if (humanBoardBlock) {
     log(opts, `  human-board instruction(s) injected into delegate prompt (${humanBoardInstructions.length} item(s))`);
   }
 
-  // 2. Build pitfall context
   const pitfallContext = injectPitfallContext(task, pitfalls);
   if (pitfallContext) {
     log(opts, `  pitfall context injected (${pitfalls.filter((p) => p.taskId === task.id || !p.taskId).length} entries)`);
   }
 
-  // 3. Branch on action
   switch (action) {
-    case "start-task": {
-      // Backlog → In Progress → dispatch
+    case "start-task":
+    case "continue-implementation":
+    case "fix-and-retest": {
       await ensureTaskBaseline(task, opts);
-      await transitionToInProgress(task, opts);
+      if (action !== "continue-implementation") {
+        await transitionToInProgress(task, opts);
+      }
       const result = await dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts);
       if (result.dryRun || result.success) {
         if (!result.dryRun && humanBoardInstructions.length > 0) {
@@ -966,47 +1074,41 @@ async function runCycle(bridge, pitfalls, gateConfig, opts) {
           }
         }
         await transitionToReview(task, opts);
-        await journalEntry(task, "Dispatched and moved to Review", opts);
-        return { done: false, task, action: "dispatched→review", details: `dispatch success` };
+        const summaries = {
+          "start-task": "Dispatched and moved to Review",
+          "continue-implementation": "Continued implementation → Review",
+          "fix-and-retest": "Fix dispatched → Review"
+        };
+        const resultActions = {
+          "start-task": "dispatched→review",
+          "continue-implementation": "continued→review",
+          "fix-and-retest": "fix→review"
+        };
+        await journalEntry(task, summaries[action], opts);
+        return { done: false, task, action: resultActions[action], details: "success" };
       }
-      // Dispatch failed
-      await transitionToFailedWithRecovery(task, "dispatch", {
-        exitCode: Number(result.exitCode ?? 1),
-        stdout: String(result.stdout ?? ""),
-        stderr: String(result.stderr ?? `Agent failed: exitCode=${result.exitCode}`),
-        output: `Agent failed: exitCode=${result.exitCode}`
-      }, opts);
-      await journalEntry(task, `Dispatch failed: exitCode=${result.exitCode}`, opts);
-      return { done: false, task, action: "dispatch-failed", details: `exitCode=${result.exitCode}` };
-    }
 
-    case "continue-implementation": {
-      // In Progress → re-dispatch
-      await ensureTaskBaseline(task, opts);
-      const result = await dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts);
-      if (result.dryRun || result.success) {
-        if (!result.dryRun && humanBoardInstructions.length > 0) {
-          const acknowledgmentSource = bridge.colony ? result : result.logFile;
-          const acknowledgments = extractHumanBoardAcknowledgments(acknowledgmentSource, humanBoardInstructions);
-          if (acknowledgments) {
-            appendHumanBoardAuditEntry(opts.journalFile, task, acknowledgments, result.logFile);
-          }
-        }
-        await transitionToReview(task, opts);
-        await journalEntry(task, "Continued implementation → Review", opts);
-        return { done: false, task, action: "continued→review", details: "success" };
-      }
+      const failureLabels = {
+        "start-task": "Dispatch failed",
+        "continue-implementation": "Re-dispatch failed",
+        "fix-and-retest": "Fix dispatch failed"
+      };
+      const failureActions = {
+        "start-task": "dispatch-failed",
+        "continue-implementation": "continue-failed",
+        "fix-and-retest": "fix-failed"
+      };
       await transitionToFailedWithRecovery(task, "dispatch", {
         exitCode: Number(result.exitCode ?? 1),
         stdout: String(result.stdout ?? ""),
-        stderr: String(result.stderr ?? "Re-dispatch failed"),
-        output: "Re-dispatch failed"
+        stderr: String(result.stderr ?? `${failureLabels[action]}: exitCode=${result.exitCode}`),
+        output: `${failureLabels[action]}: exitCode=${result.exitCode}`
       }, opts);
-      return { done: false, task, action: "continue-failed", details: "dispatch failed" };
+      await journalEntry(task, `${failureLabels[action]}: exitCode=${result.exitCode}`, opts);
+      return { done: false, task, action: failureActions[action], details: `exitCode=${result.exitCode}` };
     }
 
     case "run-review": {
-      // Review → run review gate
       const gateResult = await runGateSequence(
         { buildCommand: gateConfig.buildCommand, reviewCommand: gateConfig.reviewCommand },
         opts
@@ -1025,53 +1127,81 @@ async function runCycle(bridge, pitfalls, gateConfig, opts) {
     }
 
     case "run-acceptance": {
-      // Testing → run acceptance gate
       const gateResult = await runGateSequence(gateConfig, opts);
       if (gateResult.passed || opts.dryRun) {
         await transitionToDone(task, opts);
         await journalEntry(task, "All gates passed → Done", opts);
-        return {
-          done: false,
-          task,
-          action: "testing→done",
-          details: "all gates passed"
-        };
+        return { done: false, task, action: "testing→done", details: "all gates passed" };
       }
       await transitionToFailedWithRecovery(task, gateResult.gate, gateResult, opts);
       await journalEntry(task, `Acceptance gate "${gateResult.gate}" failed`, opts);
       return { done: false, task, action: "acceptance-failed", details: `gate: ${gateResult.gate}` };
     }
 
-    case "fix-and-retest": {
-      // Failed → re-dispatch with pitfall context
-      await ensureTaskBaseline(task, opts);
-      await transitionToInProgress(task, opts);
-      const result = await dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts);
-      if (result.dryRun || result.success) {
-        if (!result.dryRun && humanBoardInstructions.length > 0) {
-          const acknowledgmentSource = bridge.colony ? result : result.logFile;
-          const acknowledgments = extractHumanBoardAcknowledgments(acknowledgmentSource, humanBoardInstructions);
-          if (acknowledgments) {
-            appendHumanBoardAuditEntry(opts.journalFile, task, acknowledgments, result.logFile);
-          }
-        }
-        await transitionToReview(task, opts);
-        await journalEntry(task, "Fix dispatched → Review", opts);
-        return { done: false, task, action: "fix→review", details: "fix dispatched" };
-      }
-      await transitionToFailedWithRecovery(task, "dispatch", {
-        exitCode: Number(result.exitCode ?? 1),
-        stdout: String(result.stdout ?? ""),
-        stderr: String(result.stderr ?? "Fix dispatch failed"),
-        output: "Fix dispatch failed"
-      }, opts);
-      return { done: false, task, action: "fix-failed", details: "dispatch failed" };
-    }
-
     default:
       log(opts, `  unknown action: ${action}, skipping`);
       return { done: false, task, action: "unknown", details: action };
   }
+}
+
+async function executeSingleTask(taskId, bridge, pitfalls, gateConfig, opts) {
+  const steps = [];
+
+  while (true) {
+    const selection = buildTaskSelection(taskId, opts);
+    if (selection.done) {
+      return { task: null, action: selection.action, details: selection.details, steps, terminal: true };
+    }
+
+    const step = await executeTaskAction(selection, bridge, pitfalls, gateConfig, opts);
+    steps.push(step);
+
+    if (opts.dryRun) {
+      return { ...step, steps, terminal: false };
+    }
+
+    const refreshedState = readSprintState(opts.stateFile);
+    const refreshedTask = findTaskById(refreshedState, taskId);
+    if (!refreshedTask) {
+      return { ...step, steps, terminal: true };
+    }
+
+    if (refreshedTask.state === "Done") {
+      const finalizeResult = await finalizeDoneTaskCommit(refreshedTask, opts);
+      if (finalizeResult.ok) {
+        return {
+          task: refreshedTask,
+          action: "testing→done",
+          details: finalizeResult.details,
+          commitHash: finalizeResult.commitResult.hash,
+          commitFiles: finalizeResult.commitResult.files,
+          steps,
+          terminal: true
+        };
+      }
+      return {
+        task: refreshedTask,
+        action: "commit-failed",
+        details: finalizeResult.details,
+        steps,
+        terminal: true
+      };
+    }
+
+    if (refreshedTask.state === "Failed") {
+      return { task: refreshedTask, action: step.action, details: step.details, steps, terminal: true };
+    }
+
+    pitfalls = await loadUnresolvedPitfalls(opts);
+  }
+}
+
+async function runCycle(bridge, pitfalls, gateConfig, opts) {
+  const selection = await resolveNextSelection(opts);
+  if (selection.done) {
+    return selection;
+  }
+  return executeTaskAction(selection, bridge, pitfalls, gateConfig, opts);
 }
 
 // ---------------------------------------------------------------------------
@@ -1126,6 +1256,155 @@ async function appendCycleBoundaryEntry(cycle, result, pendingTasks, stopConditi
   );
 }
 
+function extractReviewerReport(raw) {
+  const parsed = tryParseJson(String(raw ?? "").trim());
+  if (parsed.parsed && parsed.value && typeof parsed.value === "object") {
+    const value = parsed.value;
+    return {
+      status: String(value.status ?? "WARNING"),
+      perspective: String(value.perspective ?? ""),
+      findings: Array.isArray(value.findings) ? value.findings : [],
+      raw: String(raw ?? "")
+    };
+  }
+
+  return {
+    status: /\bCRITICAL\b/i.test(String(raw ?? "")) ? "CRITICAL" : "WARNING",
+    perspective: "",
+    findings: [],
+    raw: String(raw ?? "")
+  };
+}
+
+async function collectSprintDiff(opts) {
+  const state = readSprintState(opts.stateFile);
+  let baseCommit = String(state.sprintStartCommit ?? "").trim();
+
+  if (!baseCommit) {
+    try {
+      const root = await git(["rev-list", "--max-parents=0", "HEAD"], opts);
+      baseCommit = splitLines(root.stdout)[0] ?? "";
+    } catch {
+      baseCommit = "";
+    }
+  }
+
+  const diffRange = baseCommit ? `${baseCommit}..HEAD` : "";
+  const committedFiles = baseCommit
+    ? splitLines((await git(["diff", "--name-only", diffRange], opts)).stdout)
+    : [];
+  const workingTreeFiles = splitLines((await git(["diff", "--name-only", "HEAD"], opts)).stdout);
+  const untrackedFiles = splitLines((await git(["ls-files", "--others", "--exclude-standard"], opts)).stdout);
+  const changedFiles = [...new Set([...committedFiles, ...workingTreeFiles, ...untrackedFiles])];
+
+  const committedDiff = baseCommit
+    ? (await git(["diff", "--binary", diffRange], opts)).stdout
+    : "";
+  const workingTreeDiff = (await git(["diff", "--binary", "HEAD"], opts)).stdout;
+
+  let untrackedDiff = "";
+  for (const file of untrackedFiles) {
+    const absolutePath = path.join(opts.workDir ?? process.cwd(), file);
+    if (!fs.existsSync(absolutePath)) continue;
+    const content = fs.readFileSync(absolutePath, "utf8");
+    untrackedDiff += `\n--- /dev/null\n+++ b/${file}\n@@\n+${content.split(/\r?\n/).join("\n+")}\n`;
+  }
+
+  const diff = [committedDiff, workingTreeDiff, untrackedDiff].filter(Boolean).join("\n");
+
+  return { baseCommit, changedFiles, diff };
+}
+
+async function spawnSprintReviewer(diffBundle, opts) {
+  const prompt = [
+    "You are an isolated sprint completion reviewer.",
+    "You only know the changed file list and git diff below. You do not know run-journal history or sprint context.",
+    "Review from an adversarial regression perspective: hidden breakage, unsafe assumptions, missing gates, and incomplete follow-up work.",
+    'Return strict JSON: {"status":"PASS|WARNING|CRITICAL","perspective":"...","findings":[{"severity":"CRITICAL|WARNING","title":"...","detail":"...","suggestedTaskTitle":"..."}]}',
+    "",
+    `Base commit: ${diffBundle.baseCommit || "(unknown)"}`,
+    "Changed files:",
+    diffBundle.changedFiles.length > 0 ? diffBundle.changedFiles.map((file) => `- ${file}`).join("\n") : "- none",
+    "",
+    "Git diff:",
+    diffBundle.diff || "(no diff)"
+  ].join("\n");
+
+  if (typeof opts.sprintReviewerRunner === "function") {
+    return opts.sprintReviewerRunner(prompt, diffBundle, opts);
+  }
+
+  return execFileAsync("codex", [
+    "exec",
+    "--sandbox", "read-only",
+    "-C", opts.workDir ?? process.cwd(),
+    prompt
+  ], {
+    encoding: "utf8",
+    cwd: opts.workDir ?? process.cwd(),
+    timeout: 120_000
+  });
+}
+
+async function handleSprintCompletionReview(opts) {
+  if (opts.skipSprintReview || opts.dryRun) {
+    return { cleared: true, action: "sprint-complete", details: "Sprint review skipped." };
+  }
+
+  const diffBundle = await collectSprintDiff(opts);
+  if (!diffBundle.diff.trim() && diffBundle.changedFiles.length === 0) {
+    return { cleared: true, action: "sprint-complete", details: "Sprint complete; no changes to review." };
+  }
+
+  let reviewerOutput = "";
+  try {
+    const reviewerResult = await spawnSprintReviewer(diffBundle, opts);
+    reviewerOutput = String(reviewerResult.stdout ?? reviewerResult.output ?? "");
+  } catch (error) {
+    reviewerOutput = String(error.stdout ?? error.stderr ?? error.message ?? "");
+  }
+
+  const report = extractReviewerReport(reviewerOutput);
+  await journalEntry({ id: "sprint-review" }, `Sprint completion review result: ${report.status}`, opts, {
+    taskId: "sprint-review",
+    files: diffBundle.changedFiles,
+    signals: [`sprint-review:${report.status}`]
+  });
+
+  if (report.status !== "CRITICAL") {
+    return { cleared: true, action: "sprint-complete", details: `Sprint completion review ${report.status.toLowerCase()}.` };
+  }
+
+  const findings = Array.isArray(report.findings) && report.findings.length > 0
+    ? report.findings
+    : [{ severity: "CRITICAL", title: "Sprint completion review failure", detail: report.raw, suggestedTaskTitle: "Resolve sprint completion review finding" }];
+
+  const createdTaskIds = [];
+  for (const finding of findings.filter((item) => String(item.severity ?? "").toUpperCase() === "CRITICAL")) {
+    const addResult = await sprintBoard([
+      "add",
+      "--title", String(finding.suggestedTaskTitle ?? finding.title ?? "Resolve sprint completion review finding"),
+      "--priority", "P1",
+      "--source", "sprint-review"
+    ], opts);
+    const createdTaskId = extractCreatedTaskId(addResult.stdout);
+    if (createdTaskId) {
+      createdTaskIds.push(createdTaskId);
+    }
+  }
+
+  await journalEntry({ id: "sprint-review" }, `Sprint completion review created follow-up tasks: ${createdTaskIds.join(", ") || "none"}`, opts, {
+    taskId: "sprint-review",
+    signals: createdTaskIds.map((id) => `fix-task:${id}`)
+  });
+
+  return {
+    cleared: false,
+    action: "sprint-review-blocked",
+    details: `Sprint completion review found CRITICAL issues. Created tasks: ${createdTaskIds.join(", ") || "none"}.`
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Logging
 // ---------------------------------------------------------------------------
@@ -1170,110 +1449,147 @@ async function runLoop(opts) {
         `  cycle context: human-board=${context.humanBoardInstructions.length} unchecked, journal entries=${context.journalEntryCount}`
       );
 
+      if (opts.strict && context.humanBoardInstructions.length > 0) {
+        const details = formatHumanBoardBlockedDetails({
+          code: "HUMAN_BOARD_BLOCKED",
+          message: `human-board Instructions contain ${context.humanBoardInstructions.length} unprocessed item(s).`,
+          context: { instructions: context.humanBoardInstructions }
+        });
+        const state = readSprintState(opts.stateFile);
+        const stopCondition = detectStopCondition(state);
+        const pendingTasks = countPendingTasks(state);
+        const cycleResult = {
+          cycle,
+          task: null,
+          action: "human-board-blocked",
+          details,
+          done: true,
+          completedTask: false,
+          pendingTasks,
+          stopCondition,
+          steps: []
+        };
+        await appendCycleBoundaryEntry(cycle, cycleResult, pendingTasks, stopCondition, opts);
+        results.push(cycleResult);
+        break;
+      }
+
       let pitfalls = await loadUnresolvedPitfalls(opts);
       if (pitfalls.length > 0) {
         log(opts, `Loaded ${pitfalls.length} unresolved pitfall(s).`);
       }
 
-      const cycleSteps = [];
-      let result = null;
-
-      while (true) {
-        result = await runCycle(bridge, pitfalls, gateConfig, opts);
-        cycleSteps.push(result);
-
-        if (result.done) {
+      let taskIds = [];
+      if (opts.parallel) {
+        const planResult = await sprintBoard(["plan", "--json", "--max-parallel", String(opts.maxParallel)], opts);
+        const parsedPlan = tryParseJson(planResult.stdout.trim());
+        const plan = parsedPlan.parsed ? parsedPlan.value : null;
+        if (!plan) {
+          const review = await handleSprintCompletionReview(opts);
           const state = readSprintState(opts.stateFile);
           const stopCondition = detectStopCondition(state);
           const pendingTasks = countPendingTasks(state);
           const cycleResult = {
             cycle,
-            task: result.task,
-            action: result.action,
-            details: result.details,
-            done: true,
+            task: null,
+            action: review.action,
+            details: review.details,
+            done: review.cleared,
             completedTask: false,
             pendingTasks,
             stopCondition,
-            steps: cycleSteps
+            steps: []
           };
           await appendCycleBoundaryEntry(cycle, cycleResult, pendingTasks, stopCondition, opts);
           results.push(cycleResult);
-          log(opts, `\nLoop finished: ${result.details}`);
-          break;
-        }
-
-        log(opts, `  result: ${result.action} — ${result.details}`);
-
-        const state = readSprintState(opts.stateFile);
-        const stopCondition = detectStopCondition(state);
-        const pendingTasks = countPendingTasks(state);
-
-        if (stopCondition.stop) {
-          const cycleResult = {
-            cycle,
-            task: result.task,
-            action: "stop-condition",
-            details: stopCondition.reason,
-            done: true,
-            completedTask: false,
-            pendingTasks,
-            stopCondition,
-            steps: cycleSteps
-          };
-          await appendCycleBoundaryEntry(cycle, cycleResult, pendingTasks, stopCondition, opts);
-          results.push(cycleResult);
-          log(opts, `\nLoop finished: ${stopCondition.reason}`);
-          break;
-        }
-
-        if (opts.dryRun || result.action === "testing→done") {
-          const cycleResult = {
-            cycle,
-            task: result.task,
-            action: result.action,
-            details: result.details,
-            done: false,
-            completedTask: result.action === "testing→done",
-            pendingTasks,
-            stopCondition,
-            commitHash: result.commitHash ?? "",
-            commitFiles: result.commitFiles ?? [],
-            steps: cycleSteps
-          };
-          await appendCycleBoundaryEntry(cycle, cycleResult, pendingTasks, stopCondition, opts);
-
-          if (!opts.dryRun && result.action === "testing→done" && result.task) {
-            const finalizeResult = await finalizeDoneTaskCommit(result.task, opts);
-            const updatedState = readSprintState(opts.stateFile);
-            cycleResult.pendingTasks = countPendingTasks(updatedState);
-            cycleResult.stopCondition = detectStopCondition(updatedState);
-
-            if (finalizeResult.ok) {
-              const { commitResult } = finalizeResult;
-              cycleResult.commitHash = commitResult.hash;
-              cycleResult.commitFiles = commitResult.files;
-              cycleResult.details = finalizeResult.details;
-
-              if (commitResult.committed) {
-                log(opts, `  auto-commit created ${commitResult.hash}`);
-              } else {
-                log(opts, `  auto-commit skipped: ${commitResult.reason}`);
-              }
-            } else {
-              cycleResult.action = "commit-failed";
-              cycleResult.completedTask = false;
-              cycleResult.details = finalizeResult.details;
-              log(opts, `  auto-commit failed: ${formatGitError(finalizeResult.error)}`);
-            }
+          if (review.cleared) {
+            log(opts, `\nLoop finished: ${review.details}`);
           }
-
-          results.push(cycleResult);
           break;
         }
-
-        pitfalls = await loadUnresolvedPitfalls(opts);
+        taskIds = [plan.primaryTaskId, ...(Array.isArray(plan.parallelTracks) ? plan.parallelTracks : [])].filter(Boolean);
+      } else {
+        const selection = await resolveNextSelection(opts);
+        if (selection.done) {
+          const review = selection.action === "sprint-complete"
+            ? await handleSprintCompletionReview(opts)
+            : { cleared: true, action: selection.action, details: selection.details };
+          const state = readSprintState(opts.stateFile);
+          const stopCondition = detectStopCondition(state);
+          const pendingTasks = countPendingTasks(state);
+          const cycleResult = {
+            cycle,
+            task: selection.task,
+            action: review.action,
+            details: review.details,
+            done: review.cleared,
+            completedTask: false,
+            pendingTasks,
+            stopCondition,
+            steps: []
+          };
+          await appendCycleBoundaryEntry(cycle, cycleResult, pendingTasks, stopCondition, opts);
+          results.push(cycleResult);
+          if (review.cleared) {
+            log(opts, `\nLoop finished: ${review.details}`);
+          }
+          break;
+        }
+        taskIds = [selection.task.id];
       }
+
+      const settled = await Promise.allSettled(
+        taskIds.map((taskId) => executeSingleTask(taskId, bridge, pitfalls, gateConfig, opts))
+      );
+
+      const trackResults = settled.map((item, index) => {
+        if (item.status === "fulfilled") {
+          return { taskId: taskIds[index], ...item.value };
+        }
+        return {
+          taskId: taskIds[index],
+          task: { id: taskIds[index] },
+          action: "track-error",
+          details: item.reason instanceof Error ? item.reason.message : String(item.reason),
+          steps: [],
+          terminal: true
+        };
+      });
+
+      for (const track of trackResults) {
+        log(opts, `  result: ${track.taskId} — ${track.action} — ${track.details}`);
+      }
+
+      const state = readSprintState(opts.stateFile);
+      const stopCondition = detectStopCondition(state);
+      const pendingTasks = countPendingTasks(state);
+      const cycleResult = {
+        cycle,
+        task: taskIds.length === 1 ? (trackResults[0]?.task ?? { id: taskIds[0] }) : { id: taskIds.join(",") },
+        action: taskIds.length > 1 ? "parallel-cycle" : trackResults[0]?.action ?? "unknown",
+        details: trackResults.map((track) => `${track.taskId}:${track.action}`).join(" | "),
+        done: false,
+        completedTask: trackResults.some((track) => track.action === "testing→done"),
+        pendingTasks,
+        stopCondition,
+        commitFiles: trackResults.flatMap((track) => track.commitFiles ?? []),
+        steps: trackResults.flatMap((track) => track.steps ?? [])
+      };
+
+      if (stopCondition.stop) {
+        cycleResult.done = true;
+        cycleResult.action = "stop-condition";
+        cycleResult.details = stopCondition.reason;
+      } else if (pendingTasks <= 0) {
+        const review = await handleSprintCompletionReview(opts);
+        cycleResult.done = review.cleared;
+        cycleResult.action = review.action;
+        cycleResult.details = review.details;
+        cycleResult.pendingTasks = countPendingTasks(readSprintState(opts.stateFile));
+      }
+
+      await appendCycleBoundaryEntry(cycle, cycleResult, cycleResult.pendingTasks, cycleResult.stopCondition, opts);
+      results.push(cycleResult);
 
       const last = results[results.length - 1];
 
@@ -1332,7 +1648,18 @@ async function runLoop(opts) {
 // CLI entry point
 // ---------------------------------------------------------------------------
 
-const BOOL_FLAGS = new Set(["dry-run", "single-cycle", "no-commit", "no-colony", "json", "help", "strict"]);
+const BOOL_FLAGS = new Set([
+  "dry-run",
+  "single-cycle",
+  "no-commit",
+  "no-colony",
+  "json",
+  "help",
+  "strict",
+  "parallel",
+  "no-parallel",
+  "skip-sprint-review"
+]);
 
 function printHelp() {
   console.log(`auto-pilot-loop — Autonomous Decision Loop
@@ -1343,11 +1670,14 @@ Usage:
 Options:
   --max-cycles <n>        Maximum task cycles (default: 50)
   --max-parallel <n>      Parallel track count (default: 3)
+  --parallel              Enable multi-track execution (default)
+  --no-parallel           Disable multi-track execution
   --agent-template <cmd>  Agent command template (default: "claude --task {taskId}")
   --single-cycle          Run exactly one task cycle, then exit
   --dry-run               Print plan without executing
   --no-commit             Skip git add/git commit after gates pass
   --no-colony             Skip Colony, use raw spawn
+  --skip-sprint-review    Skip isolated sprint completion review
   --strict                Keep human-board Instructions as a hard block
   --track-timeout <ms>    Per-task timeout in ms (default: 600000)
   --json                  JSON output
@@ -1365,7 +1695,10 @@ export {
   autoCommitTask,
   finalizeDoneTaskCommit,
   extractCreatedTaskId,
-  createReviewFixTasks
+  createReviewFixTasks,
+  executeSingleTask,
+  handleSprintCompletionReview,
+  extractReviewerReport
 };
 
 async function main() {
@@ -1379,11 +1712,13 @@ async function main() {
   const opts = {
     maxCycles: parseInt(parsed.options["max-cycles"] ?? "50", 10),
     maxParallel: parseInt(parsed.options["max-parallel"] ?? "3", 10),
+    parallel: !parsed.flags.has("no-parallel"),
     agentTemplate: parsed.options["agent-template"] ?? "claude --task {taskId}",
     dryRun: parsed.flags.has("dry-run"),
     singleCycle: parsed.flags.has("single-cycle"),
     noCommit: parsed.flags.has("no-commit"),
     noColony: parsed.flags.has("no-colony"),
+    skipSprintReview: parsed.flags.has("skip-sprint-review"),
     trackTimeout: parseInt(parsed.options["track-timeout"] ?? "600000", 10),
     json: parsed.flags.has("json"),
     strict: parsed.flags.has("strict"),
@@ -1393,6 +1728,8 @@ async function main() {
     pitfallsFile: path.resolve(parsed.options["pitfalls-file"] ?? ".va-auto-pilot/pitfalls.json"),
     workDir: process.cwd(),
     taskBaselines: new Map(),
+    sprintBoardLock: Promise.resolve(),
+    stateMutationLock: Promise.resolve(),
   };
 
   if (opts.singleCycle) {

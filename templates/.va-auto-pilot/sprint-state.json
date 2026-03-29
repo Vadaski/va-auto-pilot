@@ -2,6 +2,7 @@
   "version": 1,
   "projectPrefix": "{{PROJECT_PREFIX}}",
   "updatedAt": "{{DATE_ISO}}",
+  "sprintStartCommit": "",
   "tasks": [
     {
       "id": "{{PROJECT_PREFIX}}-001",

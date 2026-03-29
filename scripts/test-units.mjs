@@ -36,10 +36,14 @@ import {
   autoCommitTask,
   finalizeDoneTaskCommit,
   runCycle,
-  extractCreatedTaskId
+  extractCreatedTaskId,
+  executeSingleTask,
+  handleSprintCompletionReview,
+  extractReviewerReport
 } from "./auto-pilot-loop.mjs";
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
+import { suggestGateFromPitfall, suggestGatesFromPitfalls } from "./lib/adaptive-gates.mjs";
 
 // ---------------------------------------------------------------------------
 // Import pure functions from sprint-board via a thin re-export shim.
@@ -685,6 +689,191 @@ test("runCycle review failure creates fix tasks for blocking review findings", a
     assert.match(journal, /Failure classified: type=review/);
     assert.match(journal, /Review failed with 3 blocking findings\. Creating fix tasks\./);
     assert.match(journal, /Created review fix tasks: AP-031, AP-032, AP-033/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("suggestGateFromPitfall maps gate pitfall into required suggestion", () => {
+  const suggestion = suggestGateFromPitfall({
+    id: "PF-001",
+    failureType: "gate",
+    attempted: "npm test",
+    hypothesis: "tests failed because a regression escaped"
+  });
+
+  assert.equal(suggestion.required, true);
+  assert.equal(suggestion.triggeredBy, "PF-001");
+  assert.equal(suggestion.command, "npm test");
+  assert.match(suggestion.description, /PF-001/);
+});
+
+test("suggestGatesFromPitfalls filters resolved entries", () => {
+  const suggestions = suggestGatesFromPitfalls([
+    {
+      id: "PF-001",
+      failureType: "acceptance",
+      attempted: "playwright smoke",
+      hypothesis: "smoke path regressed",
+      resolvedAt: null
+    },
+    {
+      id: "PF-002",
+      failureType: "gate",
+      attempted: "npm run lint",
+      hypothesis: "lint missed a rule",
+      resolvedAt: "2026-03-29T00:00:00.000Z"
+    }
+  ]);
+
+  assert.equal(suggestions.length, 1);
+  assert.equal(suggestions[0].triggeredBy, "PF-001");
+  assert.equal(suggestions[0].required, false);
+});
+
+test("extractReviewerReport parses JSON reviewer output", () => {
+  const report = extractReviewerReport(JSON.stringify({
+    status: "CRITICAL",
+    perspective: "regression",
+    findings: [{ severity: "CRITICAL", title: "Missing follow-up" }]
+  }));
+
+  assert.equal(report.status, "CRITICAL");
+  assert.equal(report.perspective, "regression");
+  assert.equal(report.findings.length, 1);
+});
+
+test("handleSprintCompletionReview creates backlog tasks for critical findings", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-sprint-review-"));
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(repoDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
+
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    updatedAt: "2026-03-29T00:00:00.000Z",
+    sprintStartCommit: "",
+    tasks: []
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint Board\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+  runGit(["init"], repoDir);
+  runGit(["config", "user.email", "test@example.com"], repoDir);
+  runGit(["config", "user.name", "Test User"], repoDir);
+  fs.writeFileSync(path.join(repoDir, "reviewed.txt"), "before\n", "utf8");
+  runGit(["add", "."], repoDir);
+  runGit(["commit", "-m", "initial"], repoDir);
+  fs.writeFileSync(path.join(repoDir, "reviewed.txt"), "after\n", "utf8");
+  const sprintStartCommit = runGit(["rev-parse", "HEAD"], repoDir);
+  const seededState = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  seededState.sprintStartCommit = sprintStartCommit;
+  fs.writeFileSync(stateFile, JSON.stringify(seededState, null, 2) + "\n", "utf8");
+
+  const previousCwd = process.cwd();
+  process.chdir(repoDir);
+  try {
+    const review = await handleSprintCompletionReview({
+      dryRun: false,
+      skipSprintReview: false,
+      json: true,
+      workDir: repoDir,
+      stateFile,
+      boardFile,
+      journalFile,
+      pitfallsFile: path.join(repoDir, ".va-auto-pilot", "pitfalls.json"),
+      sprintBoardLock: Promise.resolve(),
+      stateMutationLock: Promise.resolve(),
+      sprintReviewerRunner: async () => ({
+        stdout: JSON.stringify({
+          status: "CRITICAL",
+          findings: [
+            {
+              severity: "CRITICAL",
+              title: "Missing sprint follow-up",
+              suggestedTaskTitle: "Add sprint follow-up task"
+            }
+          ]
+        })
+      })
+    });
+
+    assert.equal(review.cleared, false);
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.equal(state.tasks.length, 1);
+    assert.equal(state.tasks[0].title, "Add sprint follow-up task");
+    assert.equal(state.tasks[0].state, "Backlog");
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("executeSingleTask completes a backlog task through gates", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-exec-single-"));
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(repoDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
+  const humanBoardFile = path.join(repoDir, "docs", "todo", "human-board.md");
+
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    updatedAt: "2026-03-29T00:00:00.000Z",
+    tasks: [
+      { id: "AP-040", title: "Parallel task", priority: "P1", state: "Backlog", dependsOn: [] }
+    ]
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint Board\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+  fs.writeFileSync(humanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  runGit(["init"], repoDir);
+  runGit(["config", "user.email", "test@example.com"], repoDir);
+  runGit(["config", "user.name", "Test User"], repoDir);
+  fs.writeFileSync(path.join(repoDir, "work.txt"), "before\n", "utf8");
+  runGit(["add", "."], repoDir);
+  runGit(["commit", "-m", "initial"], repoDir);
+
+  const previousCwd = process.cwd();
+  process.chdir(repoDir);
+  try {
+    const result = await executeSingleTask(
+      "AP-040",
+      {
+        colony: false,
+        dispatch: async (_track, _template, logFile) => {
+          fs.writeFileSync(path.join(repoDir, "work.txt"), "after\n", "utf8");
+          fs.mkdirSync(path.dirname(logFile), { recursive: true });
+          fs.writeFileSync(logFile, "ok\n", "utf8");
+          return { success: true, durationMs: 1, logFile };
+        }
+      },
+      [],
+      {},
+      {
+        dryRun: false,
+        noCommit: false,
+        json: true,
+        strict: false,
+        workDir: repoDir,
+        stateFile,
+        boardFile,
+        journalFile,
+        pitfallsFile: path.join(repoDir, ".va-auto-pilot", "pitfalls.json"),
+        agentTemplate: "echo {taskId}",
+        trackTimeout: 1000,
+        taskBaselines: new Map(),
+        sprintBoardLock: Promise.resolve(),
+        stateMutationLock: Promise.resolve()
+      }
+    );
+
+    assert.equal(result.action, "testing→done");
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.equal(state.tasks[0].state, "Done");
+    assert.ok(state.sprintStartCommit);
   } finally {
     process.chdir(previousCwd);
   }

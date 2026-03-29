@@ -22,9 +22,9 @@
 ## In Progress
 | ID | Task | Owner | Started | Notes |
 |----|------|-------|---------|-------|
-| AP-027 | 循环自驱：auto-pilot-loop 完成一轮后自动检测 backlog 并重启下一轮 | - | 2026-03-29 | - |
-| AP-028 | Auto commit：gate 通过后自动 stage + commit，消除变更堆积 | - | 2026-03-29 | - |
 | AP-004 | Add unit test suite for sprint-board.mjs pure functions | - | 2026-02-23 | - |
+| AP-029 | 错误恢复策略：失败分类器 + 策略表（build/lint/test/review 各有不同恢复路径）+ 升级机制 | - | 2026-03-29 | - |
+| AP-030 | Review 决策结构化：finding → 自动创建 fix task + 历史修复模式库 + pitfall 自动注入 delegation | - | 2026-03-29 | - |
 
 ## Failed
 | ID | Task | Fail Count | Reason | Last Failed |
@@ -47,6 +47,8 @@
 | AP-013 | Rewrite website copy with marketing conviction — hooks, not features | 2026-02-23 | All gates pass: node --check, npm run check:all, npm run validate:distribution. Codex review: no CRITICAL/BUG findings (P2 sprint.md board artifact only). Adversarial review (burned-by-hype-marketing perspective): no CRITICAL findings, 2 WARNINGs accepted with rationale. |
 | AP-017 | va-lives: 固化 tsx 依赖，消除 spawn 脚本对 npx 临时拉包的依赖 | 2026-03-02 | - |
 | AP-020 | AP-020: va-anima 语义记忆升级 | 2026-03-25 | va-anima 213 tests pass, build pass. Ebbinghaus遗忘曲线+语义记忆升级 committed at 40696e5 |
+| AP-027 | 循环自驱：auto-pilot-loop 完成一轮后自动检测 backlog 并重启下一轮 | 2026-03-29 | - |
+| AP-028 | Auto commit：gate 通过后自动 stage + commit，消除变更堆积 | 2026-03-29 | - |
 | AP-001 | Upgrade multi-perspective review to dynamic perspective selection | 2026-02-23 | Two cross-reviews (adversarial + protocol designer), 6 CRITICALs resolved, templates synced |
 | AP-003 | Add sprint-board.mjs add command to create tasks via CLI without hand-editing JSON | 2026-02-23 | add command implemented: auto-ID (AP-NNN), validation, depends-on, regex-safe prefix; printHelp updated; templates mirrored; all gates pass |
 | AP-006 | Expand test-flows to cover add, update, journal, and next CLI commands | 2026-02-23 | sprint-board-cli.yaml added (9 flows, 18 MUST/3 SHOULD); test-cli-flows.mjs runner with isolated_state/isolated_journal; check:cli-flows added to check:all; all gates pass |
@@ -73,8 +75,6 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| P1 | AP-029 | 错误恢复策略：失败分类器 + 策略表（build/lint/test/review 各有不同恢复路径）+ 升级机制 | - | - | gap-analysis-3 |
-| P1 | AP-030 | Review 决策结构化：finding → 自动创建 fix task + 历史修复模式库 + pitfall 自动注入 delegation | - | - | gap-analysis-2 |
 | P2 | AP-031 | 自适应质量门：pitfall → suggest gate + 自动写入 quality-gates.yaml + 跨项目 gate 继承 | - | - | gap-analysis-5 |
 | P2 | AP-032 | 默认并行执行：auto-pilot-loop 从单任务循环改为任务池循环，plan 命令输出自动执行 | - | - | gap-analysis-6 |
 | P3 | AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | - | - | gap-analysis-7 |

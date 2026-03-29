@@ -32,6 +32,8 @@ import {
   resolveHumanBoardPath
 } from "./lib/human-board.mjs";
 import { ColonyBridge } from "./lib/colony-bridge.mjs";
+import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
+import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -323,7 +325,7 @@ function injectPitfallContext(task, pitfalls) {
  * Runs sequentially; returns on first failure.
  * @param {object} gateConfig
  * @param {object} opts
- * @returns {Promise<{ passed: boolean, gate: string, output: string }>}
+ * @returns {Promise<{ passed: boolean, gate: string, output: string, exitCode: number, stdout: string, stderr: string }>}
  */
 async function runGateSequence(gateConfig, opts) {
   const gates = [
@@ -346,13 +348,22 @@ async function runGateSequence(gateConfig, opts) {
       );
       log(opts, `  gate "${gate.name}" PASSED`);
     } catch (err) {
-      const output = (err.stdout ?? "") + "\n" + (err.stderr ?? err.message);
+      const stdout = String(err.stdout ?? "");
+      const stderr = String(err.stderr ?? err.message);
+      const output = stdout + "\n" + stderr;
       log(opts, `  gate "${gate.name}" FAILED`);
-      return { passed: false, gate: gate.name, output: output.slice(0, 2000) };
+      return {
+        passed: false,
+        gate: gate.name,
+        output: output.slice(0, 2000),
+        exitCode: typeof err.code === "number" ? err.code : 1,
+        stdout,
+        stderr
+      };
     }
   }
 
-  return { passed: true, gate: "", output: "" };
+  return { passed: true, gate: "", output: "", exitCode: 0, stdout: "", stderr: "" };
 }
 
 // ---------------------------------------------------------------------------
@@ -443,6 +454,100 @@ async function transitionToFailed(task, gate, output, opts) {
     "--failure-attempted", `auto-pilot gate: ${gate}`,
     "--failure-hypothesis", output.slice(0, 500),
   ], opts);
+}
+
+function findTaskById(state, taskId) {
+  return Array.isArray(state.tasks)
+    ? state.tasks.find((item) => item?.id === taskId) ?? null
+    : null;
+}
+
+function extractCreatedTaskId(stdout) {
+  const match = String(stdout ?? "").match(/Task added:\s+([A-Z]+-\d+)/);
+  return match ? match[1] : null;
+}
+
+async function journalFailureRecoveryDecision(task, failureDetails, opts) {
+  const state = readSprintState(opts.stateFile);
+  const persistedTask = findTaskById(state, task.id);
+  const failCount = Number(persistedTask?.failCount ?? task.failCount ?? 0);
+  const classified = classifyFailure(
+    Number(failureDetails.exitCode ?? 1),
+    String(failureDetails.stderr ?? ""),
+    String(failureDetails.stdout ?? ""),
+    failureDetails.gateName
+  );
+  const strategy = getRecoveryStrategy(classified, failCount);
+  const parts = [
+    `Failure classified: type=${classified.type}`,
+    `severity=${classified.severity}`,
+    `pattern=${classified.pattern}`,
+    `failCount=${failCount}`,
+    `strategy=${strategy.action}`,
+    `reason=${strategy.reason}`
+  ];
+
+  if (strategy.nextModel) {
+    parts.push(`nextModel=${strategy.nextModel}`);
+  }
+  if (strategy.fixPrompt) {
+    parts.push(`fixPrompt=${strategy.fixPrompt}`);
+  }
+
+  await journalEntry(task, parts.join(" | "), opts, {
+    signals: [`failure:${classified.type}`, `strategy:${strategy.action}`]
+  });
+
+  return { classified, strategy, failCount };
+}
+
+async function transitionToFailedWithRecovery(task, gateName, failureDetails, opts) {
+  await transitionToFailed(task, gateName, failureDetails.output, opts);
+  return journalFailureRecoveryDecision(task, { ...failureDetails, gateName }, opts);
+}
+
+async function createReviewFixTasks(task, reviewOutput, opts) {
+  const parsed = parseReviewFindings(reviewOutput);
+  if (!parsed.hasBlocking) {
+    return { parsed, createdTaskIds: [] };
+  }
+
+  await journalEntry(
+    task,
+    `Review failed with ${parsed.summary.critical + parsed.summary.p1 + parsed.summary.p2} blocking findings. Creating fix tasks.`,
+    opts,
+    { signals: ["review-blocking-findings"] }
+  );
+
+  const taskSpecs = createFixTasksFromFindings(parsed.findings, task.id)
+    .filter((item) => item.priority === "P0" || item.priority === "P1" || item.priority === "P2");
+
+  const createdTaskIds = [];
+  for (const spec of taskSpecs) {
+    const result = await sprintBoard([
+      "add",
+      "--title", spec.title,
+      "--priority", spec.priority,
+      "--source", spec.source
+    ], opts);
+    const createdTaskId = extractCreatedTaskId(result.stdout);
+    if (createdTaskId) {
+      createdTaskIds.push(createdTaskId);
+    }
+  }
+
+  if (createdTaskIds.length > 0) {
+    await sprintBoard([
+      "update",
+      "--id", task.id,
+      "--depends-on", createdTaskIds.join(",")
+    ], opts);
+    await journalEntry(task, `Created review fix tasks: ${createdTaskIds.join(", ")}`, opts, {
+      signals: createdTaskIds.map((id) => `fix-task:${id}`)
+    });
+  }
+
+  return { parsed, createdTaskIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -865,7 +970,12 @@ async function runCycle(bridge, pitfalls, gateConfig, opts) {
         return { done: false, task, action: "dispatched→review", details: `dispatch success` };
       }
       // Dispatch failed
-      await transitionToFailed(task, "dispatch", `Agent failed: exitCode=${result.exitCode}`, opts);
+      await transitionToFailedWithRecovery(task, "dispatch", {
+        exitCode: Number(result.exitCode ?? 1),
+        stdout: String(result.stdout ?? ""),
+        stderr: String(result.stderr ?? `Agent failed: exitCode=${result.exitCode}`),
+        output: `Agent failed: exitCode=${result.exitCode}`
+      }, opts);
       await journalEntry(task, `Dispatch failed: exitCode=${result.exitCode}`, opts);
       return { done: false, task, action: "dispatch-failed", details: `exitCode=${result.exitCode}` };
     }
@@ -886,7 +996,12 @@ async function runCycle(bridge, pitfalls, gateConfig, opts) {
         await journalEntry(task, "Continued implementation → Review", opts);
         return { done: false, task, action: "continued→review", details: "success" };
       }
-      await transitionToFailed(task, "dispatch", `Re-dispatch failed`, opts);
+      await transitionToFailedWithRecovery(task, "dispatch", {
+        exitCode: Number(result.exitCode ?? 1),
+        stdout: String(result.stdout ?? ""),
+        stderr: String(result.stderr ?? "Re-dispatch failed"),
+        output: "Re-dispatch failed"
+      }, opts);
       return { done: false, task, action: "continue-failed", details: "dispatch failed" };
     }
 
@@ -901,7 +1016,10 @@ async function runCycle(bridge, pitfalls, gateConfig, opts) {
         await journalEntry(task, "Review gates passed → Testing", opts);
         return { done: false, task, action: "review→testing", details: "gates passed" };
       }
-      await transitionToFailed(task, gateResult.gate, gateResult.output, opts);
+      await transitionToFailedWithRecovery(task, gateResult.gate, gateResult, opts);
+      if (gateResult.gate === "review") {
+        await createReviewFixTasks(task, gateResult.output, opts);
+      }
       await journalEntry(task, `Review gate "${gateResult.gate}" failed`, opts);
       return { done: false, task, action: "review-failed", details: `gate: ${gateResult.gate}` };
     }
@@ -919,7 +1037,7 @@ async function runCycle(bridge, pitfalls, gateConfig, opts) {
           details: "all gates passed"
         };
       }
-      await transitionToFailed(task, gateResult.gate, gateResult.output, opts);
+      await transitionToFailedWithRecovery(task, gateResult.gate, gateResult, opts);
       await journalEntry(task, `Acceptance gate "${gateResult.gate}" failed`, opts);
       return { done: false, task, action: "acceptance-failed", details: `gate: ${gateResult.gate}` };
     }
@@ -941,7 +1059,12 @@ async function runCycle(bridge, pitfalls, gateConfig, opts) {
         await journalEntry(task, "Fix dispatched → Review", opts);
         return { done: false, task, action: "fix→review", details: "fix dispatched" };
       }
-      await transitionToFailed(task, "dispatch", "Fix dispatch failed", opts);
+      await transitionToFailedWithRecovery(task, "dispatch", {
+        exitCode: Number(result.exitCode ?? 1),
+        stdout: String(result.stdout ?? ""),
+        stderr: String(result.stderr ?? "Fix dispatch failed"),
+        output: "Fix dispatch failed"
+      }, opts);
       return { done: false, task, action: "fix-failed", details: "dispatch failed" };
     }
 
@@ -1232,7 +1355,7 @@ Options:
 `);
 }
 
-export { runLoop, readHumanBoard, loadUnresolvedPitfalls, injectPitfallContext, runGateSequence };
+export { runLoop, runCycle, readHumanBoard, loadUnresolvedPitfalls, injectPitfallContext, runGateSequence };
 export { extractHumanBoardAcknowledgments, appendHumanBoardAuditEntry };
 export {
   deriveCommitType,
@@ -1240,7 +1363,9 @@ export {
   buildCommitHeader,
   detectStopCondition,
   autoCommitTask,
-  finalizeDoneTaskCommit
+  finalizeDoneTaskCommit,
+  extractCreatedTaskId,
+  createReviewFixTasks
 };
 
 async function main() {

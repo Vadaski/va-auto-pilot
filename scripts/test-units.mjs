@@ -34,8 +34,12 @@ import {
   buildCommitHeader,
   detectStopCondition,
   autoCommitTask,
-  finalizeDoneTaskCommit
+  finalizeDoneTaskCommit,
+  runCycle,
+  extractCreatedTaskId
 } from "./auto-pilot-loop.mjs";
+import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
+import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
 
 // ---------------------------------------------------------------------------
 // Import pure functions from sprint-board via a thin re-export shim.
@@ -257,6 +261,117 @@ test("buildCommitHeader uses normalized scope and task title", () => {
 
   assert.equal(deriveCommitScope(task), "scripts-auto-pilot-loop");
   assert.equal(buildCommitHeader(task), "feat(scripts-auto-pilot-loop): Transform loop runner");
+});
+
+test("classifyFailure detects build, lint, test, review, and dispatch failures", () => {
+  assert.deepEqual(
+    classifyFailure(1, "Cannot find module foo", "", "build"),
+    { type: "build", severity: "fixable", pattern: "Cannot find module" }
+  );
+  assert.deepEqual(
+    classifyFailure(1, "ESLint: no-unused-vars", "", "format"),
+    { type: "lint", severity: "fixable", pattern: "format" }
+  );
+  assert.deepEqual(
+    classifyFailure(1, "AssertionError: boom", "", "test"),
+    { type: "test", severity: "fixable", pattern: "test" }
+  );
+  assert.deepEqual(
+    classifyFailure(1, "needs follow-up", "", "review"),
+    { type: "review", severity: "critical", pattern: "gate:review" }
+  );
+  assert.deepEqual(
+    classifyFailure(1, "process timeout while dispatching", "", "dispatch"),
+    { type: "dispatch", severity: "transient", pattern: "timeout" }
+  );
+});
+
+test("classifyFailure marks exit-0 stderr as transient lint noise", () => {
+  assert.deepEqual(
+    classifyFailure(0, "BIOME warning", "", "check"),
+    { type: "lint", severity: "transient", pattern: "stderr-with-exit-0" }
+  );
+});
+
+test("getRecoveryStrategy selects retry, escalation, fix-task, and stop states", () => {
+  assert.equal(
+    getRecoveryStrategy({ type: "dispatch", severity: "transient", pattern: "timeout" }, 1).action,
+    "retry-immediately"
+  );
+  const buildFix = getRecoveryStrategy({ type: "build", severity: "fixable", pattern: "Cannot find module" }, 1);
+  assert.equal(buildFix.action, "retry-with-fix");
+  assert.match(buildFix.fixPrompt ?? "", /Cannot find module/);
+  assert.equal(
+    getRecoveryStrategy({ type: "review", severity: "critical", pattern: "gate:review" }, 1).action,
+    "create-fix-task"
+  );
+  const escalated = getRecoveryStrategy({ type: "test", severity: "fixable", pattern: "FAIL" }, 2);
+  assert.equal(escalated.action, "escalate-model");
+  assert.equal(escalated.nextModel, "claude-opus-4-6");
+  assert.equal(
+    getRecoveryStrategy({ type: "unknown", severity: "critical", pattern: "oops" }, 3).action,
+    "stop"
+  );
+});
+
+test("parseReviewFindings extracts severities, files, lines, and blocking summary", () => {
+  const parsed = parseReviewFindings([
+    "[CRITICAL] Missing null check -- scripts/auto-pilot-loop.mjs:438",
+    "File: scripts/auto-pilot-loop.mjs:438",
+    "[BUG] Fatal race in dispatcher -- scripts/dispatch.mjs:7",
+    "[P0] Unsafe retry loop -- scripts/retry.mjs:9",
+    "[P1] Race condition in retry logic",
+    "File: scripts/lib/error-recovery.mjs:12",
+    "[P2] Missing regression test -- scripts/test-units.mjs:250",
+    "[WARNING] Journal entry is vague",
+    "STYLE Prefer tighter wording -- docs/todo/run-journal.md:9"
+  ].join("\n"));
+
+  assert.equal(parsed.findings.length, 7);
+  assert.deepEqual(parsed.summary, { critical: 3, p1: 1, p2: 1, warning: 1, style: 1 });
+  assert.equal(parsed.hasBlocking, true);
+  assert.equal(parsed.findings[0].file, "scripts/auto-pilot-loop.mjs");
+  assert.equal(parsed.findings[0].line, 438);
+  assert.equal(parsed.findings[1].severity, "CRITICAL");
+  assert.equal(parsed.findings[1].file, "scripts/dispatch.mjs");
+  assert.equal(parsed.findings[1].line, 7);
+  assert.equal(parsed.findings[2].severity, "CRITICAL");
+  assert.equal(parsed.findings[2].file, "scripts/retry.mjs");
+  assert.equal(parsed.findings[2].line, 9);
+  assert.equal(parsed.findings[3].file, "scripts/lib/error-recovery.mjs");
+  assert.equal(parsed.findings[3].line, 12);
+});
+
+test("createFixTasksFromFindings maps blocking review findings into sprint tasks", () => {
+  const tasks = createFixTasksFromFindings([
+    { severity: "CRITICAL", file: "a", line: 1, message: "Critical issue that must be fixed immediately" },
+    { severity: "P1", file: "b", line: 2, message: "Important issue that blocks approval" },
+    { severity: "P2", file: "c", line: 3, message: "Secondary issue that still needs tracking" },
+    { severity: "WARNING", file: "d", line: 4, message: "Non-blocking note" }
+  ], "AP-030");
+
+  assert.deepEqual(tasks, [
+    {
+      title: "Fix review finding: Critical issue that must be fixed immediately",
+      priority: "P0",
+      source: "review-fix:AP-030:CRITICAL"
+    },
+    {
+      title: "Fix review finding: Important issue that blocks approval",
+      priority: "P1",
+      source: "review-fix:AP-030:P1"
+    },
+    {
+      title: "Fix review finding: Secondary issue that still needs tracking",
+      priority: "P2",
+      source: "review-fix:AP-030:P2"
+    }
+  ]);
+});
+
+test("extractCreatedTaskId reads sprint-board add output", () => {
+  assert.equal(extractCreatedTaskId("Task added: AP-014\nState file: x\n"), "AP-014");
+  assert.equal(extractCreatedTaskId("no task"), null);
 });
 
 test("autoCommitTask commits all files changed relative to HEAD and leaves the tree clean", async () => {
@@ -483,6 +598,96 @@ test("finalizeDoneTaskCommit rolls a task back to Failed when git commit fails",
   assert.equal(task.completedAt, "");
   assert.equal(task.verification, "");
   assert.equal(state.tasks.filter((item) => item.state !== "Done").length, 1);
+});
+
+test("runCycle review failure creates fix tasks for blocking review findings", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-review-fix-loop-"));
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(repoDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
+  const humanBoardFile = path.join(repoDir, "docs", "todo", "human-board.md");
+  const configFile = path.join(repoDir, ".va-auto-pilot", "config.yaml");
+  const reviewScript = path.join(repoDir, "review-fail.mjs");
+
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    updatedAt: "2026-03-29T00:00:00.000Z",
+    tasks: [
+      {
+        id: "AP-030",
+        title: "Structured review pipeline",
+        priority: "P1",
+        state: "Review",
+        failCount: 0,
+        dependsOn: [],
+        review: { implementer: "", security: "", qa: "", domain: "", architect: "" }
+      }
+    ]
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint Board\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+  fs.writeFileSync(humanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(configFile, `qualityGate:\n  reviewCommand: "node ${reviewScript}"\n`, "utf8");
+  fs.writeFileSync(reviewScript, [
+    "process.stderr.write(" + JSON.stringify([
+      "[CRITICAL] Missing rollback guard -- scripts/auto-pilot-loop.mjs:720",
+      "[P1] Missing fix-task regression path -- scripts/test-units.mjs:1",
+      "[P2] Missing follow-up coverage -- scripts/test-cli-flows.mjs:11",
+      "[WARNING] Nice to tighten log wording"
+    ].join("\n")) + ");",
+    "process.exit(1);"
+  ].join("\n"), "utf8");
+
+  const previousCwd = process.cwd();
+  process.chdir(repoDir);
+
+  try {
+    const result = await runCycle(
+      { dispatch: async () => ({ success: false }) },
+      [],
+      { reviewCommand: `node ${reviewScript}` },
+      {
+        maxCycles: 1,
+        maxParallel: 1,
+        agentTemplate: "claude --task {taskId}",
+        dryRun: false,
+        singleCycle: true,
+        noCommit: true,
+        noColony: true,
+        trackTimeout: 10_000,
+        json: true,
+        strict: false,
+        stateFile,
+        boardFile,
+        journalFile,
+        pitfallsFile: path.join(repoDir, ".va-auto-pilot", "pitfalls.json"),
+        workDir: repoDir,
+        taskBaselines: new Map()
+      }
+    );
+
+    assert.equal(result.action, "review-failed");
+
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    const failedTask = state.tasks.find((task) => task.id === "AP-030");
+    assert.equal(failedTask.state, "Failed");
+    assert.equal(failedTask.failCount, 1);
+    assert.deepEqual(failedTask.dependsOn, ["AP-031", "AP-032", "AP-033"]);
+
+    const fixTasks = state.tasks.filter((task) => task.id !== "AP-030");
+    assert.equal(fixTasks.length, 3);
+    assert.deepEqual(fixTasks.map((task) => task.priority), ["P0", "P1", "P2"]);
+    assert.ok(fixTasks.every((task) => String(task.source).startsWith("review-fix:AP-030:")));
+
+    const journal = fs.readFileSync(journalFile, "utf8");
+    assert.match(journal, /Failure classified: type=review/);
+    assert.match(journal, /Review failed with 3 blocking findings\. Creating fix tasks\./);
+    assert.match(journal, /Created review fix tasks: AP-031, AP-032, AP-033/);
+  } finally {
+    process.chdir(previousCwd);
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -429,6 +429,20 @@ async function runGateSequence(gateConfig, opts) {
       log(opts, `  [dry-run] would run gate "${gate.name}": ${gate.cmd}`);
       continue;
     }
+
+    if (gate.name === "review" && isCodexReviewCommand(gate.cmd)) {
+      const result = await runPitfallAwareReviewGate(gate, opts);
+      if (result.passed) {
+        log(opts, `  gate "${gate.name}" PASSED`);
+      } else {
+        log(opts, `  gate "${gate.name}" FAILED`);
+      }
+      if (!result.passed) {
+        return result;
+      }
+      continue;
+    }
+
     log(opts, `  running gate "${gate.name}": ${gate.cmd}`);
     try {
       await execFileAsync(
@@ -453,6 +467,108 @@ async function runGateSequence(gateConfig, opts) {
   }
 
   return { passed: true, gate: "", output: "", exitCode: 0, stdout: "", stderr: "" };
+}
+
+function isCodexReviewCommand(command) {
+  return /^codex\s+review\b/.test(String(command ?? "").trim());
+}
+
+async function collectReviewGateDiff(opts) {
+  const changedFiles = [...await listChangedFiles(opts)];
+  const trackedDiff = (await git(["diff", "--binary", "HEAD"], opts)).stdout;
+  let untrackedDiff = "";
+
+  for (const file of changedFiles) {
+    const absolutePath = path.join(opts.workDir ?? process.cwd(), file);
+    if (!fs.existsSync(absolutePath)) continue;
+    if (trackedDiff.includes(`+++ b/${file}`)) continue;
+    const content = fs.readFileSync(absolutePath, "utf8");
+    untrackedDiff += `\n--- /dev/null\n+++ b/${file}\n@@\n+${content.split(/\r?\n/).join("\n+")}\n`;
+  }
+
+  return {
+    changedFiles,
+    diff: [trackedDiff, untrackedDiff].filter(Boolean).join("\n")
+  };
+}
+
+function formatPitfallsForReview(pitfalls) {
+  if (!Array.isArray(pitfalls) || pitfalls.length === 0) {
+    return "- none";
+  }
+
+  return pitfalls.map((pitfall, index) => {
+    const id = pitfall.id ?? `PF-${index + 1}`;
+    const failureType = pitfall.failureType ?? "review";
+    const attempted = pitfall.attempted ?? "";
+    const hypothesis = pitfall.hypothesis ?? "";
+    const missingContext = pitfall.missingContext ? ` | missing context: ${pitfall.missingContext}` : "";
+    return `${index + 1}. [${id}] ${failureType} | attempted: ${attempted} | hypothesis: ${hypothesis}${missingContext}`;
+  }).join("\n");
+}
+
+async function runPitfallAwareReviewGate(gate, opts) {
+  const pitfalls = await loadUnresolvedPitfalls(opts);
+  const diffBundle = await collectReviewGateDiff(opts);
+  const pitfallCount = pitfalls.length;
+  log(opts, `  review gate context: injected ${pitfallCount} unresolved pitfall(s)`);
+
+  const prompt = [
+    "You are a read-only code review gate.",
+    "You must review the current uncommitted diff using the project's unresolved pitfall history as extra context.",
+    "Treat each pitfall as a regression pattern to actively probe for.",
+    "Return plain text only.",
+    "First line must be exactly: REVIEW STATUS: PASS or REVIEW STATUS: FAIL",
+    "Then emit one finding per line using this format:",
+    "[CRITICAL|P1|P2|WARNING] concise finding -- relative/path/to/file:line",
+    "If there are no findings, emit no extra lines after REVIEW STATUS: PASS.",
+    "",
+    "Unresolved pitfalls:",
+    formatPitfallsForReview(pitfalls),
+    "",
+    "Changed files:",
+    diffBundle.changedFiles.length > 0 ? diffBundle.changedFiles.map((file) => `- ${file}`).join("\n") : "- none",
+    "",
+    "Git diff:",
+    diffBundle.diff || "(no diff)"
+  ].join("\n");
+
+  let output = "";
+  try {
+    if (typeof opts.reviewGateRunner === "function") {
+      const result = await opts.reviewGateRunner(prompt, { gate, pitfalls, diffBundle }, opts);
+      output = String(result.stdout ?? result.output ?? "");
+    } else {
+      const result = await execFileAsync("codex", [
+        "exec",
+        "--sandbox", "read-only",
+        "-C", opts.workDir ?? process.cwd(),
+        prompt
+      ], {
+        encoding: "utf8",
+        cwd: opts.workDir ?? process.cwd(),
+        timeout: 120_000
+      });
+      output = String(result.stdout ?? result.output ?? "");
+    }
+  } catch (error) {
+    output = String(error.stdout ?? error.stderr ?? error.message ?? "");
+  }
+
+  const findings = parseReviewFindings(output);
+  const statusLine = /^\s*REVIEW STATUS:\s*(PASS|FAIL)\s*$/im.exec(output);
+  const passed = statusLine
+    ? statusLine[1] === "PASS" && !findings.hasBlocking
+    : !findings.hasBlocking && output.trim().length > 0;
+
+  return {
+    passed,
+    gate: gate.name,
+    output,
+    exitCode: passed ? 0 : 1,
+    stdout: output,
+    stderr: passed ? "" : output
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1276,6 +1392,36 @@ function extractReviewerReport(raw) {
   };
 }
 
+function selectSprintReviewPerspective(diffBundle) {
+  const changedFiles = Array.isArray(diffBundle?.changedFiles)
+    ? diffBundle.changedFiles.map((file) => String(file ?? ""))
+    : [];
+  const diffText = String(diffBundle?.diff ?? "");
+  const haystack = `${changedFiles.join("\n")}\n${diffText}`;
+
+  if (/(auth|token|credential|secret|apikey|api[_-]?key|bearer)/i.test(haystack)) {
+    return "a security engineer doing a post-incident review after a credentials leak";
+  }
+
+  if (changedFiles.some((file) => /(^|\/)(docs\/operations\/va-auto-pilot-protocol\.md|templates\/docs\/operations\/va-auto-pilot-protocol\.md|README(?:\.zh)?\.md)$/.test(file))) {
+    return "an adopter who built a tool on top of this protocol and just had a dependency break without warning";
+  }
+
+  if (changedFiles.some((file) => /(^|\/)(scripts|bin)\//.test(file)) || changedFiles.some((file) => /(^|\/)package\.json$/.test(file))) {
+    return "a developer who will automate this command in a CI pipeline and has been burned by silent failures before";
+  }
+
+  if (changedFiles.some((file) => /(^|\/)(tests?|__tests__|spec|\.test\.|\.spec\.)/i.test(file))) {
+    return "a QA engineer verifying test coverage catches real regressions, not just happy paths";
+  }
+
+  if (changedFiles.some((file) => /(^|\/)(docs|website)\//.test(file))) {
+    return "a new team member following these instructions on their first day, with no existing context to fill gaps";
+  }
+
+  return "an adversarial regression reviewer probing for hidden breakage, unsafe assumptions, and missing follow-up work";
+}
+
 async function collectSprintDiff(opts) {
   const state = readSprintState(opts.stateFile);
   let baseCommit = String(state.sprintStartCommit ?? "").trim();
@@ -1315,11 +1461,12 @@ async function collectSprintDiff(opts) {
   return { baseCommit, changedFiles, diff };
 }
 
-async function spawnSprintReviewer(diffBundle, opts) {
+async function spawnSprintReviewer(diffBundle, perspective = "an adversarial regression reviewer probing for hidden breakage, unsafe assumptions, and missing follow-up work", opts) {
   const prompt = [
     "You are an isolated sprint completion reviewer.",
     "You only know the changed file list and git diff below. You do not know run-journal history or sprint context.",
-    "Review from an adversarial regression perspective: hidden breakage, unsafe assumptions, missing gates, and incomplete follow-up work.",
+    `Review from this specific stakeholder-grounded perspective: ${perspective}.`,
+    "Attack the change from that stake: hidden breakage, unsafe assumptions, missing gates, and incomplete follow-up work that would materially hurt this stakeholder.",
     'Return strict JSON: {"status":"PASS|WARNING|CRITICAL","perspective":"...","findings":[{"severity":"CRITICAL|WARNING","title":"...","detail":"...","suggestedTaskTitle":"..."}]}',
     "",
     `Base commit: ${diffBundle.baseCommit || "(unknown)"}`,
@@ -1331,7 +1478,7 @@ async function spawnSprintReviewer(diffBundle, opts) {
   ].join("\n");
 
   if (typeof opts.sprintReviewerRunner === "function") {
-    return opts.sprintReviewerRunner(prompt, diffBundle, opts);
+    return opts.sprintReviewerRunner(prompt, diffBundle, perspective, opts);
   }
 
   return execFileAsync("codex", [
@@ -1356,19 +1503,21 @@ async function handleSprintCompletionReview(opts) {
     return { cleared: true, action: "sprint-complete", details: "Sprint complete; no changes to review." };
   }
 
+  const selectedPerspective = selectSprintReviewPerspective(diffBundle);
   let reviewerOutput = "";
   try {
-    const reviewerResult = await spawnSprintReviewer(diffBundle, opts);
+    const reviewerResult = await spawnSprintReviewer(diffBundle, selectedPerspective, opts);
     reviewerOutput = String(reviewerResult.stdout ?? reviewerResult.output ?? "");
   } catch (error) {
     reviewerOutput = String(error.stdout ?? error.stderr ?? error.message ?? "");
   }
 
   const report = extractReviewerReport(reviewerOutput);
-  await journalEntry({ id: "sprint-review" }, `Sprint completion review result: ${report.status}`, opts, {
+  const actualPerspective = report.perspective || selectedPerspective;
+  await journalEntry({ id: "sprint-review" }, `Sprint completion review result: ${report.status} | perspective: ${actualPerspective}`, opts, {
     taskId: "sprint-review",
     files: diffBundle.changedFiles,
-    signals: [`sprint-review:${report.status}`]
+    signals: [`sprint-review:${report.status}`, `sprint-review-perspective:${actualPerspective}`]
   });
 
   if (report.status !== "CRITICAL") {
@@ -1698,7 +1847,9 @@ export {
   createReviewFixTasks,
   executeSingleTask,
   handleSprintCompletionReview,
-  extractReviewerReport
+  extractReviewerReport,
+  selectSprintReviewPerspective,
+  selectSprintReviewPerspective as derivePerspective
 };
 
 async function main() {

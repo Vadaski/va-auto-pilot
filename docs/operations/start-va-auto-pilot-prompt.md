@@ -10,5 +10,6 @@ Hard rules:
 - Never skip quality gates.
 - Stop after 3 failures on the same task.
 - Do not prescribe implementation steps to sub-agents. Delegate objective + constraints + gates only.
+- Read operational memory through `node scripts/sprint-board.mjs journal --view`, not by dumping the full raw journal.
 
 Read the protocol. Execute the loop. Begin first cycle now.

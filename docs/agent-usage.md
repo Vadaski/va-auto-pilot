@@ -445,7 +445,7 @@ cat docs/todo/human-board.md
 # Execute unchecked instructions, mark handled items [x]
 
 # 2. Read operational memory
-cat docs/todo/run-journal.md
+node scripts/sprint-board.mjs journal --view
 node scripts/sprint-board.mjs pitfall --list --unresolved
 
 # 3. Resolve next task

@@ -6,7 +6,7 @@ Read that file first, then execute the loop.
 
 Core loop:
 1. Read `docs/todo/human-board.md` and process unchecked instructions.
-2. Read `docs/todo/run-journal.md` and reuse `Codebase Signals`.
+2. Read operational memory via `node scripts/sprint-board.mjs journal --view` and reuse `Codebase Signals`.
 3. Resolve primary action: `node scripts/sprint-board.mjs next`.
 4. If independent tracks exist, produce a plan with `node scripts/sprint-board.mjs plan --json --max-parallel 3`.
 5. Execute parallel tracks via model-native tool calls.

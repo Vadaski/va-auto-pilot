@@ -78,11 +78,42 @@
 
   委派对象：Codex CLI（Task A 在 va-auto-pilot 仓，Task B 在 va-hub 仓，Task C 在 va-project 仓 — 三者可并行）。
 
-## [ ] **Sprint Complete — 新 Sprint 方向待定（2026-03-25）**
+- [ ] **Sprint 5：Harness 优化（源自 Anthropic 长运行 Agent 工程博客分析）**
 
-Sprint 24 tasks Done，Backlog 清零。待解决：
-- PF-001/002/003（CLI-Anything artifact验证/硬依赖/禁止静默降级）仍 unresolved
-- 新 Sprint 方向由瓦决定，请在此写入 Instructions
+  基于 Anthropic 两篇工程博客（Effective Harnesses for Long-Running Agents + Harness Design for Long-Running Apps）的核心洞察，经四视角交叉分析确认的优化方向。按优先级排列：
+
+  **Task 1（P1）— Journal 分层视图**
+  run-journal.md 是 append-only，随 sprint 增长会稀释关键信息。新 session 全量读 journal 成本递增。
+  - 给 `sprint-board.mjs` 新增 `journal --view` 子命令，生成分层摘要：Active Signals（聚合全部 Codebase Signals）+ Recent（最近 5 条完整条目）+ Earlier（每条压缩为一行 task-id + summary）
+  - 原始 journal 保持 append-only 不动，审计完整性不受影响
+  - 协议 `docs/operations/va-auto-pilot-protocol.md` Operational Memory Contract 中 `cat docs/todo/run-journal.md` 改为 `node scripts/sprint-board.mjs journal --view`
+  - 验收：`node scripts/sprint-board.mjs journal --view` 输出分层结构且行数 < 原始 journal 50%；原始 journal 内容不变；现有测试全绿
+
+  **Task 2（P1）— Sprint Review Perspective 动态化**
+  当前 `spawnSprintReviewer()` 的 perspective 硬编码为 "adversarial regression perspective"，违反协议自身设计（要求 manager 根据 diff 内容动态选择 stakeholder-grounded perspective）。
+  - 给 `spawnSprintReviewer()` 增加 `perspective` 参数，默认仍为当前行为
+  - 在 `handleSprintCompletionReview()` 中，调用 reviewer 前先分析 `diffBundle.changedFiles` 的变更范围（CLI/auth/protocol/docs 等），生成具体 perspective 描述传入
+  - perspective 选择逻辑参考协议 Sprint Completion Gate → Perspective Assignment 章节的示例模式
+  - 验收：perspective 不再是硬编码字符串；journal 中记录实际使用的 perspective；现有测试全绿
+
+  **Task 3（P2）— 协议 Quality Gates 示例瘦身**
+  协议 767 行中 Quality Gates section 包含 4 个具体技术栈示例（Godot/Python/Mixed/Godot validation script），占 ~150 行，对非匹配项目是纯噪音。
+  - 将 4 个具体示例（Example: Godot Project、Example: Python Project、Example: Mixed Project、Creating a Godot Validation Script）移到 `docs/operations/quality-gate-examples.md`
+  - 协议主文件保留：Gate Configuration 格式说明 + TypeScript 默认示例 + Gate Semantics + Adaptive Quality Gates + Gate Resolution，并加一行指针 "See docs/operations/quality-gate-examples.md for more stack-specific examples"
+  - 模板目录 `templates/docs/operations/` 同步
+  - 验收：协议主文件行数减少 ≥100 行；`npm run check:all` 全绿；quality-gate-examples.md 内容完整
+
+  **Task 4（P2）— Evaluator Pitfall 注入**
+  codex review 是通用 review，未利用项目历史失败知识。将 pitfalls.json 中的未解决条目自动注入 review 上下文。
+  - 在 `runGateSequence()` 的 review gate 执行前，读取 `pitfalls.json` 中未解决条目
+  - 如果 codex review CLI 支持附加上下文（检查 `codex review --help`），则注入；否则改用 `codex exec --sandbox read-only` + 自定义 review prompt（包含 diff + pitfall 列表 + review 指令）
+  - 验收：review gate 执行时日志显示注入了 N 条 pitfall 上下文（或日志说明 0 条可注入）；现有测试全绿
+
+  **全局约束**：
+  - 每个 Task 独立闭环，完成一个 review + commit 一个，不堆积
+  - 质量门严格执行：`npm run check:all` + `codex review --uncommitted`
+  - Do NOT run `codex review` inside the execution session（防递归）
+  - 不改动与任务无关的代码
 
 ---
 

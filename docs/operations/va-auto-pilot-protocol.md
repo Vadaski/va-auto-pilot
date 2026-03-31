@@ -59,7 +59,7 @@ Never delete human-written content.
 
 At the start of each cycle:
 
-1. Read `docs/todo/run-journal.md`.
+1. Read operational memory via `node scripts/sprint-board.mjs journal --view`.
 2. Query pitfalls via `node scripts/sprint-board.mjs pitfall --list --unresolved` — identify unresolved entries relevant to the current task (by task ID match, failure type, or keyword overlap). Inject matching unresolved pitfalls into delegation prompts under **Hard constraints**.
 3. Check `Codebase Signals` first.
 4. Reuse existing signals before inventing new conventions.
@@ -75,7 +75,7 @@ cat docs/todo/human-board.md
 # -> unhandled instructions? execute now, then mark [x]
 
 # 2. Operational memory
-cat docs/todo/run-journal.md
+node scripts/sprint-board.mjs journal --view
 node scripts/sprint-board.mjs pitfall --list --unresolved
 
 # 3. Resolve next task

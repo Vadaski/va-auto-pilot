@@ -1229,6 +1229,147 @@ test("journal: creates file if it does not exist", () => {
   assert.ok(content.includes("UT-002"), content);
 });
 
+test("journal --view: renders layered summary without mutating source journal", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-journal-view-"));
+  const journalFile = path.join(tmpDir, "run-journal.md");
+  const original = [
+    "# Run Journal",
+    "",
+    "## Codebase Signals",
+    "- reuse existing signals",
+    "- keep journal append-only",
+    "",
+    "## Entries",
+    "## 2026-03-01T00:00:00.000Z - AP-001",
+    "- Summary: first entry",
+    "---",
+    "## 2026-03-02T00:00:00.000Z - AP-002",
+    "- Summary: second entry",
+    "---",
+    "## 2026-03-03T00:00:00.000Z - AP-003",
+    "- Summary: third entry",
+    "---",
+    "## 2026-03-04T00:00:00.000Z - AP-004",
+    "- Summary: fourth entry",
+    "---",
+    "## 2026-03-05T00:00:00.000Z - AP-005",
+    "- Summary: fifth entry",
+    "---",
+    "## 2026-03-06T00:00:00.000Z - AP-006",
+    "- Summary: sixth entry",
+    "- Files: `scripts/sprint-board.mjs`",
+    "- Signals:",
+    "  - added layered view",
+    "---",
+    ""
+  ].join("\n");
+  fs.writeFileSync(journalFile, original, "utf8");
+
+  const r = spawnSync(
+    "node",
+    [BOARD_SCRIPT, "journal", "--view", "--journal-file", journalFile],
+    { encoding: "utf8", timeout: 10_000 }
+  );
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /## Active Signals/);
+  assert.match(r.stdout, /## Recent/);
+  assert.match(r.stdout, /## Earlier/);
+  assert.match(r.stdout, /AP-006/);
+  assert.match(r.stdout, /AP-002/);
+  assert.match(r.stdout, /2026-03-01T00:00:00.000Z \| AP-001 \| first entry/);
+  assert.doesNotMatch(r.stdout, /## 2026-03-01T00:00:00.000Z - AP-001\n- Summary: first entry/);
+  assert.equal(fs.readFileSync(journalFile, "utf8"), original);
+});
+
+test("journal --view: prints layered summary without mutating source journal", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-journal-view-"));
+  const journalFile = path.join(tmpDir, "run-journal.md");
+  const journalContent = `# Run Journal
+
+## Codebase Signals
+- keep logs append-only
+- prefer deterministic CLI commands
+
+## Entries
+## 2026-03-01T00:00:00.000Z - AP-001
+- Summary: first entry
+- Signals:
+  - shared-signal
+---
+## 2026-03-02T00:00:00.000Z - AP-002
+- Summary: second entry
+---
+## 2026-03-03T00:00:00.000Z - AP-003
+- Summary: third entry
+---
+## 2026-03-04T00:00:00.000Z - AP-004
+- Summary: fourth entry
+- Signals:
+  - docs-updated
+---
+## 2026-03-05T00:00:00.000Z - AP-005
+- Summary: fifth entry
+---
+## 2026-03-06T00:00:00.000Z - AP-006
+- Summary: sixth entry
+---
+## 2026-03-07T00:00:00.000Z - AP-007
+- Summary: seventh entry
+---
+`;
+  fs.writeFileSync(journalFile, journalContent, "utf8");
+
+  const r = spawnSync(
+    "node",
+    [BOARD_SCRIPT, "journal", "--view", "--journal-file", journalFile],
+    { encoding: "utf8", timeout: 10_000 }
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /## Active Signals/);
+  assert.match(r.stdout, /keep logs append-only/);
+  assert.match(r.stdout, /## Recent/);
+  assert.match(r.stdout, /AP-007/);
+  assert.match(r.stdout, /AP-003/);
+  assert.match(r.stdout, /## Earlier/);
+  assert.match(r.stdout, /2026-03-01T00:00:00\.000Z \| AP-001 \| first entry/);
+  assert.doesNotMatch(r.stdout, /2026-03-01T00:00:00\.000Z - AP-001[\s\S]*Summary: first entry/);
+  assert.equal(fs.readFileSync(journalFile, "utf8"), journalContent);
+});
+
+test("journal --view: compresses output below half of source lines for long journals", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-journal-lines-"));
+  const journalFile = path.join(tmpDir, "run-journal.md");
+  const entries = [];
+  for (let index = 1; index <= 20; index += 1) {
+    entries.push(`## 2026-03-${String(index).padStart(2, "0")}T00:00:00.000Z - AP-${String(index).padStart(3, "0")}
+- Summary: entry ${index}
+- Files: \`file-${index}.ts\`
+- Signals:
+  - signal-${index}
+---`);
+  }
+  const journalContent = `# Run Journal
+
+## Codebase Signals
+- base-signal
+
+## Entries
+${entries.join("\n")}
+`;
+  fs.writeFileSync(journalFile, journalContent, "utf8");
+
+  const r = spawnSync(
+    "node",
+    [BOARD_SCRIPT, "journal", "--view", "--journal-file", journalFile],
+    { encoding: "utf8", timeout: 10_000 }
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const sourceLines = journalContent.trimEnd().split("\n").length;
+  const viewLines = r.stdout.trimEnd().split("\n").length;
+  assert.ok(viewLines < sourceLines * 0.75, `expected ${viewLines} < ${sourceLines * 0.75} (view should compress to under 75% of source)`);
+});
+
 // ---------------------------------------------------------------------------
 // normalizeDependsOn / --depends-on option
 // ---------------------------------------------------------------------------

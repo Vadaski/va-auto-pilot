@@ -62,6 +62,88 @@ flows:
         - stdout_contains: ["Journal updated"]
       should: []
 
+  - name: "journal: layered view"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        journal="$tmpdir/run-journal.md"
+        cat > "$journal" <<'EOF'
+        # Run Journal
+
+        ## Codebase Signals
+        - signal one
+
+        ## Entries
+        ## 2026-03-01T00:00:00.000Z - AP-001
+        - Summary: first
+        ---
+        ## 2026-03-02T00:00:00.000Z - AP-002
+        - Summary: second
+        ---
+        ## 2026-03-03T00:00:00.000Z - AP-003
+        - Summary: third
+        ---
+        ## 2026-03-04T00:00:00.000Z - AP-004
+        - Summary: fourth
+        ---
+        ## 2026-03-05T00:00:00.000Z - AP-005
+        - Summary: fifth
+        ---
+        ## 2026-03-06T00:00:00.000Z - AP-006
+        - Summary: sixth
+        ---
+        EOF
+        node scripts/sprint-board.mjs journal --view --journal-file "$journal"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["## Active Signals", "## Recent", "## Earlier", "AP-001 | first"]
+      should: []
+
+  - name: "journal --view: prints layered summary"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        journal="$tmpdir/run-journal.md"
+        cat > "$journal" <<'EOF'
+        # Run Journal
+
+        ## Codebase Signals
+        - durable-signal
+
+        ## Entries
+        ## 2026-03-01T00:00:00.000Z - AP-001
+        - Summary: first
+        ---
+        ## 2026-03-02T00:00:00.000Z - AP-002
+        - Summary: second
+        ---
+        ## 2026-03-03T00:00:00.000Z - AP-003
+        - Summary: third
+        ---
+        ## 2026-03-04T00:00:00.000Z - AP-004
+        - Summary: fourth
+        ---
+        ## 2026-03-05T00:00:00.000Z - AP-005
+        - Summary: fifth
+        ---
+        ## 2026-03-06T00:00:00.000Z - AP-006
+        - Summary: sixth
+        ---
+        EOF
+        node scripts/sprint-board.mjs journal --view --journal-file "$journal"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["Run Journal View", "Active Signals", "Recent", "Earlier", "durable-signal"]
+      should: []
+
   - name: "next: returns next actionable task"
     command: "bash"
     args:

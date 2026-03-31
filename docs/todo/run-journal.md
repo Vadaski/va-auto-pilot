@@ -145,3 +145,22 @@
 ## 2026-03-02T06:33:42.006Z - AP-019
 - Summary: Verified all quality gates: typecheck (tsc --noEmit, pass), lint (eslint, clean), test (164/164 pass, node --test), codex-review (configured as 'codex review --uncommitted', CLI binary exists at /opt/homebrew/bin/codex v0.106.0 but hits usage limit — gate is WIRED but BLOCKED by credits). build gate (npm run check:all) passes all sub-gates. Codex-review is NOT auto-invoked by sprint-board.mjs; it is documented in config.yaml and protocol.md as a manual step the agent must run.
 ---
+
+## 2026-03-31T04:25:19.926Z - AP-034
+- Summary: Implemented layered journal view via journal --view; added CLI/unit coverage; protocol now reads journal through the view command. npm run check:all passed. Awaiting external review gate before commit.
+- Files: `scripts/sprint-board.mjs`, `scripts/test-units.mjs`, `test-flows/sprint-board-cli.yaml`, `docs/operations/va-auto-pilot-protocol.md`, `templates/docs/operations/va-auto-pilot-protocol.md`, `templates/docs/operations/start-va-auto-pilot-prompt.md`, `.va-auto-pilot/sprint-state.json`, `docs/todo/sprint.md`
+- Signals:
+  - journal-view layered-summary
+  - operational-memory reads journal-view
+  - check-all passed
+  - external-review pending
+---
+
+## 2026-03-31T04:25:53.567Z - AP-034
+- Summary: Implemented layered journal view via journal --view. Updated protocol/prompt entry points to use the layered view. check:all passed; CLI view is 52 lines vs 147-line source journal.
+- Files: `scripts/sprint-board.mjs`, `scripts/test-units.mjs`, `test-flows/sprint-board-cli.yaml`, `docs/operations/va-auto-pilot-protocol.md`, `templates/docs/operations/va-auto-pilot-protocol.md`, `docs/operations/start-va-auto-pilot-prompt.md`, `templates/docs/operations/start-va-auto-pilot-prompt.md`, `docs/agent-usage.md`
+- Signals:
+  - journal-view
+  - operational-memory-layered
+  - external-review-pending
+---

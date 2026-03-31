@@ -86,6 +86,7 @@ Usage:
   node scripts/sprint-board.mjs add --title <text> --priority <P0|P1|P2|P3> [options]
   node scripts/sprint-board.mjs update --id <TASK-ID> [--state <state>] [options]
   node scripts/sprint-board.mjs journal --task <TASK-ID> --summary <text> [options]
+  node scripts/sprint-board.mjs journal --view [--journal-file <path>]
   node scripts/sprint-board.mjs pitfall --task <TASK-ID> --failure-type <gate|acceptance|review> --attempted <text> --hypothesis <text> [--missing-context <text>]
   node scripts/sprint-board.mjs pitfall --resolve <PF-ID> --resolution <text>
   node scripts/sprint-board.mjs pitfall --list [--unresolved] [--json]
@@ -120,6 +121,7 @@ Options (update):
   --missing-context <text>  Context that was absent and contributed to the failure
 
 Options (journal):
+  --view                      Print a layered read view of the journal
   --files <comma-separated paths>
   --signals <comma-separated signals>
 
@@ -821,6 +823,156 @@ function appendJournal(filePath, options) {
 }
 
 /**
+ * @param {string} content
+ * @returns {{ codebaseSignals: string[], entries: { heading: string, timestamp: string, taskId: string, summary: string, signals: string[], rawLines: string[] }[] }}
+ */
+function parseJournal(content) {
+  const lines = String(content ?? "").split(/\r?\n/);
+  const codebaseSignals = [];
+  const entries = [];
+  let inCodebaseSignals = false;
+  let inEntries = false;
+  /** @type {{ heading: string, timestamp: string, taskId: string, summary: string, signals: string[], rawLines: string[] } | null} */
+  let currentEntry = null;
+  let collectingEntrySignals = false;
+
+  const flushEntry = () => {
+    if (!currentEntry) return;
+    while (currentEntry.rawLines.length > 0 && currentEntry.rawLines.at(-1) === "") {
+      currentEntry.rawLines.pop();
+    }
+    entries.push(currentEntry);
+    currentEntry = null;
+    collectingEntrySignals = false;
+  };
+
+  for (const line of lines) {
+    if (line === "## Codebase Signals") {
+      flushEntry();
+      inCodebaseSignals = true;
+      inEntries = false;
+      continue;
+    }
+
+    if (line === "## Entries") {
+      flushEntry();
+      inCodebaseSignals = false;
+      inEntries = true;
+      continue;
+    }
+
+    const entryHeading = inEntries ? line.match(/^##\s+(.+?)\s+-\s+(.+)$/) : null;
+    if (entryHeading) {
+      flushEntry();
+      currentEntry = {
+        heading: line,
+        timestamp: entryHeading[1].trim(),
+        taskId: entryHeading[2].trim(),
+        summary: "",
+        signals: [],
+        rawLines: [line]
+      };
+      continue;
+    }
+
+    if (inCodebaseSignals) {
+      const signal = line.match(/^\-\s+(.*)$/);
+      if (signal) {
+        codebaseSignals.push(signal[1].trim());
+      }
+      continue;
+    }
+
+    if (!currentEntry) continue;
+    currentEntry.rawLines.push(line);
+
+    const summaryMatch = line.match(/^- Summary:\s+(.*)$/);
+    if (summaryMatch) {
+      currentEntry.summary = summaryMatch[1].trim();
+      collectingEntrySignals = false;
+      continue;
+    }
+
+    if (line === "- Signals:") {
+      collectingEntrySignals = true;
+      continue;
+    }
+
+    const nestedSignal = collectingEntrySignals ? line.match(/^\s+\-\s+(.*)$/) : null;
+    if (nestedSignal) {
+      currentEntry.signals.push(nestedSignal[1].trim());
+      continue;
+    }
+
+    collectingEntrySignals = false;
+
+    if (line === "---") {
+      flushEntry();
+    }
+  }
+
+  flushEntry();
+  return { codebaseSignals, entries };
+}
+
+/**
+ * @param {string} filePath
+ * @returns {string}
+ */
+function renderJournalView(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return `# Run Journal View\n\n## Active Signals\n- none\n\n## Recent\n- none\n\n## Earlier\n- none\n`;
+  }
+
+  const { codebaseSignals, entries } = parseJournal(fs.readFileSync(filePath, "utf8"));
+  const activeSignals = [];
+  const seenSignals = new Set();
+  for (const signal of [...codebaseSignals, ...entries.flatMap((entry) => entry.signals)]) {
+    const normalized = String(signal ?? "").trim();
+    if (!normalized || seenSignals.has(normalized)) continue;
+    seenSignals.add(normalized);
+    activeSignals.push(normalized);
+  }
+
+  const recentEntries = entries.slice(-5).reverse();
+  const earlierEntries = entries.slice(0, Math.max(0, entries.length - 5));
+
+  const lines = ["# Run Journal View", "", "## Active Signals"];
+  if (activeSignals.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const signal of activeSignals) {
+      lines.push(`- ${signal}`);
+    }
+  }
+
+  lines.push("", "## Recent");
+  if (recentEntries.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const entry of recentEntries) {
+      lines.push(...entry.rawLines);
+      lines.push("");
+    }
+    while (lines.at(-1) === "") {
+      lines.pop();
+    }
+  }
+
+  lines.push("", "## Earlier");
+  if (earlierEntries.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const entry of earlierEntries) {
+      lines.push(`- ${entry.timestamp} | ${entry.taskId} | ${entry.summary || "(no summary)"}`);
+    }
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
  * @param {SprintState} state
  * @param {string} pitfallsFile
  * @returns {void}
@@ -988,7 +1140,7 @@ function listPitfalls(pitfallsFile, options, flags) {
 
 function main() {
   const argv = process.argv.slice(2);
-  const parsed = parseArgv(argv, new Set(["json", "help", "reset-fail-count", "unresolved", "list", "strict"]));
+  const parsed = parseArgv(argv, new Set(["json", "help", "reset-fail-count", "unresolved", "list", "strict", "view"]));
 
   if (!parsed.command || parsed.flags.has("help") || parsed.command === "help") {
     printHelp();
@@ -1002,6 +1154,10 @@ function main() {
   const humanBoardFile = resolveHumanBoardPath(stateFile);
 
   if (parsed.command === "journal") {
+    if (parsed.flags.has("view")) {
+      process.stdout.write(renderJournalView(journalFile));
+      return;
+    }
     appendJournal(journalFile, parsed.options);
     console.log(`Journal updated: ${path.relative(process.cwd(), journalFile)}`);
     return;

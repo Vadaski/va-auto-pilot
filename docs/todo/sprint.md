@@ -1,6 +1,6 @@
 # Sprint Board
 
-> Last updated: 2026-03-29 by VA Auto-Pilot
+> Last updated: 2026-03-31 by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:
@@ -23,9 +23,6 @@
 | ID | Task | Owner | Started | Notes |
 |----|------|-------|---------|-------|
 | AP-004 | Add unit test suite for sprint-board.mjs pure functions | - | 2026-02-23 | - |
-| AP-031 | 自适应质量门：pitfall → suggest gate + 自动写入 quality-gates.yaml + 跨项目 gate 继承 | - | 2026-03-29 | - |
-| AP-032 | 默认并行执行：auto-pilot-loop 从单任务循环改为任务池循环，plan 命令输出自动执行 | - | 2026-03-29 | - |
-| AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | - | 2026-03-29 | - |
 
 ## Failed
 | ID | Task | Fail Count | Reason | Last Failed |
@@ -35,7 +32,7 @@
 ## Review
 | ID | Task | Implementer | Security | QA | Domain | Architect |
 |----|------|-------------|----------|----|--------|-----------|
-| - | - | - | - | - | - | - |
+| AP-034 | Sprint 5 Task 1: Add layered journal view via journal --view | - | - | - | - | - |
 
 ## Testing
 | ID | Task | Test Flow | MUST Pass Rate | SHOULD Pass Rate |
@@ -73,9 +70,14 @@
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
 | AP-023 | va-anima reflect: 去重（多 tag 条目在 reflect 中重复出现） | 2026-03-25 | fix: 三项记忆系统缺陷修复 commit 1b4eba2 — reflect 去重已修复，213 tests pass |
 | AP-024 | va-anima autoRecall: 双语 tag/triggerConditions 支持（中文 context 无法命中英文 trigger） | 2026-03-25 | fix: 三项记忆系统缺陷修复 commit 1b4eba2 — autoRecall 双语支持已修复，213 tests pass |
+| AP-031 | 自适应质量门：pitfall → suggest gate + 自动写入 quality-gates.yaml + 跨项目 gate 继承 | 2026-03-29 | - |
+| AP-032 | 默认并行执行：auto-pilot-loop 从单任务循环改为任务池循环，plan 命令输出自动执行 | 2026-03-29 | - |
 | AP-007 | Correct 'human-out-of-the-loop' framing to 'human-on-the-loop' across docs and website | 2026-02-23 | docs/human-on-the-loop.md created with updated framing; old file removed; README.md and README.zh.md references updated; all gates pass |
+| AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | 2026-03-29 | - |
 
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| - | - | - | - | - | - |
+| P1 | AP-035 | Sprint 5 Task 2: Make sprint completion review perspective dynamic | - | - | human-board Sprint 5 |
+| P2 | AP-036 | Sprint 5 Task 3: Move stack-specific quality gate examples out of protocol | - | - | human-board Sprint 5 |
+| P2 | AP-037 | Sprint 5 Task 4: Inject unresolved pitfalls into evaluator review context | - | - | human-board Sprint 5 |

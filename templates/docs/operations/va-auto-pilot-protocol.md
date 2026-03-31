@@ -58,8 +58,8 @@ Never delete human-written content.
 
 At the start of each cycle:
 
-1. Read `docs/todo/run-journal.md`.
-2. Read `.va-auto-pilot/pitfalls.json` — identify unresolved entries relevant to the current task (by task ID match, failure type, or keyword overlap). Inject matching unresolved pitfalls into delegation prompts under **Hard constraints**.
+1. Read operational memory via `node scripts/sprint-board.mjs journal --view`.
+2. Query pitfalls via `node scripts/sprint-board.mjs pitfall --list --unresolved` — identify unresolved entries relevant to the current task (by task ID match, failure type, or keyword overlap). Inject matching unresolved pitfalls into delegation prompts under **Hard constraints**.
 3. Check `Codebase Signals` first.
 4. Reuse existing signals before inventing new conventions.
 5. Append one execution entry at the end of each cycle.
@@ -68,19 +68,30 @@ At the start of each cycle:
 
 ## Decision Loop
 
-```
-Read human-board.md
-  -> unhandled instructions? execute now
-Read run-journal.md
-Resolve next task via CLI
-  -> node scripts/sprint-board.mjs next
-  -> optional: node scripts/sprint-board.mjs plan --json --max-parallel 3
-  -> has Failed task? fix + retest
-  -> has Testing task? run acceptance
-  -> has Review task? run review
-  -> has In Progress task? continue
-  -> has Backlog task? start highest priority
-  -> none? mark Sprint Complete and stop
+```bash
+# 1. Human board — always first
+cat docs/todo/human-board.md
+# -> unhandled instructions? execute now, then mark [x]
+
+# 2. Operational memory
+node scripts/sprint-board.mjs journal --view
+node scripts/sprint-board.mjs pitfall --list --unresolved
+
+# 3. Resolve next task
+node scripts/sprint-board.mjs next --json
+# -> returns task ID, state, and metadata
+
+# 4. Branch on task state:
+#    Failed     → fix root cause, re-run gates, advance or re-fail
+#    Testing    → npm run validate:distribution
+#    Review     → codex review --uncommitted
+#    In Progress → continue delegation
+#    Backlog    → start via Delegation Contract
+#    none       → node scripts/sprint-board.mjs summary → Sprint Complete, stop
+
+# 5. Optional parallel tracks
+node scripts/sprint-board.mjs plan --json --max-parallel 3
+# -> execute independent tracks via model-native tool calls
 ```
 
 ### Task Pick Strategy

@@ -36,10 +36,12 @@ import {
   autoCommitTask,
   finalizeDoneTaskCommit,
   runCycle,
+  runGateSequence,
   extractCreatedTaskId,
   executeSingleTask,
   handleSprintCompletionReview,
-  extractReviewerReport
+  extractReviewerReport,
+  selectSprintReviewPerspective
 } from "./auto-pilot-loop.mjs";
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
@@ -731,6 +733,59 @@ test("suggestGatesFromPitfalls filters resolved entries", () => {
   assert.equal(suggestions[0].required, false);
 });
 
+test("runGateSequence injects unresolved pitfalls into codex-backed review gate context", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-review-pitfalls-"));
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+  const workFile = path.join(repoDir, "scripts", "auto-pilot-loop.mjs");
+
+  fs.mkdirSync(path.dirname(pitfallsFile), { recursive: true });
+  fs.mkdirSync(path.dirname(workFile), { recursive: true });
+  fs.writeFileSync(pitfallsFile, JSON.stringify({
+    version: 1,
+    entries: [
+      {
+        id: "PF-007",
+        taskId: "AP-037",
+        failureType: "review",
+        attempted: "codex review --uncommitted",
+        hypothesis: "History-specific regressions were invisible to the generic reviewer",
+        missingContext: "pitfall guide was not injected",
+        resolution: "",
+        resolvedAt: null,
+        createdAt: "2026-03-31T00:00:00.000Z"
+      }
+    ]
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(workFile, "before\n", "utf8");
+
+  runGit(["init"], repoDir);
+  runGit(["config", "user.email", "test@example.com"], repoDir);
+  runGit(["config", "user.name", "Test User"], repoDir);
+  runGit(["add", "."], repoDir);
+  runGit(["commit", "-m", "initial"], repoDir);
+  fs.writeFileSync(workFile, "after\n", "utf8");
+
+  let capturedPrompt = "";
+  const gateResult = await runGateSequence(
+    { reviewCommand: "codex review --uncommitted" },
+    {
+      dryRun: false,
+      json: false,
+      workDir: repoDir,
+      pitfallsFile,
+      reviewGateRunner: async (prompt) => {
+        capturedPrompt = prompt;
+        return { stdout: "REVIEW STATUS: PASS\n" };
+      }
+    }
+  );
+
+  assert.equal(gateResult.passed, true);
+  assert.match(capturedPrompt, /Unresolved pitfalls:/);
+  assert.match(capturedPrompt, /\[PF-007\]/);
+  assert.match(capturedPrompt, /pitfall guide was not injected/);
+});
+
 test("extractReviewerReport parses JSON reviewer output", () => {
   const report = extractReviewerReport(JSON.stringify({
     status: "CRITICAL",
@@ -741,6 +796,30 @@ test("extractReviewerReport parses JSON reviewer output", () => {
   assert.equal(report.status, "CRITICAL");
   assert.equal(report.perspective, "regression");
   assert.equal(report.findings.length, 1);
+});
+
+test("selectSprintReviewPerspective chooses protocol adopter perspective for protocol diffs", () => {
+  const perspective = selectSprintReviewPerspective({
+    changedFiles: ["docs/operations/va-auto-pilot-protocol.md"],
+    diff: "@@ protocol change @@"
+  });
+
+  assert.equal(
+    perspective,
+    "an adopter who built a tool on top of this protocol and just had a dependency break without warning"
+  );
+});
+
+test("selectSprintReviewPerspective chooses CI operator perspective for CLI changes", () => {
+  const perspective = selectSprintReviewPerspective({
+    changedFiles: ["scripts/auto-pilot-loop.mjs", "package.json"],
+    diff: "@@ loop change @@"
+  });
+
+  assert.equal(
+    perspective,
+    "a developer who will automate this command in a CI pipeline and has been burned by silent failures before"
+  );
 });
 
 test("handleSprintCompletionReview creates backlog tasks for critical findings", async () => {
@@ -762,10 +841,11 @@ test("handleSprintCompletionReview creates backlog tasks for critical findings",
   runGit(["init"], repoDir);
   runGit(["config", "user.email", "test@example.com"], repoDir);
   runGit(["config", "user.name", "Test User"], repoDir);
-  fs.writeFileSync(path.join(repoDir, "reviewed.txt"), "before\n", "utf8");
+  fs.mkdirSync(path.join(repoDir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(repoDir, "scripts", "auto-pilot-loop.mjs"), "before\n", "utf8");
   runGit(["add", "."], repoDir);
   runGit(["commit", "-m", "initial"], repoDir);
-  fs.writeFileSync(path.join(repoDir, "reviewed.txt"), "after\n", "utf8");
+  fs.writeFileSync(path.join(repoDir, "scripts", "auto-pilot-loop.mjs"), "after\n", "utf8");
   const sprintStartCommit = runGit(["rev-parse", "HEAD"], repoDir);
   const seededState = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   seededState.sprintStartCommit = sprintStartCommit;
@@ -774,6 +854,7 @@ test("handleSprintCompletionReview creates backlog tasks for critical findings",
   const previousCwd = process.cwd();
   process.chdir(repoDir);
   try {
+    let capturedPerspective = "";
     const review = await handleSprintCompletionReview({
       dryRun: false,
       skipSprintReview: false,
@@ -785,25 +866,35 @@ test("handleSprintCompletionReview creates backlog tasks for critical findings",
       pitfallsFile: path.join(repoDir, ".va-auto-pilot", "pitfalls.json"),
       sprintBoardLock: Promise.resolve(),
       stateMutationLock: Promise.resolve(),
-      sprintReviewerRunner: async () => ({
-        stdout: JSON.stringify({
-          status: "CRITICAL",
-          findings: [
-            {
-              severity: "CRITICAL",
-              title: "Missing sprint follow-up",
-              suggestedTaskTitle: "Add sprint follow-up task"
-            }
-          ]
-        })
-      })
+      sprintReviewerRunner: async (_prompt, _diffBundle, perspective) => {
+        capturedPerspective = perspective;
+        return {
+          stdout: JSON.stringify({
+            status: "CRITICAL",
+            perspective,
+            findings: [
+              {
+                severity: "CRITICAL",
+                title: "Missing sprint follow-up",
+                suggestedTaskTitle: "Add sprint follow-up task"
+              }
+            ]
+          })
+        };
+      }
     });
 
     assert.equal(review.cleared, false);
+    assert.equal(
+      capturedPerspective,
+      "a developer who will automate this command in a CI pipeline and has been burned by silent failures before"
+    );
     const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
     assert.equal(state.tasks.length, 1);
     assert.equal(state.tasks[0].title, "Add sprint follow-up task");
     assert.equal(state.tasks[0].state, "Backlog");
+    const journal = fs.readFileSync(journalFile, "utf8");
+    assert.match(journal, /Sprint completion review result: CRITICAL \| perspective: a developer who will automate this command in a CI pipeline and has been burned by silent failures before/);
   } finally {
     process.chdir(previousCwd);
   }

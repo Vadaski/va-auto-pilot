@@ -278,6 +278,8 @@ Pass criteria:
 - MUST assertions: 100% pass
 - SHOULD assertions: >= 80% pass
 
+See [quality-gate-examples.md](./quality-gate-examples.md) for stack-specific examples (Godot, Python, mixed stacks, and a sample Godot validation script).
+
 ---
 
 ## Multi-Perspective Review

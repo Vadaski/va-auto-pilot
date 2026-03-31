@@ -85,7 +85,7 @@ node scripts/sprint-board.mjs next --json
 # 4. Branch on task state:
 #    Failed     → fix root cause, re-run gates, advance or re-fail
 #    Testing    → npm run validate:distribution
-#    Review     → codex review --uncommitted
+#    Review     → node scripts/sprint-board.mjs review
 #    In Progress → continue delegation
 #    Backlog    → start via Delegation Contract
 #    none       → node scripts/sprint-board.mjs summary → Sprint Complete, stop
@@ -260,8 +260,8 @@ node scripts/sprint-board.mjs pitfall --list --unresolved
 # Run project-specific quality gates (see Quality Gates section)
 # If .va-auto-pilot/quality-gates.yaml exists, run gates from there
 # Otherwise fall back to defaults based on project type detection
-# Example (TypeScript): npm run check:all && codex review --uncommitted
-# Example (Godot): godot --headless --script tests/validate_all_scripts.gd && codex review --uncommitted
+# Example (TypeScript): npm run check:all && node scripts/sprint-board.mjs review
+# Example (Godot): godot --headless --script tests/validate_all_scripts.gd && node scripts/sprint-board.mjs review
 node scripts/sprint-board.mjs update --id AP-XXX --state "Done"
 node scripts/sprint-board.mjs journal --task AP-XXX --summary "what changed and why"
 # on failure:
@@ -300,7 +300,7 @@ gates:
     required: true
     description: "Build and static quality check"
   review:
-    command: "codex review --uncommitted"
+    command: "node scripts/sprint-board.mjs review"
     required: true
     description: "Code review"
   acceptance:
@@ -317,7 +317,7 @@ gates:
     command: "npm run check:all"
     required: true
   review:
-    command: "codex review --uncommitted"
+    command: "node scripts/sprint-board.mjs review"
     required: true
   acceptance:
     command: "npm run validate:distribution"
@@ -331,7 +331,7 @@ See [quality-gate-examples.md](./quality-gate-examples.md) for stack-specific ex
 1. If `.va-auto-pilot/quality-gates.yaml` exists → use it
 2. If `package.json` exists with `check:all` script → use TypeScript defaults
 3. If `project.godot` exists → use Godot defaults
-4. Otherwise → only `codex review --uncommitted`
+4. Otherwise → only `node scripts/sprint-board.mjs review`
 
 ### Gate Semantics
 
@@ -349,7 +349,7 @@ The build gate verifies that all source code compiles/parses without errors. Thi
 #### Gate: Review (required)
 
 ```bash
-codex review --uncommitted
+node scripts/sprint-board.mjs review
 ```
 
 Review findings policy:

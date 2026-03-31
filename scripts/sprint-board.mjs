@@ -2,6 +2,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { stringify as stringifyYaml } from "yaml";
 import {
   nowIso,
@@ -15,6 +17,8 @@ import {
   readHumanBoardInstructions
 } from "./lib/human-board.mjs";
 import { VAPilotError } from "./lib/errors.mjs";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * @typedef {import("./lib/sprint-utils.mjs").Task} Task
@@ -90,6 +94,7 @@ Usage:
   node scripts/sprint-board.mjs pitfall --task <TASK-ID> --failure-type <gate|acceptance|review> --attempted <text> --hypothesis <text> [--missing-context <text>]
   node scripts/sprint-board.mjs pitfall --resolve <PF-ID> --resolution <text>
   node scripts/sprint-board.mjs pitfall --list [--unresolved] [--json]
+  node scripts/sprint-board.mjs review [--pitfalls-file <path>]
 
 Options (add):
   --title <text>            (required) Task title
@@ -1138,6 +1143,167 @@ function listPitfalls(pitfallsFile, options, flags) {
   return entries;
 }
 
+// ---------------------------------------------------------------------------
+// Review command
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive a review perspective from changed file patterns.
+ * Simplified version of selectSprintReviewPerspective from auto-pilot-loop.mjs.
+ * @param {string[]} changedFiles
+ * @returns {string}
+ */
+function deriveReviewPerspective(changedFiles) {
+  const haystack = changedFiles.join("\n");
+
+  if (changedFiles.some((f) => /(^|\/)(scripts|bin)\//.test(f)) || changedFiles.some((f) => /(^|\/)package\.json$/.test(f))) {
+    return "a developer who automates this CLI in CI pipelines";
+  }
+  if (/(auth|security|token|credential|secret|apikey|api[_-]?key|bearer)/i.test(haystack)) {
+    return "a security engineer doing post-incident review";
+  }
+  if (changedFiles.some((f) => /(protocol|spec|docs)/.test(f))) {
+    return "an adopter who built tooling on this protocol";
+  }
+  if (changedFiles.some((f) => /(^|\/)(tests?|__tests__|\.test\.|\.spec\.)/i.test(f))) {
+    return "a QA engineer verifying regression coverage";
+  }
+  return "an experienced engineer reviewing for correctness and maintainability";
+}
+
+/**
+ * Format pitfall entries for inclusion in a review prompt.
+ * @param {PitfallRecord[]} pitfalls
+ * @returns {string}
+ */
+function formatPitfallsForPrompt(pitfalls) {
+  if (!Array.isArray(pitfalls) || pitfalls.length === 0) {
+    return "- none";
+  }
+  return pitfalls.map((p) => {
+    const id = p.id ?? "PF-???";
+    return `- ${id} [${p.failureType}]: attempted: ${p.attempted} | hypothesis: ${p.hypothesis}${p.missingContext ? ` | missing context: ${p.missingContext}` : ""}`;
+  }).join("\n");
+}
+
+/**
+ * Build the review prompt with perspective, pitfalls, and diff.
+ * @param {object} params
+ * @param {string} params.perspective
+ * @param {PitfallRecord[]} params.pitfalls
+ * @param {string[]} params.changedFiles
+ * @param {string} params.diff
+ * @returns {string}
+ */
+function buildReviewPrompt({ perspective, pitfalls, changedFiles, diff }) {
+  return [
+    "You are a code reviewer.",
+    `Review from this perspective: ${perspective}`,
+    "",
+    "Known failure patterns to watch for:",
+    formatPitfallsForPrompt(pitfalls),
+    "",
+    "Changed files:",
+    changedFiles.length > 0 ? changedFiles.map((f) => `- ${f}`).join("\n") : "- none",
+    "",
+    "Diff:",
+    diff || "(no diff)",
+    "",
+    "Return structured findings using this format:",
+    "First line: REVIEW STATUS: PASS or REVIEW STATUS: FAIL",
+    "Then one finding per line:",
+    "[CRITICAL|P1|P2|STYLE] concise finding -- relative/path/to/file:line",
+    "If there are no findings, emit no extra lines after REVIEW STATUS: PASS."
+  ].join("\n");
+}
+
+/**
+ * Run the review subcommand: gather context, build prompt, execute codex review.
+ * @param {string} pitfallsFile
+ * @param {object} [options]
+ * @param {function} [options.execRunner] - Override for codex exec (testing)
+ * @returns {Promise<void>}
+ */
+async function runReviewCommand(pitfallsFile, options) {
+  const execRunner = options?.execRunner;
+  const workDir = process.cwd();
+
+  // 1. Read unresolved pitfalls
+  const data = readPitfalls(pitfallsFile);
+  const unresolvedPitfalls = data.entries.filter((e) => !e.resolvedAt);
+
+  // 2. Collect changed files
+  /** @param {string[]} args */
+  const gitExec = async (args) => {
+    const result = await execFileAsync("git", args, {
+      encoding: "utf8",
+      cwd: workDir,
+      timeout: 30_000
+    });
+    return String(result.stdout ?? "").trim();
+  };
+
+  let changedFiles = [];
+  try {
+    const tracked = await gitExec(["diff", "--name-only", "HEAD"]);
+    const untracked = await gitExec(["ls-files", "--others", "--exclude-standard"]);
+    changedFiles = [...new Set([
+      ...tracked.split("\n").filter(Boolean),
+      ...untracked.split("\n").filter(Boolean)
+    ])];
+  } catch {
+    // If git fails (e.g. no commits yet), proceed with empty list
+  }
+
+  // 3. Derive perspective
+  const perspective = deriveReviewPerspective(changedFiles);
+
+  // 4. Collect diff
+  let diff = "";
+  try {
+    diff = await gitExec(["diff", "HEAD"]);
+  } catch {
+    // no diff available
+  }
+
+  // 5. Build prompt
+  const prompt = buildReviewPrompt({
+    perspective,
+    pitfalls: unresolvedPitfalls,
+    changedFiles,
+    diff
+  });
+
+  // 6. Execute codex review
+  let output = "";
+  if (typeof execRunner === "function") {
+    const result = await execRunner(prompt);
+    output = String(result.stdout ?? result.output ?? "");
+  } else {
+    try {
+      const result = await execFileAsync("codex", [
+        "exec",
+        "--sandbox", "read-only",
+        "-C", workDir,
+        prompt
+      ], {
+        encoding: "utf8",
+        cwd: workDir,
+        timeout: 120_000
+      });
+      output = String(result.stdout ?? "");
+    } catch (error) {
+      output = String(error.stdout ?? error.stderr ?? error.message ?? "");
+    }
+  }
+
+  // 7. Print output
+  process.stdout.write(output);
+  if (output.length > 0 && !output.endsWith("\n")) {
+    process.stdout.write("\n");
+  }
+}
+
 function main() {
   const argv = process.argv.slice(2);
   const parsed = parseArgv(argv, new Set(["json", "help", "reset-fail-count", "unresolved", "list", "strict", "view"]));
@@ -1321,13 +1487,39 @@ function main() {
     return;
   }
 
+  if (parsed.command === "review") {
+    runReviewCommand(pitfallsFile).catch((err) => {
+      printCommandError(parsed.flags.has("json"), err instanceof Error ? err : new Error(String(err)));
+      process.exit(1);
+    });
+    return;
+  }
+
   throw new Error(`Unknown command: ${parsed.command}`);
 }
 
-try {
-  main();
-} catch (error) {
-  const wantsJson = process.argv.slice(2).some((token) => token === "--json" || token.startsWith("--json="));
-  printCommandError(wantsJson, error instanceof Error ? error : new Error(String(error)));
-  process.exit(1);
+// ---------------------------------------------------------------------------
+// Exports for testing
+// ---------------------------------------------------------------------------
+export {
+  deriveReviewPerspective,
+  formatPitfallsForPrompt,
+  buildReviewPrompt,
+  runReviewCommand
+};
+
+// Only run main() when this file is the entry point (not when imported).
+const isMain = process.argv[1] && (
+  process.argv[1] === new URL(import.meta.url).pathname ||
+  process.argv[1].endsWith("sprint-board.mjs")
+);
+
+if (isMain) {
+  try {
+    main();
+  } catch (error) {
+    const wantsJson = process.argv.slice(2).some((token) => token === "--json" || token.startsWith("--json="));
+    printCommandError(wantsJson, error instanceof Error ? error : new Error(String(error)));
+    process.exit(1);
+  }
 }

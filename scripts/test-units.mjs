@@ -2742,6 +2742,128 @@ test("runSmokeTests: successful smoke test returns passed", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// sprint-board review command — pure function tests
+// ---------------------------------------------------------------------------
+import {
+  deriveReviewPerspective,
+  formatPitfallsForPrompt,
+  buildReviewPrompt,
+  runReviewCommand
+} from "./sprint-board.mjs";
+
+test("deriveReviewPerspective: scripts → CI pipeline perspective", () => {
+  const p = deriveReviewPerspective(["scripts/sprint-board.mjs", "lib/utils.mjs"]);
+  assert.ok(p.includes("CI"), p);
+});
+
+test("deriveReviewPerspective: auth/token → security perspective", () => {
+  const p = deriveReviewPerspective(["src/auth-handler.ts"]);
+  assert.ok(p.includes("security"), p);
+});
+
+test("deriveReviewPerspective: protocol/docs → adopter perspective", () => {
+  const p = deriveReviewPerspective(["docs/operations/protocol.md"]);
+  assert.ok(p.includes("adopter"), p);
+});
+
+test("deriveReviewPerspective: test files → QA perspective", () => {
+  const p = deriveReviewPerspective(["tests/unit.test.ts"]);
+  assert.ok(p.includes("QA"), p);
+});
+
+test("deriveReviewPerspective: default → experienced engineer", () => {
+  const p = deriveReviewPerspective(["src/model.ts"]);
+  assert.ok(p.includes("experienced engineer"), p);
+});
+
+test("formatPitfallsForPrompt: empty array returns none", () => {
+  assert.equal(formatPitfallsForPrompt([]), "- none");
+});
+
+test("formatPitfallsForPrompt: formats entries", () => {
+  const result = formatPitfallsForPrompt([{
+    id: "PF-001",
+    taskId: "AP-001",
+    failureType: "gate",
+    attempted: "ran build",
+    hypothesis: "missing dep",
+    missingContext: "",
+    resolution: "",
+    resolvedAt: null,
+    createdAt: "2026-01-01T00:00:00.000Z"
+  }]);
+  assert.ok(result.includes("PF-001"), result);
+  assert.ok(result.includes("gate"), result);
+  assert.ok(result.includes("ran build"), result);
+});
+
+test("buildReviewPrompt: constructs prompt with perspective and pitfalls", () => {
+  const prompt = buildReviewPrompt({
+    perspective: "a security engineer doing post-incident review",
+    pitfalls: [{
+      id: "PF-001",
+      taskId: "AP-001",
+      failureType: "gate",
+      attempted: "ran build",
+      hypothesis: "missing dep",
+      missingContext: "",
+      resolution: "",
+      resolvedAt: null,
+      createdAt: "2026-01-01T00:00:00.000Z"
+    }],
+    changedFiles: ["src/auth.ts"],
+    diff: "@@ -1 +1 @@\n-old\n+new"
+  });
+  assert.ok(prompt.includes("security engineer"), prompt);
+  assert.ok(prompt.includes("PF-001"), prompt);
+  assert.ok(prompt.includes("src/auth.ts"), prompt);
+  assert.ok(prompt.includes("CRITICAL|P1|P2|STYLE"), prompt);
+  assert.ok(prompt.includes("REVIEW STATUS"), prompt);
+});
+
+test("runReviewCommand: uses execRunner and prints output", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-review-test-"));
+  const pitfallsFile = path.join(tmpDir, "pitfalls.json");
+  fs.writeFileSync(pitfallsFile, JSON.stringify({
+    version: 1,
+    entries: [{
+      id: "PF-001",
+      taskId: "AP-001",
+      failureType: "review",
+      attempted: "review gate",
+      hypothesis: "missing check",
+      missingContext: "",
+      resolution: "",
+      resolvedAt: null,
+      createdAt: "2026-01-01T00:00:00.000Z"
+    }]
+  }, null, 2), "utf8");
+
+  let capturedPrompt = "";
+  const mockExecRunner = (prompt) => {
+    capturedPrompt = prompt;
+    return { stdout: "REVIEW STATUS: PASS\n" };
+  };
+
+  // Capture stdout
+  const originalWrite = process.stdout.write;
+  let output = "";
+  process.stdout.write = (chunk) => { output += chunk; return true; };
+
+  try {
+    await runReviewCommand(pitfallsFile, { execRunner: mockExecRunner });
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  // Verify prompt was constructed with pitfall data
+  assert.ok(capturedPrompt.includes("PF-001"), "Prompt should include pitfall ID");
+  assert.ok(capturedPrompt.includes("Known failure patterns"), "Prompt should include pitfall section header");
+  // Verify output was printed
+  assert.ok(output.includes("REVIEW STATUS: PASS"), "Should print codex output");
+});
+
+// ---------------------------------------------------------------------------
 // Import additional coverage tests
 // ---------------------------------------------------------------------------
 import "./test-units-coverage.mjs";

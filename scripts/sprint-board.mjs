@@ -4,14 +4,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   nowIso,
   resolveDefaults,
   parseArgv,
   requireOption
 } from "./lib/sprint-utils.mjs";
-import { suggestGatesFromPitfalls } from "./lib/adaptive-gates.mjs";
+import { suggestGateFromPitfall, suggestGatesFromPitfalls } from "./lib/adaptive-gates.mjs";
 import {
   resolveHumanBoardPath,
   readHumanBoardInstructions
@@ -76,6 +76,7 @@ const DEFAULT_MAX_PARALLEL = 2;
 
 const DEFAULTS = resolveDefaults();
 const DEFAULT_PITFALLS_FILE = ".va-auto-pilot/pitfalls.json";
+const DEFAULT_CONFIG_FILE = ".va-auto-pilot/config.yaml";
 const VALID_FAILURE_TYPES = ["gate", "acceptance", "review"];
 
 function printHelp() {
@@ -881,7 +882,7 @@ function parseJournal(content) {
     }
 
     if (inCodebaseSignals) {
-      const signal = line.match(/^\-\s+(.*)$/);
+      const signal = line.match(/^-\s+(.*)$/);
       if (signal) {
         codebaseSignals.push(signal[1].trim());
       }
@@ -903,7 +904,7 @@ function parseJournal(content) {
       continue;
     }
 
-    const nestedSignal = collectingEntrySignals ? line.match(/^\s+\-\s+(.*)$/) : null;
+    const nestedSignal = collectingEntrySignals ? line.match(/^\s+-\s+(.*)$/) : null;
     if (nestedSignal) {
       currentEntry.signals.push(nestedSignal[1].trim());
       continue;
@@ -1060,6 +1061,73 @@ function writePitfalls(filePath, data) {
 }
 
 /**
+ * @param {string} filePath
+ * @returns {Record<string, unknown>}
+ */
+function readConfigDocument(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+
+  try {
+    const parsed = parseYaml(fs.readFileSync(filePath, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * @param {string} filePath
+ * @param {Record<string, unknown>} config
+ * @returns {void}
+ */
+function writeConfigDocument(filePath, config) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, stringifyYaml(config), "utf8");
+}
+
+/**
+ * @param {string} configFile
+ * @param {{ name: string, command: string, required: boolean, description: string, triggeredBy: string }} suggestion
+ * @returns {{ added: boolean, gate: { name: string, command: string, required: boolean, description: string, triggeredBy: string } }}
+ */
+function appendSuggestedGate(configFile, suggestion) {
+  const config = readConfigDocument(configFile);
+  const qualityGate = config.qualityGate && typeof config.qualityGate === "object"
+    ? config.qualityGate
+    : {};
+  const adaptiveGates = Array.isArray(qualityGate.adaptiveGates)
+    ? [...qualityGate.adaptiveGates]
+    : [];
+  const duplicate = adaptiveGates.find((gate) =>
+    String(gate?.triggeredBy ?? "") === suggestion.triggeredBy ||
+    (
+      String(gate?.name ?? "").trim() === suggestion.name &&
+      String(gate?.command ?? "").trim() === suggestion.command
+    )
+  );
+
+  if (duplicate) {
+    return { added: false, gate: duplicate };
+  }
+
+  adaptiveGates.push({
+    name: suggestion.name,
+    command: suggestion.command,
+    required: suggestion.required,
+    description: suggestion.description,
+    triggeredBy: suggestion.triggeredBy
+  });
+  config.qualityGate = {
+    ...qualityGate,
+    adaptiveGates
+  };
+  writeConfigDocument(configFile, config);
+  return { added: true, gate: adaptiveGates.at(-1) };
+}
+
+/**
  * @param {PitfallRecord[]} entries
  * @returns {string}
  */
@@ -1111,9 +1179,10 @@ function addPitfall(pitfallsFile, options) {
 /**
  * @param {string} pitfallsFile
  * @param {Record<string, string>} options
+ * @param {{ journalFile?: string, configFile?: string }} [runtime]
  * @returns {PitfallRecord}
  */
-function resolvePitfall(pitfallsFile, options) {
+function resolvePitfall(pitfallsFile, options, runtime = {}) {
   const pfId = requireOption(options, "resolve");
   const resolution = requireOption(options, "resolution");
 
@@ -1125,6 +1194,26 @@ function resolvePitfall(pitfallsFile, options) {
   entry.resolution = resolution;
   entry.resolvedAt = nowIso();
   writePitfalls(pitfallsFile, data);
+
+  const suggestion = suggestGateFromPitfall(entry);
+  const configFile = runtime.configFile
+    ? path.resolve(runtime.configFile)
+    : path.resolve(path.dirname(pitfallsFile), "..", DEFAULT_CONFIG_FILE);
+  const suggestionResult = appendSuggestedGate(configFile, suggestion);
+  if (runtime.journalFile) {
+    const summary = suggestionResult.added
+      ? `Resolved pitfall ${entry.id}. Suggested gate appended: ${suggestion.name} -> ${suggestion.command}`
+      : `Resolved pitfall ${entry.id}. Suggested gate already present: ${suggestion.name} -> ${suggestion.command}`;
+    appendJournal(runtime.journalFile, {
+      task: entry.taskId,
+      summary,
+      signals: [
+        `pitfall-resolved:${entry.id}`,
+        `adaptive-gate:${suggestion.name}`,
+        `adaptive-gate-trigger:${suggestion.triggeredBy}`
+      ].join(",")
+    });
+  }
   return entry;
 }
 
@@ -1275,11 +1364,12 @@ async function runReviewCommand(pitfallsFile, options) {
   });
 
   // 6. Execute codex review
-  let output = "";
-  if (typeof execRunner === "function") {
-    const result = await execRunner(prompt);
-    output = String(result.stdout ?? result.output ?? "");
-  } else {
+  const output = await (async () => {
+    if (typeof execRunner === "function") {
+      const result = await execRunner(prompt);
+      return String(result.stdout ?? result.output ?? "");
+    }
+
     try {
       const result = await execFileAsync("codex", [
         "exec",
@@ -1291,11 +1381,11 @@ async function runReviewCommand(pitfallsFile, options) {
         cwd: workDir,
         timeout: 120_000
       });
-      output = String(result.stdout ?? "");
+      return String(result.stdout ?? "");
     } catch (error) {
-      output = String(error.stdout ?? error.stderr ?? error.message ?? "");
+      return String(error.stdout ?? error.stderr ?? error.message ?? "");
     }
-  }
+  })();
 
   // 7. Print output
   process.stdout.write(output);
@@ -1450,7 +1540,10 @@ function main() {
   if (parsed.command === "pitfall") {
     // --resolve: mark an existing entry resolved
     if (parsed.options.resolve) {
-      const entry = resolvePitfall(pitfallsFile, parsed.options);
+      const entry = resolvePitfall(pitfallsFile, parsed.options, {
+        journalFile,
+        configFile: path.resolve(DEFAULT_CONFIG_FILE)
+      });
       console.log(`Pitfall resolved: ${entry.id}`);
       console.log(`Pitfalls file: ${path.relative(process.cwd(), pitfallsFile)}`);
       return;

@@ -101,6 +101,27 @@ function mapGateToFailureType(gateName) {
   return "gate";
 }
 
+function extractFailureReason(details = {}) {
+  const candidates = [
+    details.output,
+    details.stderr,
+    details.stdout
+  ];
+
+  for (const candidate of candidates) {
+    const lines = String(candidate ?? "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => !/^(> |at\s+\S|\[.*\]|\s*node:internal)/.test(line));
+    if (lines.length > 0) {
+      return lines.slice(0, 3).join(" | ").slice(0, 500);
+    }
+  }
+
+  return "failure without detailed output";
+}
+
 function parsePitfallIdFromStdout(stdout) {
   const match = String(stdout ?? "").match(/Pitfall recorded:\s+(PF-\d+)/);
   return match ? match[1] : null;
@@ -124,13 +145,9 @@ async function recordSprintStartCommit(opts) {
       return String(state.sprintStartCommit);
     }
 
-    let sprintStartCommit = "";
-    try {
-      const head = await git(["rev-parse", "HEAD"], opts);
-      sprintStartCommit = head.stdout.trim();
-    } catch {
-      sprintStartCommit = "";
-    }
+    const sprintStartCommit = await git(["rev-parse", "HEAD"], opts)
+      .then((head) => head.stdout.trim())
+      .catch(() => "");
 
     state.sprintStartCommit = sprintStartCommit;
     fs.writeFileSync(opts.stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
@@ -143,12 +160,14 @@ async function recordPitfallAndSuggestGates(task, details, opts) {
     return { pitfallId: null, suggestions: [] };
   }
 
+  const reason = extractFailureReason(details);
+
   const args = [
     "pitfall",
     "--task", task.id,
     "--failure-type", mapGateToFailureType(details.gateName),
-    "--attempted", String(details.attempted ?? `auto-pilot ${details.gateName}`),
-    "--hypothesis", String(details.hypothesis ?? details.output ?? "failure without detailed hypothesis")
+    "--attempted", String(details.attempted ?? reason),
+    "--hypothesis", String(details.hypothesis ?? reason)
   ];
 
   if (details.missingContext) {
@@ -395,14 +414,55 @@ async function loadUnresolvedPitfalls(opts = {}) {
  * @returns {string}
  */
 function injectPitfallContext(task, pitfalls) {
-  const relevant = pitfalls.filter(
-    (p) => p.taskId === task.id || !p.taskId
-  );
+  const taskTokens = new Set([
+    ...tokenizeForPitfallMatch(task.id),
+    ...tokenizeForPitfallMatch(task.title),
+    ...tokenizeForPitfallMatch(task.source),
+    ...tokenizeForPitfallMatch(task.notes),
+    ...(Array.isArray(task.tags) ? task.tags.flatMap((tag) => tokenizeForPitfallMatch(tag)) : [])
+  ]);
+  const relevant = pitfalls.filter((pitfall) => isRelevantPitfall(task, pitfall, taskTokens));
   if (relevant.length === 0) return "";
-  const lines = relevant.map(
-    (p, i) => `  ${i + 1}. [${p.id ?? "?"}] ${p.failureType}: ${p.attempted} — hypothesis: ${p.hypothesis}${p.missingContext ? ` (missing: ${p.missingContext})` : ""}`
-  );
+  const lines = relevant.map((pitfall) => {
+    const hypothesis = String(pitfall.hypothesis ?? "").trim() || "unknown failure mode";
+    const attempted = String(pitfall.attempted ?? "").trim() || "prior attempt";
+    return `- Known pitfall: ${hypothesis} -- ${attempted} failed`;
+  });
   return `\n--- HARD CONSTRAINTS (pitfall guide) ---\n${lines.join("\n")}\n---`;
+}
+
+function tokenizeForPitfallMatch(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4);
+}
+
+function isRelevantPitfall(task, pitfall, taskTokens) {
+  if (!pitfall || pitfall.resolvedAt) {
+    return false;
+  }
+
+  if (String(pitfall.taskId ?? "").trim() === String(task.id ?? "").trim()) {
+    return true;
+  }
+
+  const pitfallTokens = new Set([
+    ...tokenizeForPitfallMatch(pitfall.taskId),
+    ...tokenizeForPitfallMatch(pitfall.failureType),
+    ...tokenizeForPitfallMatch(pitfall.attempted),
+    ...tokenizeForPitfallMatch(pitfall.hypothesis),
+    ...tokenizeForPitfallMatch(pitfall.missingContext)
+  ]);
+
+  for (const token of taskTokens) {
+    if (pitfallTokens.has(token)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +481,15 @@ async function runGateSequence(gateConfig, opts) {
     { name: "build", cmd: gateConfig.buildCommand },
     { name: "review", cmd: gateConfig.reviewCommand },
     { name: "acceptance", cmd: gateConfig.acceptanceTestCommand },
+    ...Array.isArray(gateConfig.adaptiveGates)
+      ? gateConfig.adaptiveGates
+        .filter((gate) => gate && typeof gate === "object" && String(gate.command ?? "").trim())
+        .map((gate, index) => ({
+          name: String(gate.name ?? `adaptive-${index + 1}`),
+          cmd: String(gate.command),
+          required: gate.required !== false
+        }))
+      : []
   ];
 
   for (const gate of gates) {
@@ -454,15 +523,19 @@ async function runGateSequence(gateConfig, opts) {
       const stdout = String(err.stdout ?? "");
       const stderr = String(err.stderr ?? err.message);
       const output = stdout + "\n" + stderr;
-      log(opts, `  gate "${gate.name}" FAILED`);
-      return {
-        passed: false,
-        gate: gate.name,
-        output: output.slice(0, 2000),
-        exitCode: typeof err.code === "number" ? err.code : 1,
-        stdout,
-        stderr
-      };
+      if (gate.required === false) {
+        log(opts, `  gate "${gate.name}" FAILED (advisory, continuing)`);
+      } else {
+        log(opts, `  gate "${gate.name}" FAILED`);
+        return {
+          passed: false,
+          gate: gate.name,
+          output: output.slice(0, 2000),
+          exitCode: typeof err.code === "number" ? err.code : 1,
+          stdout,
+          stderr
+        };
+      }
     }
   }
 
@@ -533,12 +606,13 @@ async function runPitfallAwareReviewGate(gate, opts) {
     diffBundle.diff || "(no diff)"
   ].join("\n");
 
-  let output = "";
-  try {
-    if (typeof opts.reviewGateRunner === "function") {
-      const result = await opts.reviewGateRunner(prompt, { gate, pitfalls, diffBundle }, opts);
-      output = String(result.stdout ?? result.output ?? "");
-    } else {
+  const output = await (async () => {
+    try {
+      if (typeof opts.reviewGateRunner === "function") {
+        const result = await opts.reviewGateRunner(prompt, { gate, pitfalls, diffBundle }, opts);
+        return String(result.stdout ?? result.output ?? "");
+      }
+
       const result = await execFileAsync("codex", [
         "exec",
         "--sandbox", "read-only",
@@ -549,11 +623,11 @@ async function runPitfallAwareReviewGate(gate, opts) {
         cwd: opts.workDir ?? process.cwd(),
         timeout: 120_000
       });
-      output = String(result.stdout ?? result.output ?? "");
+      return String(result.stdout ?? result.output ?? "");
+    } catch (error) {
+      return String(error.stdout ?? error.stderr ?? error.message ?? "");
     }
-  } catch (error) {
-    output = String(error.stdout ?? error.stderr ?? error.message ?? "");
-  }
+  })();
 
   const findings = parseReviewFindings(output);
   const statusLine = /^\s*REVIEW STATUS:\s*(PASS|FAIL)\s*$/im.exec(output);
@@ -711,8 +785,11 @@ async function transitionToFailedWithRecovery(task, gateName, failureDetails, op
   await transitionToFailed(task, gateName, failureDetails.output, opts);
   await recordPitfallAndSuggestGates(task, {
     gateName,
-    attempted: `auto-pilot ${gateName}`,
-    hypothesis: failureDetails.output?.slice(0, 500) ?? "",
+    attempted: extractFailureReason({
+      output: failureDetails.stderr,
+      stdout: failureDetails.stdout
+    }),
+    hypothesis: extractFailureReason(failureDetails),
     output: failureDetails.output ?? "",
     missingContext: failureDetails.stderr ? String(failureDetails.stderr).slice(0, 500) : ""
   }, opts);
@@ -1504,13 +1581,9 @@ async function handleSprintCompletionReview(opts) {
   }
 
   const selectedPerspective = selectSprintReviewPerspective(diffBundle);
-  let reviewerOutput = "";
-  try {
-    const reviewerResult = await spawnSprintReviewer(diffBundle, selectedPerspective, opts);
-    reviewerOutput = String(reviewerResult.stdout ?? reviewerResult.output ?? "");
-  } catch (error) {
-    reviewerOutput = String(error.stdout ?? error.stderr ?? error.message ?? "");
-  }
+  const reviewerOutput = await spawnSprintReviewer(diffBundle, selectedPerspective, opts)
+    .then((reviewerResult) => String(reviewerResult.stdout ?? reviewerResult.output ?? ""))
+    .catch((error) => String(error.stdout ?? error.stderr ?? error.message ?? ""));
 
   const report = extractReviewerReport(reviewerOutput);
   const actualPerspective = report.perspective || selectedPerspective;
@@ -1623,7 +1696,7 @@ async function runLoop(opts) {
         break;
       }
 
-      let pitfalls = await loadUnresolvedPitfalls(opts);
+      const pitfalls = await loadUnresolvedPitfalls(opts);
       if (pitfalls.length > 0) {
         log(opts, `Loaded ${pitfalls.length} unresolved pitfall(s).`);
       }

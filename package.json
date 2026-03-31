@@ -11,6 +11,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "build": "npm run check:all",
     "check": "node ./bin/va-auto-pilot.mjs --help",
     "check:sprint": "node ./scripts/sprint-board.mjs summary",
     "check:units": "node ./scripts/test-units.mjs",

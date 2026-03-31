@@ -126,6 +126,58 @@ flows:
         - stderr_contains: ["Pitfall not found"]
       should: []
 
+  - name: "pitfall --resolve: appends adaptive gate suggestion"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/pitfalls.json" <<'EOF'
+        {
+          "version": 1,
+          "entries": [
+            {
+              "id": "PF-010",
+              "taskId": "AP-010",
+              "failureType": "gate",
+              "attempted": "npm run build",
+              "hypothesis": "build check should become a persistent gate",
+              "missingContext": "",
+              "resolution": "",
+              "resolvedAt": null,
+              "createdAt": "2026-03-31T00:00:00.000Z"
+            }
+          ]
+        }
+        EOF
+        cat > "$tmpdir/.va-auto-pilot/config.yaml" <<'EOF'
+        qualityGate:
+          buildCommand: "npm run build"
+        EOF
+        cat > "$tmpdir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        ## Entries
+        EOF
+        (
+          cd "$tmpdir"
+          node /Users/vadaski/vadaski/Code/va-auto-pilot/scripts/sprint-board.mjs pitfall --resolve PF-010 --resolution "made build gate permanent" --pitfalls-file "$tmpdir/.va-auto-pilot/pitfalls.json" --journal-file "$tmpdir/docs/todo/run-journal.md"
+        )
+        cat "$tmpdir/.va-auto-pilot/config.yaml"
+        printf '\n---\n'
+        cat "$tmpdir/docs/todo/run-journal.md"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains:
+            - "Pitfall resolved: PF-010"
+            - "adaptiveGates:"
+            - "triggeredBy: PF-010"
+            - "Resolved pitfall PF-010. Suggested gate appended:"
+      should: []
+
   - name: "update --state Failed with failure-type: records failureDetail"
     command: "node"
     args:

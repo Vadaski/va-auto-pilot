@@ -1,24 +1,31 @@
 version: 1
-projectPrefix: "AP"
+projectPrefix: AP
 sprint:
-  stateFile: ".va-auto-pilot/sprint-state.json"
-  boardFile: "docs/todo/sprint.md"
-  runJournalFile: "docs/todo/run-journal.md"
+  stateFile: .va-auto-pilot/sprint-state.json
+  boardFile: docs/todo/sprint.md
+  runJournalFile: docs/todo/run-journal.md
 qualityGate:
-  buildCommand: "npm run check:all"
-  reviewCommand: "codex review --uncommitted"
-  acceptanceTestCommand: "npm run validate:distribution"
-  smokeTestCommand: "node scripts/smoke-test-runner.mjs --config"
+  buildCommand: npm run check:all
+  reviewCommand: codex review --uncommitted
+  acceptanceTestCommand: npm run validate:distribution
+  smokeTestCommand: node scripts/smoke-test-runner.mjs --config
   smokeTest:
     enabled: true
     timeout: 30000
-    screenshotDir: ".va-auto-pilot/screenshots"
+    screenshotDir: .va-auto-pilot/screenshots
     criticalPaths: []
+  adaptiveGates:
+    - name: npm-test
+      command: npm test
+      required: true
+      description: "Suggested from pitfall PF-001: tests broken"
+      triggeredBy: PF-001
 review:
-  domainRoleName: "Domain Expert"
-  domainPrompt: "You are the domain expert for this product. Review behavioral correctness, user impact, and product consistency."
+  domainRoleName: Domain Expert
+  domainPrompt: You are the domain expert for this product. Review behavioral
+    correctness, user impact, and product consistency.
 api:
-  debugSetupEndpoint: "/api/debug/setup"
-  debugChatEndpoint: "/api/debug/chat"
+  debugSetupEndpoint: /api/debug/setup
+  debugChatEndpoint: /api/debug/chat
 testing:
-  resultsDir: "docs/quality/query-tests/results"
+  resultsDir: docs/quality/query-tests/results

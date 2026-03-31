@@ -39,6 +39,7 @@ import {
   runGateSequence,
   extractCreatedTaskId,
   executeSingleTask,
+  injectPitfallContext,
   handleSprintCompletionReview,
   extractReviewerReport,
   selectSprintReviewPerspective
@@ -968,6 +969,160 @@ test("executeSingleTask completes a backlog task through gates", async () => {
   } finally {
     process.chdir(previousCwd);
   }
+});
+
+test("executeSingleTask records a pitfall when a quality gate fails", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-exec-fail-"));
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(repoDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
+  const humanBoardFile = path.join(repoDir, "docs", "todo", "human-board.md");
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+  const failScript = path.join(repoDir, "fail-build.mjs");
+
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    updatedAt: "2026-03-31T00:00:00.000Z",
+    tasks: [
+      { id: "AP-041", title: "Broken gate task", priority: "P1", state: "Review", dependsOn: [] }
+    ]
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint Board\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+  fs.writeFileSync(humanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(failScript, [
+    "process.stderr.write('Build exploded due to missing export\\n');",
+    "process.exit(2);"
+  ].join("\n"), "utf8");
+
+  const previousCwd = process.cwd();
+  process.chdir(repoDir);
+  try {
+    const result = await executeSingleTask(
+      "AP-041",
+      { colony: false, dispatch: async () => ({ success: true, durationMs: 1 }) },
+      [],
+      { buildCommand: `node ${failScript}` },
+      {
+        dryRun: false,
+        noCommit: true,
+        json: true,
+        strict: false,
+        workDir: repoDir,
+        stateFile,
+        boardFile,
+        journalFile,
+        pitfallsFile,
+        agentTemplate: "echo {taskId}",
+        trackTimeout: 1000,
+        taskBaselines: new Map(),
+        sprintBoardLock: Promise.resolve(),
+        stateMutationLock: Promise.resolve()
+      }
+    );
+
+    assert.equal(result.terminal, true);
+    assert.equal(result.action, "review-failed");
+    const pitfalls = JSON.parse(fs.readFileSync(pitfallsFile, "utf8"));
+    assert.equal(pitfalls.entries.length, 1);
+    assert.equal(pitfalls.entries[0].taskId, "AP-041");
+    assert.equal(pitfalls.entries[0].failureType, "gate");
+    assert.match(pitfalls.entries[0].attempted, /Build exploded due to missing export/);
+    assert.match(pitfalls.entries[0].hypothesis, /Build exploded due to missing export/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("injectPitfallContext includes relevant unresolved pitfalls by keyword overlap", () => {
+  const promptBlock = injectPitfallContext(
+    {
+      id: "AP-050",
+      title: "Fix export regression in sprint board",
+      source: "review-fix",
+      notes: "export handling for sprint board outputs"
+    },
+    [
+      {
+        id: "PF-101",
+        taskId: "AP-999",
+        failureType: "review",
+        attempted: "patched sprint board export path",
+        hypothesis: "export regression broke sprint board output",
+        missingContext: "",
+        resolvedAt: null
+      },
+      {
+        id: "PF-102",
+        taskId: "AP-888",
+        failureType: "gate",
+        attempted: "ran unrelated pipeline",
+        hypothesis: "docker cache mismatch",
+        missingContext: "",
+        resolvedAt: null
+      }
+    ]
+  );
+
+  assert.match(promptBlock, /Known pitfall: export regression broke sprint board output -- patched sprint board export path failed/);
+  assert.doesNotMatch(promptBlock, /docker cache mismatch/);
+});
+
+test("pitfall --resolve appends suggested adaptive gate and journals it", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-pitfall-resolve-"));
+  const pitfallsDir = path.join(repoDir, ".va-auto-pilot");
+  const pitfallsFile = path.join(pitfallsDir, "pitfalls.json");
+  const configFile = path.join(pitfallsDir, "config.yaml");
+  const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
+
+  fs.mkdirSync(pitfallsDir, { recursive: true });
+  fs.mkdirSync(path.dirname(journalFile), { recursive: true });
+  fs.writeFileSync(pitfallsFile, JSON.stringify({
+    version: 1,
+    entries: [
+      {
+        id: "PF-201",
+        taskId: "AP-201",
+        failureType: "gate",
+        attempted: "npm run build",
+        hypothesis: "build failed because a validation gate was missing",
+        missingContext: "",
+        resolution: "",
+        resolvedAt: null,
+        createdAt: "2026-03-31T00:00:00.000Z"
+      }
+    ]
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(configFile, [
+    "qualityGate:",
+    "  buildCommand: \"npm run build\"",
+    "  reviewCommand: \"codex review --uncommitted\""
+  ].join("\n") + "\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+
+  const result = spawnSync("node", [
+    BOARD_SCRIPT,
+    "pitfall",
+    "--resolve", "PF-201",
+    "--resolution", "added validation before merge",
+    "--pitfalls-file", pitfallsFile,
+    "--journal-file", journalFile
+  ], {
+    cwd: repoDir,
+    encoding: "utf8",
+    timeout: 10_000
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const updatedConfig = fs.readFileSync(configFile, "utf8");
+  const updatedJournal = fs.readFileSync(journalFile, "utf8");
+  assert.match(updatedConfig, /adaptiveGates:/);
+  assert.match(updatedConfig, /triggeredBy: PF-201/);
+  assert.match(updatedConfig, /command: npm run build/);
+  assert.match(updatedJournal, /Resolved pitfall PF-201\. Suggested gate appended:/);
+  assert.match(updatedJournal, /adaptive-gate-trigger:PF-201/);
 });
 
 // ---------------------------------------------------------------------------

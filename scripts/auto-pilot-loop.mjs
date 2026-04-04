@@ -580,6 +580,48 @@ function formatPitfallsForReview(pitfalls) {
   }).join("\n");
 }
 
+function classifyReviewGateFailure(error) {
+  const stdout = String(error?.stdout ?? "");
+  const stderr = String(error?.stderr ?? "");
+  const message = String(error?.message ?? "");
+  const detail = [message, stderr].filter(Boolean).join(" | ").trim();
+  const timedOut = Boolean(error?.killed) || /timed out?/i.test(detail);
+
+  if (stdout.trim()) {
+    return {
+      kind: "output",
+      output: stdout,
+      stderr,
+      reason: detail ? `non-zero exit with stdout (${detail})` : "non-zero exit with stdout"
+    };
+  }
+
+  if (timedOut) {
+    return {
+      kind: "failure",
+      output: "",
+      stderr,
+      reason: detail ? `timeout (${detail})` : "timeout"
+    };
+  }
+
+  if (detail) {
+    return {
+      kind: "failure",
+      output: "",
+      stderr,
+      reason: `crash (${detail})`
+    };
+  }
+
+  return {
+    kind: "failure",
+    output: "",
+    stderr,
+    reason: "no output"
+  };
+}
+
 async function runPitfallAwareReviewGate(gate, opts) {
   const pitfalls = await loadUnresolvedPitfalls(opts);
   const diffBundle = await collectReviewGateDiff(opts);
@@ -606,11 +648,16 @@ async function runPitfallAwareReviewGate(gate, opts) {
     diffBundle.diff || "(no diff)"
   ].join("\n");
 
-  const output = await (async () => {
+  const reviewRun = await (async () => {
     try {
       if (typeof opts.reviewGateRunner === "function") {
         const result = await opts.reviewGateRunner(prompt, { gate, pitfalls, diffBundle }, opts);
-        return String(result.stdout ?? result.output ?? "");
+        return {
+          output: String(result.stdout ?? result.output ?? ""),
+          hardFailure: false,
+          failureReason: "",
+          stderr: ""
+        };
       }
 
       const result = await execFileAsync("codex", [
@@ -623,25 +670,69 @@ async function runPitfallAwareReviewGate(gate, opts) {
         cwd: opts.workDir ?? process.cwd(),
         timeout: 120_000
       });
-      return String(result.stdout ?? result.output ?? "");
+      return {
+        output: String(result.stdout ?? result.output ?? ""),
+        hardFailure: false,
+        failureReason: "",
+        stderr: ""
+      };
     } catch (error) {
-      return String(error.stdout ?? error.stderr ?? error.message ?? "");
+      const failure = classifyReviewGateFailure(error);
+      if (failure.kind === "output") {
+        log(opts, `  review gate runner returned non-zero exit; parsing stdout anyway (${failure.reason})`);
+        return {
+          output: failure.output,
+          hardFailure: false,
+          failureReason: failure.reason,
+          stderr: failure.stderr
+        };
+      }
+
+      log(opts, `  review gate runner failed: ${failure.reason}`);
+      return {
+        output: "",
+        hardFailure: true,
+        failureReason: failure.reason,
+        stderr: failure.stderr
+      };
     }
   })();
 
+  if (reviewRun.hardFailure) {
+    const output = `review gate failed: ${reviewRun.failureReason}`;
+    return {
+      passed: false,
+      gate: gate.name,
+      output,
+      exitCode: 1,
+      stdout: "",
+      stderr: output
+    };
+  }
+
+  const output = reviewRun.output;
   const findings = parseReviewFindings(output);
   const statusLine = /^\s*REVIEW STATUS:\s*(PASS|FAIL)\s*$/im.exec(output);
-  const passed = statusLine
-    ? statusLine[1] === "PASS" && !findings.hasBlocking
-    : !findings.hasBlocking && output.trim().length > 0;
+  const hasStructuredFindings = findings.findings.length > 0;
+
+  if (!statusLine) {
+    if (hasStructuredFindings) {
+      log(opts, "  review gate output missing REVIEW STATUS line; failing closed");
+    } else {
+      log(opts, "  review gate output was unstructured; failing closed");
+    }
+  }
+
+  const passed = Boolean(statusLine) && statusLine[1] === "PASS" && !findings.hasBlocking;
+  const finalOutput = output.trim() ? output : `review gate failed: ${reviewRun.failureReason || "empty output"}`;
 
   return {
     passed,
     gate: gate.name,
-    output,
+    output: finalOutput,
     exitCode: passed ? 0 : 1,
     stdout: output,
-    stderr: passed ? "" : output
+    stderr: passed ? "" : finalOutput
   };
 }
 

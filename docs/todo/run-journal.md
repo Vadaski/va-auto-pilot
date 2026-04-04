@@ -164,3 +164,13 @@
   - operational-memory-layered
   - external-review-pending
 ---
+
+## 2026-04-04T19:10:00.000Z - MAINT-001
+- Summary: Sprint 5 reconciliation + pitfall re-resolve bug fix. AP-034/035/036/037 were already committed but sprint-state was stale — updated all to Done. Fixed resolvePitfall() missing guard against re-resolving already-resolved pitfalls (caused 12 duplicate UT-001 journal entries). Unit tests 211/211 pass.
+- Files: `scripts/sprint-board.mjs`, `.va-auto-pilot/sprint-state.json`, `docs/todo/sprint.md`, `docs/todo/run-journal.md`
+- Signals:
+  - pitfall-resolve-guard: already-resolved pitfalls now skip silently
+  - sprint-5-complete: all 4 tasks Done
+  - sprint-state-reconciled
+---
+---

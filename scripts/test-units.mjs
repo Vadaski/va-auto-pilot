@@ -787,6 +787,64 @@ test("runGateSequence injects unresolved pitfalls into codex-backed review gate 
   assert.match(capturedPrompt, /pitfall guide was not injected/);
 });
 
+test("runGateSequence fails closed when codex-backed review gate times out without stdout", async () => {
+  const repoDir = createTempGitRepo({ "scripts/auto-pilot-loop.mjs": "before\n" });
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+  const workFile = path.join(repoDir, "scripts", "auto-pilot-loop.mjs");
+
+  fs.mkdirSync(path.dirname(pitfallsFile), { recursive: true });
+  fs.writeFileSync(pitfallsFile, JSON.stringify({ version: 1, entries: [] }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(workFile, "after\n", "utf8");
+
+  const gateResult = await runGateSequence(
+    { reviewCommand: "codex review --uncommitted" },
+    {
+      dryRun: false,
+      json: false,
+      workDir: repoDir,
+      pitfallsFile,
+      reviewGateRunner: async () => {
+        const error = new Error("Command timed out after 120000ms");
+        error.killed = true;
+        throw error;
+      }
+    }
+  );
+
+  assert.equal(gateResult.passed, false);
+  assert.equal(gateResult.gate, "review");
+  assert.match(gateResult.output, /review gate failed: timeout/i);
+});
+
+test("runGateSequence fails closed on unstructured stdout from failed codex-backed review gate", async () => {
+  const repoDir = createTempGitRepo({ "scripts/auto-pilot-loop.mjs": "before\n" });
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+  const workFile = path.join(repoDir, "scripts", "auto-pilot-loop.mjs");
+
+  fs.mkdirSync(path.dirname(pitfallsFile), { recursive: true });
+  fs.writeFileSync(pitfallsFile, JSON.stringify({ version: 1, entries: [] }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(workFile, "after\n", "utf8");
+
+  const gateResult = await runGateSequence(
+    { reviewCommand: "codex review --uncommitted" },
+    {
+      dryRun: false,
+      json: false,
+      workDir: repoDir,
+      pitfallsFile,
+      reviewGateRunner: async () => {
+        const error = new Error("rate limit");
+        error.stdout = "429 rate limit exceeded\nplease retry later\n";
+        throw error;
+      }
+    }
+  );
+
+  assert.equal(gateResult.passed, false);
+  assert.equal(gateResult.gate, "review");
+  assert.match(gateResult.output, /429 rate limit exceeded/);
+});
+
 test("extractReviewerReport parses JSON reviewer output", () => {
   const report = extractReviewerReport(JSON.stringify({
     status: "CRITICAL",
@@ -2903,8 +2961,68 @@ import {
   deriveReviewPerspective,
   formatPitfallsForPrompt,
   buildReviewPrompt,
-  runReviewCommand
+  runReviewCommand,
+  parseReviewStatus
 } from "./sprint-board.mjs";
+
+function writeReviewPitfallsFixture() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-review-test-"));
+  const pitfallsFile = path.join(tmpDir, "pitfalls.json");
+  fs.writeFileSync(pitfallsFile, JSON.stringify({
+    version: 1,
+    entries: [{
+      id: "PF-001",
+      taskId: "AP-001",
+      failureType: "review",
+      attempted: "review gate",
+      hypothesis: "missing check",
+      missingContext: "",
+      resolution: "",
+      resolvedAt: null,
+      createdAt: "2026-01-01T00:00:00.000Z"
+    }]
+  }, null, 2), "utf8");
+  return pitfallsFile;
+}
+
+async function invokeReviewCommandForTest(pitfallsFile, options = {}) {
+  let stdoutText = "";
+  let stderrText = "";
+  let exitCode = null;
+
+  const stdout = {
+    write(chunk) {
+      stdoutText += String(chunk);
+      return true;
+    }
+  };
+  const stderr = {
+    write(chunk) {
+      stderrText += String(chunk);
+      return true;
+    }
+  };
+  const exit = (code) => {
+    exitCode = code;
+    throw new Error(`EXIT:${code}`);
+  };
+
+  try {
+    await runReviewCommand(pitfallsFile, {
+      gitRunner: async () => "",
+      ...options,
+      stdout,
+      stderr,
+      exit
+    });
+  } catch (error) {
+    if (!String(error?.message ?? "").startsWith("EXIT:")) {
+      throw error;
+    }
+  }
+
+  return { stdoutText, stderrText, exitCode };
+}
 
 test("deriveReviewPerspective: scripts → CI pipeline perspective", () => {
   const p = deriveReviewPerspective(["scripts/sprint-board.mjs", "lib/utils.mjs"]);
@@ -2976,46 +3094,102 @@ test("buildReviewPrompt: constructs prompt with perspective and pitfalls", () =>
   assert.ok(prompt.includes("REVIEW STATUS"), prompt);
 });
 
-test("runReviewCommand: uses execRunner and prints output", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-review-test-"));
-  const pitfallsFile = path.join(tmpDir, "pitfalls.json");
-  fs.writeFileSync(pitfallsFile, JSON.stringify({
-    version: 1,
-    entries: [{
-      id: "PF-001",
-      taskId: "AP-001",
-      failureType: "review",
-      attempted: "review gate",
-      hypothesis: "missing check",
-      missingContext: "",
-      resolution: "",
-      resolvedAt: null,
-      createdAt: "2026-01-01T00:00:00.000Z"
-    }]
-  }, null, 2), "utf8");
+test("parseReviewStatus: returns PASS, FAIL, or AMBIGUOUS", () => {
+  assert.equal(parseReviewStatus("REVIEW STATUS: PASS\n"), "PASS");
+  assert.equal(parseReviewStatus("REVIEW STATUS: FAIL\n[P1] issue -- src/app.ts:1"), "FAIL");
+  assert.equal(parseReviewStatus("review incomplete"), "AMBIGUOUS");
+});
 
+test("runReviewCommand: PASS output exits 0 and prints reviewer output", async () => {
+  const pitfallsFile = writeReviewPitfallsFixture();
   let capturedPrompt = "";
-  const mockExecRunner = (prompt) => {
-    capturedPrompt = prompt;
-    return { stdout: "REVIEW STATUS: PASS\n" };
-  };
+  const result = await invokeReviewCommandForTest(pitfallsFile, {
+    execRunner: (prompt) => {
+      capturedPrompt = prompt;
+      return { stdout: "REVIEW STATUS: PASS\n" };
+    }
+  });
 
-  // Capture stdout
-  const originalWrite = process.stdout.write;
-  let output = "";
-  process.stdout.write = (chunk) => { output += chunk; return true; };
-
-  try {
-    await runReviewCommand(pitfallsFile, { execRunner: mockExecRunner });
-  } finally {
-    process.stdout.write = originalWrite;
-  }
-
-  // Verify prompt was constructed with pitfall data
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderrText, "");
   assert.ok(capturedPrompt.includes("PF-001"), "Prompt should include pitfall ID");
   assert.ok(capturedPrompt.includes("Known failure patterns"), "Prompt should include pitfall section header");
-  // Verify output was printed
-  assert.ok(output.includes("REVIEW STATUS: PASS"), "Should print codex output");
+  assert.ok(result.stdoutText.includes("REVIEW STATUS: PASS"), "Should print codex output");
+});
+
+test("runReviewCommand: FAIL output exits 1", async () => {
+  const pitfallsFile = writeReviewPitfallsFixture();
+
+  const result = await invokeReviewCommandForTest(pitfallsFile, {
+    execRunner: () => ({ stdout: "REVIEW STATUS: FAIL\n[P1] found issue -- scripts/sprint-board.mjs:1\n" })
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.ok(result.stdoutText.includes("REVIEW STATUS: FAIL"));
+});
+
+test("runReviewCommand: ambiguous output exits 1 with stderr message", async () => {
+  const pitfallsFile = writeReviewPitfallsFixture();
+
+  const result = await invokeReviewCommandForTest(pitfallsFile, {
+    execRunner: () => ({ stdout: "review incomplete\n" })
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.ok(result.stderrText.includes("ambiguous review output"), result.stderrText);
+});
+
+test("runReviewCommand: exec failure without stdout exits 1 and prints error", async () => {
+  const pitfallsFile = writeReviewPitfallsFixture();
+
+  const result = await invokeReviewCommandForTest(pitfallsFile, {
+    execRunner: () => {
+      const error = new Error("spawn codex ENOENT");
+      error.stderr = "codex executable not found";
+      throw error;
+    }
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdoutText, "");
+  assert.ok(result.stderrText.includes("review command failed before producing output"), result.stderrText);
+  assert.ok(result.stderrText.includes("codex executable not found"), result.stderrText);
+});
+
+test("runReviewCommand: git failures warn to stderr and continue with partial context", async () => {
+  const pitfallsFile = writeReviewPitfallsFixture();
+  let capturedPrompt = "";
+
+  const result = await invokeReviewCommandForTest(pitfallsFile, {
+    gitRunner: async () => {
+      throw new Error("not a git repository");
+    },
+    execRunner: (prompt) => {
+      capturedPrompt = prompt;
+      return { stdout: "REVIEW STATUS: PASS\n" };
+    }
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.ok(result.stderrText.includes("failed to collect changed files via git"), result.stderrText);
+  assert.ok(result.stderrText.includes("failed to collect git diff"), result.stderrText);
+  assert.ok(capturedPrompt.includes("Changed files:\n- none"), capturedPrompt);
+  assert.ok(capturedPrompt.includes("Diff:\n(no diff)"), capturedPrompt);
+});
+
+test("runReviewCommand: uses execRunner output fallback", async () => {
+  const pitfallsFile = writeReviewPitfallsFixture();
+  let capturedPrompt = "";
+  const result = await invokeReviewCommandForTest(pitfallsFile, {
+    execRunner: (prompt) => {
+    capturedPrompt = prompt;
+      return { output: "REVIEW STATUS: PASS\n" };
+    }
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.ok(capturedPrompt.includes("PF-001"), "Prompt should include pitfall ID");
+  assert.ok(result.stdoutText.includes("REVIEW STATUS: PASS"), "Should print execRunner output fallback");
 });
 
 // ---------------------------------------------------------------------------

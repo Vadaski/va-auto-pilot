@@ -1191,6 +1191,9 @@ function resolvePitfall(pitfallsFile, options, runtime = {}) {
   if (!entry) {
     throw new Error(`Pitfall not found: ${pfId}`);
   }
+  if (entry.resolvedAt && String(entry.resolvedAt).trim() !== "") {
+    return { skipped: true, reason: "already-resolved", id: pfId };
+  }
   entry.resolution = resolution;
   entry.resolvedAt = nowIso();
   writePitfalls(pitfallsFile, data);
@@ -1307,14 +1310,56 @@ function buildReviewPrompt({ perspective, pitfalls, changedFiles, diff }) {
 }
 
 /**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function formatReviewCommandError(error) {
+  const stderr = String(error?.stderr ?? "").trim();
+  if (stderr) return stderr;
+
+  const stdout = String(error?.stdout ?? "").trim();
+  if (stdout) return stdout;
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error ?? "Unknown error");
+}
+
+/**
+ * @param {string} output
+ * @returns {"PASS" | "FAIL" | "AMBIGUOUS"}
+ */
+function parseReviewStatus(output) {
+  if (/^REVIEW STATUS:\s*FAIL\b/m.test(output)) {
+    return "FAIL";
+  }
+
+  if (/^REVIEW STATUS:\s*PASS\b/m.test(output)) {
+    return "PASS";
+  }
+
+  return "AMBIGUOUS";
+}
+
+/**
  * Run the review subcommand: gather context, build prompt, execute codex review.
  * @param {string} pitfallsFile
  * @param {object} [options]
  * @param {function} [options.execRunner] - Override for codex exec (testing)
+ * @param {function} [options.gitRunner] - Override for git commands (testing)
+ * @param {{ write(chunk: string): unknown }} [options.stdout] - Override stdout stream
+ * @param {{ write(chunk: string): unknown }} [options.stderr] - Override stderr stream
+ * @param {(code: number) => unknown} [options.exit] - Override process exit (testing)
  * @returns {Promise<void>}
  */
 async function runReviewCommand(pitfallsFile, options) {
   const execRunner = options?.execRunner;
+  const gitRunner = options?.gitRunner;
+  const stdout = options?.stdout ?? process.stdout;
+  const stderr = options?.stderr ?? process.stderr;
+  const exit = options?.exit ?? ((code) => process.exit(code));
   const workDir = process.cwd();
 
   // 1. Read unresolved pitfalls
@@ -1324,6 +1369,10 @@ async function runReviewCommand(pitfallsFile, options) {
   // 2. Collect changed files
   /** @param {string[]} args */
   const gitExec = async (args) => {
+    if (typeof gitRunner === "function") {
+      return String(await gitRunner(args)).trim();
+    }
+
     const result = await execFileAsync("git", args, {
       encoding: "utf8",
       cwd: workDir,
@@ -1340,8 +1389,10 @@ async function runReviewCommand(pitfallsFile, options) {
       ...tracked.split("\n").filter(Boolean),
       ...untracked.split("\n").filter(Boolean)
     ])];
-  } catch {
-    // If git fails (e.g. no commits yet), proceed with empty list
+  } catch (error) {
+    stderr.write(
+      `Warning: failed to collect changed files via git; continuing with partial review context. ${formatReviewCommandError(error)}\n`
+    );
   }
 
   // 3. Derive perspective
@@ -1351,8 +1402,10 @@ async function runReviewCommand(pitfallsFile, options) {
   let diff = "";
   try {
     diff = await gitExec(["diff", "HEAD"]);
-  } catch {
-    // no diff available
+  } catch (error) {
+    stderr.write(
+      `Warning: failed to collect git diff; continuing with partial review context. ${formatReviewCommandError(error)}\n`
+    );
   }
 
   // 5. Build prompt
@@ -1365,33 +1418,55 @@ async function runReviewCommand(pitfallsFile, options) {
 
   // 6. Execute codex review
   const output = await (async () => {
-    if (typeof execRunner === "function") {
-      const result = await execRunner(prompt);
-      return String(result.stdout ?? result.output ?? "");
-    }
-
     try {
-      const result = await execFileAsync("codex", [
-        "exec",
-        "--sandbox", "read-only",
-        "-C", workDir,
-        prompt
-      ], {
-        encoding: "utf8",
-        cwd: workDir,
-        timeout: 120_000
-      });
-      return String(result.stdout ?? "");
+      const result = typeof execRunner === "function"
+        ? await execRunner(prompt)
+        : await execFileAsync("codex", [
+          "exec",
+          "--sandbox", "read-only",
+          "-C", workDir,
+          prompt
+        ], {
+          encoding: "utf8",
+          cwd: workDir,
+          timeout: 120_000
+        });
+      return String(result.stdout ?? result.output ?? "");
     } catch (error) {
-      return String(error.stdout ?? error.stderr ?? error.message ?? "");
+      const commandStdout = String(error?.stdout ?? "");
+      if (commandStdout) {
+        return commandStdout;
+      }
+
+      stderr.write(`Error: review command failed before producing output. ${formatReviewCommandError(error)}\n`);
+      exit(1);
+      return null;
     }
   })();
 
-  // 7. Print output
-  process.stdout.write(output);
-  if (output.length > 0 && !output.endsWith("\n")) {
-    process.stdout.write("\n");
+  if (output === null) {
+    return;
   }
+
+  // 7. Print output
+  stdout.write(output);
+  if (output.length > 0 && !output.endsWith("\n")) {
+    stdout.write("\n");
+  }
+
+  const status = parseReviewStatus(output);
+  if (status === "FAIL") {
+    exit(1);
+    return;
+  }
+
+  if (status === "PASS") {
+    exit(0);
+    return;
+  }
+
+  stderr.write("Error: ambiguous review output; expected REVIEW STATUS: PASS or REVIEW STATUS: FAIL.\n");
+  exit(1);
 }
 
 function main() {
@@ -1544,8 +1619,12 @@ function main() {
         journalFile,
         configFile: path.resolve(DEFAULT_CONFIG_FILE)
       });
-      console.log(`Pitfall resolved: ${entry.id}`);
-      console.log(`Pitfalls file: ${path.relative(process.cwd(), pitfallsFile)}`);
+      if (entry.skipped) {
+        console.log(`Pitfall already resolved: ${entry.id} (skipped)`);
+      } else {
+        console.log(`Pitfall resolved: ${entry.id}`);
+        console.log(`Pitfalls file: ${path.relative(process.cwd(), pitfallsFile)}`);
+      }
       return;
     }
 
@@ -1598,7 +1677,8 @@ export {
   deriveReviewPerspective,
   formatPitfallsForPrompt,
   buildReviewPrompt,
-  runReviewCommand
+  runReviewCommand,
+  parseReviewStatus
 };
 
 // Only run main() when this file is the entry point (not when imported).

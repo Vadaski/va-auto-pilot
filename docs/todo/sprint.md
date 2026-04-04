@@ -1,6 +1,6 @@
 # Sprint Board
 
-> Last updated: 2026-03-31 by VA Auto-Pilot
+> Last updated: 2026-04-04 by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:
@@ -22,7 +22,7 @@
 ## In Progress
 | ID | Task | Owner | Started | Notes |
 |----|------|-------|---------|-------|
-| AP-004 | Add unit test suite for sprint-board.mjs pure functions | - | 2026-02-23 | - |
+| - | - | - | - | - |
 
 ## Failed
 | ID | Task | Fail Count | Reason | Last Failed |
@@ -32,7 +32,7 @@
 ## Review
 | ID | Task | Implementer | Security | QA | Domain | Architect |
 |----|------|-------------|----------|----|--------|-----------|
-| AP-034 | Sprint 5 Task 1: Add layered journal view via journal --view | - | - | - | - | - |
+| - | - | - | - | - | - | - |
 
 ## Testing
 | ID | Task | Test Flow | MUST Pass Rate | SHOULD Pass Rate |
@@ -47,8 +47,11 @@
 | AP-020 | AP-020: va-anima 语义记忆升级 | 2026-03-25 | va-anima 213 tests pass, build pass. Ebbinghaus遗忘曲线+语义记忆升级 committed at 40696e5 |
 | AP-027 | 循环自驱：auto-pilot-loop 完成一轮后自动检测 backlog 并重启下一轮 | 2026-03-29 | - |
 | AP-028 | Auto commit：gate 通过后自动 stage + commit，消除变更堆积 | 2026-03-29 | - |
+| AP-038 | Fix fail-open review gate: reviewer timeout/failure must not silently become PASS | 2026-04-04 | Codex fix: review gate now fails closed. Timeout/crash/no-output -> passed=false. Missing REVIEW STATUS -> fail closed. 8 new regression tests. 219 tests pass. |
+| AP-039 | Fix fail-open sprint-board review: git errors suppressed, FAIL status does not cause non-zero exit | 2026-04-04 | Codex fix: sprint-board review now exits non-zero on FAIL/AMBIGUOUS. Git errors warn to stderr. 6 new regression tests. 219 tests pass. |
 | AP-001 | Upgrade multi-perspective review to dynamic perspective selection | 2026-02-23 | Two cross-reviews (adversarial + protocol designer), 6 CRITICALs resolved, templates synced |
 | AP-003 | Add sprint-board.mjs add command to create tasks via CLI without hand-editing JSON | 2026-02-23 | add command implemented: auto-ID (AP-NNN), validation, depends-on, regex-safe prefix; printHelp updated; templates mirrored; all gates pass |
+| AP-004 | Add unit test suite for sprint-board.mjs pure functions | 2026-02-23 | 41/41 unit tests pass via node:test; check:units added to check:all; all gates pass |
 | AP-006 | Expand test-flows to cover add, update, journal, and next CLI commands | 2026-02-23 | sprint-board-cli.yaml added (9 flows, 18 MUST/3 SHOULD); test-cli-flows.mjs runner with isolated_state/isolated_journal; check:cli-flows added to check:all; all gates pass |
 | AP-009 | Add Strategic Decomposition phase to protocol for high-level goals | 2026-02-23 | Strategic Decomposition section added to both protocol files. Specifies strategic vs tactical detection, parallel dimension-scan with independence constraint, structured audit report format, convergence step with run-journal schema, and transition back to tactical loop. Concurrency follows existing Concurrency Contract. Guards are bounded. npm run check:all and npm run validate:distribution pass. |
 | AP-010 | Add mandatory post-sprint independent adversarial review phase to protocol | 2026-02-23 | Sprint Completion Gate section added to both protocol files. Specifies adversarial reviewer setup (fresh context, diff-only), manager-assigned specific perspective grounded in what changed, structured finding report format, CRITICAL-blocks / WARNING-requires-disposition enforcement, and guard with control-downgrade semantics (not just disclosure) when fresh context is unavailable. npm run check:all and npm run validate:distribution pass. |
@@ -65,6 +68,8 @@
 | AP-026 | Resolve PF-002: cli-anything-blender PATH 修复，FORCE_INSTALLED=1 e2e 测试全绿 | 2026-03-25 | conftest.py PATH 前置修复，FORCE_INSTALLED=1 全部6个原失败e2e测试通过，54 passed 2 skipped |
 | AP-029 | 错误恢复策略：失败分类器 + 策略表（build/lint/test/review 各有不同恢复路径）+ 升级机制 | 2026-03-29 | - |
 | AP-030 | Review 决策结构化：finding → 自动创建 fix task + 历史修复模式库 + pitfall 自动注入 delegation | 2026-03-29 | - |
+| AP-034 | Sprint 5 Task 1: Add layered journal view via journal --view | 2026-04-04 | journal --view implemented: parseJournal+renderJournalView produce layered summary (Active Signals + Recent 5 + Earlier compressed). Protocol/prompt/templates updated. 3 unit + 2 CLI flow tests. check:all passed. Commit 41cd09f. |
+| AP-035 | Sprint 5 Task 2: Make sprint completion review perspective dynamic | 2026-04-04 | spawnSprintReviewer() now accepts perspective parameter. selectSprintReviewPerspective() analyzes changedFiles for stakeholder-grounded perspectives (CLI→CI dev, auth→security eng, protocol→adopter, tests→QA). Commit 8bba575. |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
@@ -72,12 +77,12 @@
 | AP-024 | va-anima autoRecall: 双语 tag/triggerConditions 支持（中文 context 无法命中英文 trigger） | 2026-03-25 | fix: 三项记忆系统缺陷修复 commit 1b4eba2 — autoRecall 双语支持已修复，213 tests pass |
 | AP-031 | 自适应质量门：pitfall → suggest gate + 自动写入 quality-gates.yaml + 跨项目 gate 继承 | 2026-03-29 | - |
 | AP-032 | 默认并行执行：auto-pilot-loop 从单任务循环改为任务池循环，plan 命令输出自动执行 | 2026-03-29 | - |
+| AP-036 | Sprint 5 Task 3: Move stack-specific quality gate examples out of protocol | 2026-04-04 | 5 stack-specific example sections extracted to docs/operations/quality-gate-examples.md. Protocol reduced 767→647 lines (-120). Templates synced. Commit 6dabc54. |
+| AP-037 | Sprint 5 Task 4: Inject unresolved pitfalls into evaluator review context | 2026-04-04 | sprint-board review command auto-injects stakeholder perspective + unresolved pitfalls. 9 unit tests covering perspective selection, pitfall formatting, prompt construction, full review flow. Protocol updated. Commit dc83411. |
 | AP-007 | Correct 'human-out-of-the-loop' framing to 'human-on-the-loop' across docs and website | 2026-02-23 | docs/human-on-the-loop.md created with updated framing; old file removed; README.md and README.zh.md references updated; all gates pass |
 | AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | 2026-03-29 | - |
 
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| P1 | AP-035 | Sprint 5 Task 2: Make sprint completion review perspective dynamic | - | - | human-board Sprint 5 |
-| P2 | AP-036 | Sprint 5 Task 3: Move stack-specific quality gate examples out of protocol | - | - | human-board Sprint 5 |
-| P2 | AP-037 | Sprint 5 Task 4: Inject unresolved pitfalls into evaluator review context | - | - | human-board Sprint 5 |
+| - | - | - | - | - | - |

@@ -78,7 +78,8 @@
 
   委派对象：Codex CLI（Task A 在 va-auto-pilot 仓，Task B 在 va-hub 仓，Task C 在 va-project 仓 — 三者可并行）。
 
-- [ ] **Sprint 5：Harness 优化（源自 Anthropic 长运行 Agent 工程博客分析）**
+- [x] **Sprint 5：Harness 优化（源自 Anthropic 长运行 Agent 工程博客分析）**
+> Processed 2026-04-04: All 4 tasks complete. AP-034 (journal --view), AP-035 (dynamic perspective), AP-036 (protocol extraction), AP-037 (pitfall injection into review). All committed 2026-03-30. Sprint state reconciled.
 
   基于 Anthropic 两篇工程博客（Effective Harnesses for Long-Running Agents + Harness Design for Long-Running Apps）的核心洞察，经四视角交叉分析确认的优化方向。按优先级排列：
 

@@ -1,0 +1,49 @@
+name: "Pitfall Lifecycle"
+description: |
+  Verifies the pitfall lifecycle: failure creates a pitfall entry,
+  the pitfall is injected into the next dispatch prompt.
+
+steps:
+  - label: "gate failure creates pitfall"
+    setup:
+      fixture: minimal-node
+      agent_behavior: fail
+      review_behavior: pass
+      sprint_state:
+        projectPrefix: E2E
+        tasks:
+          - id: E2E-001
+            title: "Write hello function"
+            priority: P1
+            state: Backlog
+            dependsOn: []
+    run:
+      args: ["scripts/auto-pilot-loop.mjs"]
+      flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "1", "--skip-sprint-review"]
+      env:
+        AGENT_CAPTURE_PROMPT: "1"
+    assert:
+      must:
+        - type: state_after
+          task: E2E-001
+          field: state
+          value: Failed
+        - type: pitfall_count
+          min: 1
+      should: []
+
+  - label: "pitfall exists and task can recover"
+    setup:
+      agent_behavior: pass
+    run:
+      args: ["scripts/auto-pilot-loop.mjs"]
+      flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "5", "--skip-sprint-review"]
+    assert:
+      must:
+        - type: state_after
+          task: E2E-001
+          field: state
+          value: Done
+      should:
+        - type: pitfall_for_task
+          task: E2E-001

@@ -21,6 +21,8 @@
     "check:coverage": "c8 --reporter=text node --test scripts/test-units.mjs",
     "typecheck": "npx tsc --noEmit",
     "check:all": "npm run check && npm run check:sprint && npm run check:units && npm run check:cli-flows && npm run validate:distribution",
+    "check:e2e": "node e2e/run-e2e.mjs --all",
+    "check:quality": "node e2e/quality/run-quality.mjs --all",
     "validate:distribution": "node ./scripts/validate-distribution.mjs",
     "auto-pilot": "node scripts/auto-pilot-loop.mjs"
   },

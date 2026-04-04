@@ -1,0 +1,42 @@
+name: "Human Board: Instruction Injection"
+description: |
+  Unchecked human board instructions are injected into the agent dispatch prompt.
+  The agent stub captures its prompt to a file, which is then checked.
+
+setup:
+  fixture: minimal-node
+  agent_behavior: pass
+  review_behavior: pass
+  sprint_state:
+    projectPrefix: E2E
+    tasks:
+      - id: E2E-001
+        title: "Write hello function"
+        priority: P1
+        state: Backlog
+        dependsOn: []
+  human_board: |
+    # Human Board
+
+    ## Instructions
+
+    - [ ] Use strict TypeScript types for all new code
+    - [ ] Add error handling for edge cases
+  pitfalls:
+    entries: []
+
+run:
+  args: ["scripts/auto-pilot-loop.mjs"]
+  flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "1", "--skip-sprint-review"]
+  env:
+    AGENT_CAPTURE_PROMPT: "1"
+
+assert:
+  must:
+    - type: exit_code
+      value: 0
+    - type: stdout_contains
+      pattern: "human-board instruction(s) injected"
+  should:
+    - type: stdout_contains
+      pattern: "strict TypeScript types"

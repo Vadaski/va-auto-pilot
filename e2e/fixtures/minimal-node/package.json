@@ -1,0 +1,8 @@
+{
+  "name": "e2e-fixture-minimal-node",
+  "type": "module",
+  "version": "1.0.0",
+  "scripts": {
+    "check:all": "node test/smoke.test.js"
+  }
+}

@@ -1,0 +1,43 @@
+name: "State Machine: Happy Path (Backlog -> Done)"
+description: |
+  Single task goes through the full state machine in one loop cycle.
+  Uses deterministic agent stub to avoid LLM non-determinism.
+  Verifies: Backlog -> In Progress -> Review -> Testing -> Done.
+
+setup:
+  fixture: minimal-node
+  agent_behavior: pass
+  review_behavior: pass
+  sprint_state:
+    projectPrefix: E2E
+    tasks:
+      - id: E2E-001
+        title: "Write hello function"
+        priority: P1
+        state: Backlog
+        dependsOn: []
+  human_board: |
+    # Human Board
+
+    ## Instructions
+  pitfalls:
+    entries: []
+
+run:
+  args: ["scripts/auto-pilot-loop.mjs"]
+  flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "5", "--skip-sprint-review"]
+
+assert:
+  must:
+    - type: exit_code
+      value: 0
+    - type: state_after
+      task: E2E-001
+      field: state
+      value: Done
+    - type: task_field
+      task: E2E-001
+      field: failCount
+      value: 0
+  should:
+    - type: all_gates_passed

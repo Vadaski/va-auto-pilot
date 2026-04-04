@@ -1,0 +1,64 @@
+name: "State Machine: Triple Fail Triggers Stop"
+description: |
+  Task fails 3 times consecutively. The loop should detect failCount >= 3
+  and stop with a FAIL_LIMIT_REACHED condition.
+  Uses multi-step: each step fails the agent once.
+
+steps:
+  - label: "first failure"
+    setup:
+      fixture: minimal-node
+      agent_behavior: fail
+      review_behavior: pass
+      sprint_state:
+        projectPrefix: E2E
+        tasks:
+          - id: E2E-001
+            title: "Write hello function"
+            priority: P1
+            state: Backlog
+            dependsOn: []
+    run:
+      args: ["scripts/auto-pilot-loop.mjs"]
+      flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "1", "--skip-sprint-review"]
+    assert:
+      must:
+        - type: state_after
+          task: E2E-001
+          field: state
+          value: Failed
+        - type: task_field
+          task: E2E-001
+          field: failCount
+          value: 1
+      should: []
+
+  - label: "second failure"
+    setup:
+      agent_behavior: fail
+    run:
+      args: ["scripts/auto-pilot-loop.mjs"]
+      flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "1", "--skip-sprint-review"]
+    assert:
+      must:
+        - type: task_field
+          task: E2E-001
+          field: failCount
+          value: 2
+      should: []
+
+  - label: "third failure triggers stop"
+    setup:
+      agent_behavior: fail
+    run:
+      args: ["scripts/auto-pilot-loop.mjs"]
+      flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "5", "--skip-sprint-review"]
+    assert:
+      must:
+        - type: task_field
+          task: E2E-001
+          field: failCount
+          value: 3
+        - type: stdout_contains
+          pattern: "Stop condition"
+      should: []

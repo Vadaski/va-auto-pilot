@@ -1,0 +1,32 @@
+name: "Sprint Completion Review"
+description: |
+  When all tasks are already Done, the loop detects sprint-complete
+  and stops. Sprint review is skipped (--skip-sprint-review) for stub mode.
+
+setup:
+  fixture: minimal-node
+  agent_behavior: pass
+  review_behavior: pass
+  sprint_state:
+    projectPrefix: E2E
+    tasks:
+      - id: E2E-001
+        title: "Write hello function"
+        priority: P1
+        state: Done
+        failCount: 0
+        dependsOn: []
+  pitfalls:
+    entries: []
+
+run:
+  args: ["scripts/auto-pilot-loop.mjs"]
+  flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "1", "--skip-sprint-review"]
+
+assert:
+  must:
+    - type: exit_code
+      value: 0
+    - type: stdout_contains
+      pattern: "sprint-complete"
+  should: []

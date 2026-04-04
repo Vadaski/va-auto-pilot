@@ -1,0 +1,59 @@
+name: "Demo: Full Sprint Lifecycle"
+description: |
+  Walkthrough of a complete sprint with 3 tasks.
+  Task 1: succeeds on first try (Backlog -> Done).
+  Task 2: fails once, then succeeds (Backlog -> Failed -> Done).
+  Task 3: succeeds on first try.
+  All tasks reach Done state.
+
+setup:
+  fixture: minimal-node
+  agent_behavior: pass
+  review_behavior: pass
+  sprint_state:
+    projectPrefix: DEMO
+    tasks:
+      - id: DEMO-001
+        title: "Add hello() function"
+        priority: P1
+        state: Backlog
+        dependsOn: []
+      - id: DEMO-002
+        title: "Add goodbye() function"
+        priority: P1
+        state: Backlog
+        dependsOn: []
+      - id: DEMO-003
+        title: "Add greet(name) function"
+        priority: P2
+        state: Backlog
+        dependsOn: []
+  human_board: |
+    # Human Board
+
+    ## Instructions
+  pitfalls:
+    entries: []
+
+run:
+  args: ["scripts/auto-pilot-loop.mjs"]
+  flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "15", "--skip-sprint-review"]
+
+assert:
+  must:
+    - type: exit_code
+      value: 0
+    - type: state_after
+      task: DEMO-001
+      field: state
+      value: Done
+    - type: state_after
+      task: DEMO-002
+      field: state
+      value: Done
+    - type: state_after
+      task: DEMO-003
+      field: state
+      value: Done
+  should:
+    - type: all_gates_passed

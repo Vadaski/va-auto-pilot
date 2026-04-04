@@ -1,0 +1,44 @@
+name: "Parallel Dispatch: Two Independent Tasks"
+description: |
+  Two independent tasks are dispatched concurrently in one cycle.
+  Both should reach Done state.
+
+setup:
+  fixture: minimal-node
+  agent_behavior: pass
+  review_behavior: pass
+  sprint_state:
+    projectPrefix: E2E
+    tasks:
+      - id: E2E-001
+        title: "Write hello function"
+        priority: P1
+        state: Backlog
+        dependsOn: []
+      - id: E2E-002
+        title: "Write goodbye function"
+        priority: P1
+        state: Backlog
+        dependsOn: []
+  pitfalls:
+    entries: []
+
+run:
+  args: ["scripts/auto-pilot-loop.mjs"]
+  flags: ["--no-colony", "--no-commit", "--max-parallel", "2", "--max-cycles", "5", "--skip-sprint-review"]
+
+assert:
+  must:
+    - type: exit_code
+      value: 0
+    - type: state_after
+      task: E2E-001
+      field: state
+      value: Done
+    - type: state_after
+      task: E2E-002
+      field: state
+      value: Done
+  should:
+    - type: stdout_contains
+      patterns: ["E2E-001", "E2E-002"]

@@ -1,0 +1,57 @@
+name: "Dispatch Prompt Quality"
+description: |
+  Evaluate the quality of auto-pilot's delegation prompt to sub-agents.
+  A good dispatch prompt gives the sub-agent everything it needs to execute
+  autonomously: clear objective, relevant context, known pitfalls, and human
+  intent — without prescribing implementation steps.
+
+dimensions:
+  - id: context_completeness
+    gene: context-sensitivity
+    description: "Does the prompt contain all necessary context (task objective, constraints, file paths where applicable)?"
+    scale:
+      0: "No task objective or completely empty prompt"
+      3: "Has a vague objective but no constraints or context"
+      5: "Has objective and some constraints but missing pitfall context or human board"
+      7: "Has objective + constraints + some pitfall/human context"
+      10: "Complete: clear objective + constraints + pitfalls + human board + acceptance criteria"
+
+  - id: pitfall_injection
+    gene: evidence-before-claim
+    description: "Are relevant known pitfalls correctly identified and injected as constraints?"
+    scale:
+      0: "No pitfalls mentioned despite unresolved entries existing"
+      3: "Pitfalls mentioned but are irrelevant to the current task"
+      5: "Some relevant pitfalls injected but missing key ones"
+      7: "All relevant pitfalls injected with descriptions"
+      10: "All relevant pitfalls injected with actionable avoidance guidance"
+
+  - id: human_board_incorporation
+    gene: toward-the-other
+    description: "Are human board instructions properly formatted and structured for acknowledgment?"
+    scale:
+      0: "Human board instructions completely ignored"
+      3: "Instructions mentioned but buried in noise"
+      5: "Instructions included but no acknowledgment structure provided"
+      7: "Instructions formatted with numbered list and acknowledgment request"
+      10: "Clear numbered instructions with explicit acknowledgment framework (ADDRESSED/SUPERSEDED/STILL_PENDING)"
+
+  - id: no_how_clause
+    gene: principle-not-rule
+    description: "Does the prompt delegate the goal without prescribing implementation steps?"
+    scale:
+      0: "Prescribes exact implementation steps line by line"
+      3: "Suggests specific implementation approach with code snippets"
+      5: "Describes desired behavior with some implementation hints"
+      7: "Clear objective with constraints, minimal implementation hints"
+      10: "Pure goal + constraints + acceptance criteria, zero implementation prescription"
+
+  - id: constraint_clarity
+    gene: architecture-first
+    description: "Are constraints (boundaries, hard rules, acceptance gates) clearly separated from context?"
+    scale:
+      0: "No constraints at all"
+      3: "Constraints mixed into prose, hard to distinguish from context"
+      5: "Some constraints separated but inconsistent formatting"
+      7: "Constraints in a dedicated section with clear markers"
+      10: "Constraints clearly separated: hard constraints marked, acceptance criteria listed, no ambiguity"

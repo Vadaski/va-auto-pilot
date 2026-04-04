@@ -1,0 +1,56 @@
+name: "Review Gate Quality"
+description: |
+  Evaluate the quality of the LLM-based code review gate output.
+  A good review finds real problems, respects the format contract,
+  leverages pitfall history, and avoids false positives.
+
+dimensions:
+  - id: format_compliance
+    gene: single-source-truth
+    description: "Does the output follow the REVIEW STATUS: PASS/FAIL + finding format contract?"
+    scale:
+      0: "No REVIEW STATUS line at all"
+      3: "Has status line but findings not in [SEVERITY] format"
+      5: "Partial compliance — some findings formatted, some not"
+      7: "All findings in correct format but status line ambiguous"
+      10: "Perfect format: clear REVIEW STATUS line + [SEVERITY] finding lines with file references"
+
+  - id: finding_depth
+    gene: evidence-before-claim
+    description: "Are findings substantive and backed by evidence from the diff, not generic platitudes?"
+    scale:
+      0: "No findings or completely generic (\"code could be improved\")"
+      3: "Findings reference general patterns but not specific code"
+      5: "Findings reference specific files/lines but reasoning is shallow"
+      7: "Findings reference specific code with clear reasoning"
+      10: "Findings reference specific code, explain WHY it's a problem, and suggest the fix direction"
+
+  - id: pitfall_awareness
+    gene: quality-gate-thinking
+    description: "Does the review actively probe for known failure patterns from the pitfall history?"
+    scale:
+      0: "No reference to pitfall history at all"
+      3: "Acknowledges pitfall existence but doesn't check for recurrence"
+      5: "Checks for some pitfall patterns but misses obvious ones"
+      7: "Systematically checks all relevant pitfall patterns"
+      10: "Proactively checks pitfall patterns AND identifies new patterns that should become pitfalls"
+
+  - id: severity_calibration
+    gene: principle-not-rule
+    description: "Are severity levels appropriate — real bugs marked CRITICAL, style issues marked WARNING?"
+    scale:
+      0: "All findings same severity regardless of actual impact"
+      3: "Severity inconsistent — style nits marked CRITICAL or real bugs marked WARNING"
+      5: "Mostly correct but some questionable severity assignments"
+      7: "Severity levels well-calibrated with one or two borderline cases"
+      10: "Perfect calibration: each finding's severity matches its actual impact on correctness/safety"
+
+  - id: false_positive_control
+    gene: toward-truth
+    description: "Are the findings genuine problems, not false alarms on correct code?"
+    scale:
+      0: "Majority of findings are false positives on correct code"
+      3: "Many false positives — flags patterns that are intentional or correct"
+      5: "Some false positives but most findings are real"
+      7: "Nearly all findings are genuine, one or two debatable"
+      10: "Zero false positives — every finding identifies a real issue or risk"

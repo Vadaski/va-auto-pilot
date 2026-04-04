@@ -1,0 +1,36 @@
+name: "Q02: Review Gate Depth"
+description: |
+  Tests the quality of the LLM-based review gate. Creates a realistic scenario
+  where a diff contains an introduced bug, and evaluates whether the review
+  correctly identifies it with appropriate severity.
+
+setup:
+  fixture: minimal-node
+  agent_behavior: pass
+  review_behavior: pass
+  sprint_state:
+    projectPrefix: Q
+    tasks:
+      - id: Q-002
+        title: "Fix greeting function edge case"
+        priority: P1
+        state: Backlog
+        dependsOn: []
+  pitfalls:
+    entries:
+      - id: PF-002
+        taskId: Q-002
+        failureType: test
+        attempted: "hello(null) returned hello null instead of hello stranger"
+        hypothesis: "Null check was missing in greeting function"
+        createdAt: "2026-04-03T12:00:00Z"
+        resolvedAt: ""
+
+run:
+  args: ["scripts/auto-pilot-loop.mjs"]
+  flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "5", "--skip-sprint-review"]
+
+assert:
+  must:
+    - type: exit_code
+      value: 0

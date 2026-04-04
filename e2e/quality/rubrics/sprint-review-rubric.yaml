@@ -1,0 +1,56 @@
+name: "Sprint Completion Review Quality"
+description: |
+  Evaluate the quality of the adversarial sprint completion review.
+  This is the most critical quality gate — an isolated reviewer with fresh
+  context must probe for hidden breakage from a stakeholder perspective.
+
+dimensions:
+  - id: adversarial_depth
+    gene: honest-limitation
+    description: "Does the review actively attack the changes looking for hidden breakage, not just rubber-stamp?"
+    scale:
+      0: "Passes everything without any critical analysis"
+      3: "Surface-level review only — checks obvious issues"
+      5: "Looks at changed code but doesn't probe edge cases or interactions"
+      7: "Probes edge cases, error paths, and cross-component interactions"
+      10: "Deep adversarial analysis: edge cases, error paths, backward compatibility, race conditions, missing tests"
+
+  - id: stakeholder_authenticity
+    gene: toward-the-other
+    description: "Does the review genuinely adopt the assigned stakeholder perspective (security engineer, CI automator, new team member, etc.)?"
+    scale:
+      0: "Generic review with no stakeholder perspective at all"
+      3: "Mentions the perspective but doesn't actually think from that viewpoint"
+      5: "Partially adopts the perspective for some findings"
+      7: "Clearly thinking from the stakeholder's needs and pain points"
+      10: "Deeply empathetic to the stakeholder — finds issues that would specifically hurt that persona"
+
+  - id: coverage_completeness
+    gene: architecture-first
+    description: "Does the review cover all changed files and all types of risk (correctness, security, performance, maintainability)?"
+    scale:
+      0: "Only reviews a subset of changed files"
+      3: "Reviews most files but only for one risk type"
+      5: "Reviews all files for correctness but misses security/performance"
+      7: "Reviews all files across multiple risk dimensions"
+      10: "Comprehensive: every changed file checked for correctness, security, performance, maintainability, and backward compatibility"
+
+  - id: finding_actionability
+    gene: evidence-before-claim
+    description: "Are findings specific enough to create fix tasks? Can someone act on each finding without guessing?"
+    scale:
+      0: "Findings are vague ('improve code quality')"
+      3: "Findings identify general areas but not specific code"
+      5: "Findings reference specific files but suggested action is unclear"
+      7: "Findings reference specific code with clear problem description"
+      10: "Each finding has: exact location, clear problem, impact explanation, and suggested fix direction — ready to become a task"
+
+  - id: json_output_quality
+    gene: quality-gate-thinking
+    description: "If JSON output is required, is it well-formed with proper structure (status, perspective, findings with severity)?"
+    scale:
+      0: "No JSON output at all"
+      3: "JSON is malformed or missing required fields"
+      5: "JSON is valid but findings lack severity or suggested task titles"
+      7: "JSON is valid with all required fields"
+      10: "Perfect JSON: valid, all required fields, findings well-structured, severity calibrated, suggested tasks actionable"

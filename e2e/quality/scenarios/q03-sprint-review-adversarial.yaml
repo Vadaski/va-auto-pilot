@@ -1,0 +1,30 @@
+name: "Q03: Sprint Review Adversarial Quality"
+description: |
+  Tests the quality of the sprint completion review. All tasks are already Done.
+  The loop should detect sprint-complete and trigger the adversarial reviewer.
+  The reviewer should provide deep analysis from a stakeholder perspective.
+
+setup:
+  fixture: minimal-node
+  agent_behavior: pass
+  review_behavior: pass
+  sprint_state:
+    projectPrefix: Q
+    tasks:
+      - id: Q-003
+        title: "Implement greeting utilities"
+        priority: P1
+        state: Done
+        failCount: 0
+        dependsOn: []
+  pitfalls:
+    entries: []
+
+run:
+  args: ["scripts/auto-pilot-loop.mjs"]
+  flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "1"]
+
+assert:
+  must:
+    - type: exit_code
+      value: 0

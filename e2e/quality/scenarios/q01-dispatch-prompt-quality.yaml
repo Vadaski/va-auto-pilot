@@ -1,0 +1,44 @@
+name: "Q01: Dispatch Prompt Quality"
+description: |
+  Tests the quality of the dispatch prompt when auto-pilot delegates a task
+  to a sub-agent. The prompt should contain: clear objective, relevant pitfalls,
+  human board instructions, and no implementation prescription.
+
+setup:
+  fixture: minimal-node
+  agent_behavior: pass
+  review_behavior: pass
+  sprint_state:
+    projectPrefix: Q
+    tasks:
+      - id: Q-001
+        title: "Add a hello(name) function to index.js that returns a personalized greeting"
+        priority: P1
+        state: Backlog
+        dependsOn: []
+        notes: "The function must handle null/undefined input gracefully."
+  human_board: |
+    # Human Board
+
+    ## Instructions
+
+    - [ ] Use strict TypeScript-style parameter validation
+    - [ ] All new code must have corresponding test coverage
+  pitfalls:
+    entries:
+      - id: PF-001
+        taskId: Q-001
+        failureType: build
+        attempted: "Added hello() but forgot to export it"
+        hypothesis: "Missing export caused build gate failure"
+        createdAt: "2026-04-03T10:00:00Z"
+        resolvedAt: ""
+
+run:
+  args: ["scripts/auto-pilot-loop.mjs"]
+  flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "3", "--skip-sprint-review"]
+
+assert:
+  must:
+    - type: exit_code
+      value: 0

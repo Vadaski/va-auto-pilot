@@ -1,0 +1,50 @@
+name: "Q05: Pitfall Injection Effectiveness"
+description: |
+  Tests whether the auto-pilot correctly injects relevant pitfalls into the
+  dispatch prompt and ignores irrelevant ones. Multiple pitfalls exist for
+  different tasks — only the one matching the dispatched task should appear.
+
+setup:
+  fixture: minimal-node
+  agent_behavior: pass
+  review_behavior: pass
+  sprint_state:
+    projectPrefix: Q
+    tasks:
+      - id: Q-005
+        title: "Refactor index.js to use named exports"
+        priority: P1
+        state: Backlog
+        dependsOn: []
+  pitfalls:
+    entries:
+      - id: PF-005A
+        taskId: Q-005
+        failureType: build
+        attempted: "Changed to named exports but forgot to update import in test file"
+        hypothesis: "Import/export mismatch after refactor"
+        createdAt: "2026-04-03T16:00:00Z"
+        resolvedAt: ""
+      - id: PF-005B
+        taskId: Q-999
+        failureType: test
+        attempted: "Unrelated pitfall for a different task"
+        hypothesis: "Should NOT be injected into Q-005 dispatch"
+        createdAt: "2026-04-03T16:00:00Z"
+        resolvedAt: ""
+      - id: PF-005C
+        taskId: Q-005
+        failureType: build
+        attempted: "Forgot to re-export the hello function after refactor"
+        hypothesis: "Missing re-export breaks dependent modules"
+        createdAt: "2026-04-03T16:05:00Z"
+        resolvedAt: ""
+
+run:
+  args: ["scripts/auto-pilot-loop.mjs"]
+  flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "5", "--skip-sprint-review"]
+
+assert:
+  must:
+    - type: exit_code
+      value: 0

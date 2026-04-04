@@ -1,0 +1,45 @@
+name: "Q04: Recovery Strategy Quality"
+description: |
+  Tests the quality of the dispatch prompt when recovering from a failed task.
+  The task has already failed once. The dispatch prompt should include:
+  failure context, recovery guidance, and relevant pitfalls.
+
+setup:
+  fixture: minimal-node
+  agent_behavior: pass
+  review_behavior: pass
+  sprint_state:
+    projectPrefix: Q
+    tasks:
+      - id: Q-004
+        title: "Implement data validation for user input"
+        priority: P1
+        state: Failed
+        failCount: 1
+        dependsOn: []
+        notes: "Must validate email, phone, and name fields"
+        failureDetail:
+          failureType: build
+          attempted: "Added validation but forgot to handle undefined input"
+          hypothesis: "Missing null check in validation chain"
+          missingContext: "Unknown expected behavior for empty string input"
+  pitfalls:
+    entries:
+      - id: PF-004
+        taskId: Q-004
+        failureType: build
+        attempted: "Forgot to handle undefined input in validation"
+        hypothesis: "Null/undefined check missing at function entry"
+        createdAt: "2026-04-03T14:00:00Z"
+        resolvedAt: ""
+
+run:
+  args: ["scripts/auto-pilot-loop.mjs"]
+  flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "5", "--skip-sprint-review"]
+
+assert:
+  must:
+    - type: state_after
+      task: Q-004
+      field: state
+      value: Done

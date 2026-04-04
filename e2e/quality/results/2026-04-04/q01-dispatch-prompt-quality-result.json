@@ -1,0 +1,58 @@
+{
+  "timestamp": "2026-04-04T16:30:23.491Z",
+  "scenario": "Q01: Dispatch Prompt Quality",
+  "scenario_file": "q01-dispatch-prompt-quality.yaml",
+  "structural_passed": false,
+  "quality_score": 5.8,
+  "overall_passed": false,
+  "probes_collected": 1,
+  "judge_results": [
+    {
+      "probe_id": "1775320073130-qlr0jv",
+      "type": "dispatch",
+      "raw": "```json\n{\n  \"dimensions\": [\n    {\n      \"id\": \"context_completeness\",\n      \"score\": 4,\n      \"reason\": \"Has a brief objective and human board constraints, but missing file paths, function name, broader task context, and explicit acceptance criteria beyond the board items.\"\n    },\n    {\n      \"id\": \"pitfall_injection\",\n      \"score\": 0,\n      \"reason\": \"No known pitfalls, edge case warnings, or avoidance guidance are injected anywhere in the prompt.\"\n    },\n    {\n      \"id\": \"human_board_incorporation\",\n      \"score\": 10,\n      \"reason\": \"Clear numbered checklist with explicit ADDRESSED/SUPERSEDED/STILL_PENDING acknowledgment framework and a named return section for journaling.\"\n    },\n    {\n      \"id\": \"no_how_clause\",\n      \"score\": 10,\n      \"reason\": \"Pure goal statement with constraints; zero implementation prescription or code hints — the agent decides how to achieve the objective.\"\n    },\n    {\n      \"id\": \"constraint_clarity\",\n      \"score\": 5,\n      \"reason\": \"Human board constraints are well-formatted, but the primary constraint (handle null/undefined gracefully) is an undifferentiated prose sentence with no clear hard-constraint vs acceptance-criteria separation.\"\n    }\n  ],\n  \"overall_score\": 5.8,\n  \"issues\": [\n    \"No file paths, function signatures, or module context provided — the agent must guess where to write code.\",\n    \"Zero pitfall or edge-case injection; common issues like type coercion quirks, empty string vs null semantics, and strict-mode implications are not surfaced.\",\n    \"The main objective ('handle null/undefined input gracefully') is vague — no definition of 'gracefully' (return default? throw? return null?) is given.\",\n    \"Constraints are not partitioned into hard rules vs acceptance criteria; the single prose line blends objective and constraint.\"\n  ],\n  \"improvement_suggestions\": [\n    \"Add file path(s) and function name/signature context so the agent writes code in the correct location.\",\n    \"Include a 'Known Pitfalls' section with at least 2-3 relevant issues (e.g., TypeScript strict null checks, empty string vs null distinction) and actionable avoidance guidance.\",\n    \"Define 'gracefully' concretely — specify the expected return behavior for null/undefined (e.g., return a default value, throw a typed error, or return null).\",\n    \"Separate hard constraints (e.g., 'must use strict TypeScript-style validation') from acceptance criteria (e.g., 'all tests pass, null/undefined return default string') in a dedicated, clearly marked section.\"\n  ]\n}\n```",
+      "parsed": true,
+      "dimensions": [
+        {
+          "id": "context_completeness",
+          "score": 4,
+          "reason": "Has a brief objective and human board constraints, but missing file paths, function name, broader task context, and explicit acceptance criteria beyond the board items."
+        },
+        {
+          "id": "pitfall_injection",
+          "score": 0,
+          "reason": "No known pitfalls, edge case warnings, or avoidance guidance are injected anywhere in the prompt."
+        },
+        {
+          "id": "human_board_incorporation",
+          "score": 10,
+          "reason": "Clear numbered checklist with explicit ADDRESSED/SUPERSEDED/STILL_PENDING acknowledgment framework and a named return section for journaling."
+        },
+        {
+          "id": "no_how_clause",
+          "score": 10,
+          "reason": "Pure goal statement with constraints; zero implementation prescription or code hints — the agent decides how to achieve the objective."
+        },
+        {
+          "id": "constraint_clarity",
+          "score": 5,
+          "reason": "Human board constraints are well-formatted, but the primary constraint (handle null/undefined gracefully) is an undifferentiated prose sentence with no clear hard-constraint vs acceptance-criteria separation."
+        }
+      ],
+      "overall_score": 5.8,
+      "issues": [
+        "No file paths, function signatures, or module context provided — the agent must guess where to write code.",
+        "Zero pitfall or edge-case injection; common issues like type coercion quirks, empty string vs null semantics, and strict-mode implications are not surfaced.",
+        "The main objective ('handle null/undefined input gracefully') is vague — no definition of 'gracefully' (return default? throw? return null?) is given.",
+        "Constraints are not partitioned into hard rules vs acceptance criteria; the single prose line blends objective and constraint."
+      ],
+      "improvement_suggestions": [
+        "Add file path(s) and function name/signature context so the agent writes code in the correct location.",
+        "Include a 'Known Pitfalls' section with at least 2-3 relevant issues (e.g., TypeScript strict null checks, empty string vs null distinction) and actionable avoidance guidance.",
+        "Define 'gracefully' concretely — specify the expected return behavior for null/undefined (e.g., return a default value, throw a typed error, or return null).",
+        "Separate hard constraints (e.g., 'must use strict TypeScript-style validation') from acceptance criteria (e.g., 'all tests pass, null/undefined return default string') in a dedicated, clearly marked section."
+      ]
+    }
+  ],
+  "duration_ms": 154788
+}

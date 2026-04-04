@@ -33,13 +33,9 @@ setup:
         createdAt: "2026-04-03T14:00:00Z"
         resolvedAt: ""
 
+probes:
+  - dispatch
+
 run:
   args: ["scripts/auto-pilot-loop.mjs"]
   flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "5", "--skip-sprint-review"]
-
-assert:
-  must:
-    - type: state_after
-      task: Q-004
-      field: state
-      value: Done

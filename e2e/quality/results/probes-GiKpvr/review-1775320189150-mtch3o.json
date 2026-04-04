@@ -1,0 +1,13 @@
+{
+  "id": "1775320189150-mtch3o",
+  "type": "review",
+  "timestamp": "2026-04-04T16:30:23.807Z",
+  "model": "gc@glm-5.1",
+  "prompt": "(empty review prompt)",
+  "metadata": {},
+  "response": "It looks like your prompt is empty! 📝 \n\nIf you're looking to do something related to a **review**, I can help you with a few different things:\n\n*   **Writing a review:** Tell me the name of the product, book, movie, restaurant, or business, and I'll help you draft a review.\n*   **Responding to a review:** Paste a review a customer left for you, and I can help write a professional reply.\n*   **Summarizing reviews:** Paste a batch of reviews, and I can pull out the common themes, pros, and cons.\n*   **Reviewing your writing:** Paste an essay, email, or article, and I can proofread it and offer improvements.\n*   **Code review:** Paste your code, and I can look for bugs or suggest best practices.\n\nJust let me know what you'd like to do, or feel free to paste your text right here!",
+  "usage": {
+    "input_tokens": 100,
+    "output_tokens": 943
+  }
+}

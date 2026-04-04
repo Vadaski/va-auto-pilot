@@ -1,0 +1,13 @@
+{
+  "id": "1775323668471-d7uch4",
+  "type": "review",
+  "timestamp": "2026-04-04T17:28:21.133Z",
+  "model": "gc@glm-5.1",
+  "prompt": "(empty review prompt)",
+  "metadata": {},
+  "response": "It looks like you left your prompt empty! \n\nIf you are looking to write a review but aren't sure where to start, I can help you draft one. Just reply with a few details:\n\n1. **What are you reviewing?** (e.g., a restaurant, a recent online purchase, a book, a movie, or a software tool)\n2. **What rating are you giving it?** (e.g., 1 star, 3 stars, 5 stars)\n3. **What were the main pros and cons?** (e.g., \"The food was great, but the service was slow\" or \"The battery life is amazing.\")\n\nAlternatively, if you just want a template to fill out yourself, here are a few options:\n\n**For a Product:**\n> \"I've been using the [Product Name] for [Time Period] and I am [completely satisfied / mostly happy / very disappointed]. The best thing about it is [Pros], but I did find that [Cons]. Overall, I [would / would not] recommend this to anyone looking for [Product Type].\"\n\n**For a Restaurant/Service:**\n> \"I recently visited [Business Name] and had a [wonderful / terrible] experience. The staff was [friendly / unhelpful] and the [food/service] was [delicious / lacking]. I especially liked [Specific Detail]. I am giving it [X] stars and [will / will not] be returning.\"\n\n**Tell me what you want to review, and I'll write it for you!**",
+  "usage": {
+    "input_tokens": 100,
+    "output_tokens": 1136
+  }
+}

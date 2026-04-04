@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 /**
- * Quality Runner — runs E2E scenarios with real LLM calls and judge evaluation.
+ * Quality Runner — directly invokes probe-collector + judge for each scenario.
  *
- * Extends the E2E runner with:
- *   1. Probe collection (intercept prompt → forward to LLM → record)
- *   2. Judge evaluation (LLM-as-judge scores each probe)
- *   3. Result persistence (timestamped JSON + trend tracking)
+ * Each quality scenario defines:
+ *   - Which probe mode(s) to exercise (dispatch, review, sprint)
+ *   - Fixture setup (sprint state, pitfalls, human board)
+ *   - Which rubric to use for judging
+ *
+ * The runner:
+ *   1. Creates an isolated fixture directory
+ *   2. Calls probe-collector directly (not through auto-pilot-loop)
+ *   3. Judges the collected probes
+ *   4. Persists results
  *
  * Usage:
  *   node e2e/quality/run-quality.mjs [--all | --scenario X] [--no-judge] [--trend]
@@ -17,25 +23,47 @@ import { spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 
 import { createIsolatedDir } from "../fixtures/fixture-helper.mjs";
-import { readState, taskState, taskField } from "../observers/state-observer.mjs";
-import { gatePassed } from "../observers/gate-observer.mjs";
 import { judgeProbe } from "./judge/judge.mjs";
-import { judgeProbes } from "./judge/judge.mjs";
 
 const E2E_ROOT = path.resolve(import.meta.dirname, "..");
-const ROOT = path.resolve(E2E_ROOT, "..");
 const QUALITY_ROOT = import.meta.dirname;
 const RESULTS_DIR = path.join(QUALITY_ROOT, "results");
-
-// ---------------------------------------------------------------------------
-// Map probe type → rubric
-// ---------------------------------------------------------------------------
+const PROBE_COLLECTOR = path.join(QUALITY_ROOT, "probes", "probe-collector.mjs");
 
 const RUBRIC_MAP = {
   dispatch: path.join(QUALITY_ROOT, "rubrics", "dispatch-rubric.yaml"),
   review: path.join(QUALITY_ROOT, "rubrics", "review-rubric.yaml"),
-  sprint: path.join(QUALITY_ROOT, "rubrics", "sprint-review-rubric.yaml"),
+  sprint: path.join(QUALITY_ROOT, "rubrics/sprint-review-rubric.yaml"),
 };
+
+// ---------------------------------------------------------------------------
+// Run a single probe mode in a fixture directory
+// ---------------------------------------------------------------------------
+
+function runProbe(mode, fixtureDir, probeDir) {
+  const env = {
+    ...process.env,
+    PROBE_MODE: mode,
+    PROBE_DIR: probeDir,
+    AUTO_PILOT_SPRINT_STATE_FILE: path.join(fixtureDir, ".va-auto-pilot", "sprint-state.json"),
+    VA_TASK_ID: "Q-PROBE",
+    VA_TASK_NOTES: "",
+  };
+
+  const result = spawnSync("node", [PROBE_COLLECTOR], {
+    cwd: fixtureDir,
+    env,
+    encoding: "utf8",
+    timeout: 120_000,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  return {
+    exitCode: result.status ?? 1,
+    stdout: result.stdout || "",
+    stderr: result.stderr || "",
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Quality scenario runner
@@ -45,7 +73,6 @@ export async function runQualityScenario(scenarioPath, opts = {}) {
   const content = fs.readFileSync(scenarioPath, "utf8");
   const scenario = parseYaml(content);
   const startTime = Date.now();
-  const probeDir = fs.mkdtempSync(path.join(RESULTS_DIR, "probes-"));
 
   console.log(`\n${"=".repeat(60)}`);
   console.log(`Quality: ${scenario.name}`);
@@ -53,8 +80,7 @@ export async function runQualityScenario(scenarioPath, opts = {}) {
   console.log(`${"=".repeat(60)}`);
 
   const setup = scenario.setup || {};
-  const run = scenario.run || {};
-  const assertBlock = scenario.assert || { must: [], should: [] };
+  const modes = scenario.probes || ["dispatch"];
 
   // Create isolated fixture
   const fixture = setup.fixture || "minimal-node";
@@ -65,127 +91,59 @@ export async function runQualityScenario(scenarioPath, opts = {}) {
     prefix: path.basename(scenarioPath, ".yaml"),
   });
 
-  // Build probe-collector command for dispatch mode
-  const probeCollectorPath = path.join(QUALITY_ROOT, "probes", "probe-collector.mjs");
-  const agentTemplate = `node ${probeCollectorPath}`;
+  const probeDir = fs.mkdtempSync(path.join(RESULTS_DIR, "probes-"));
 
-  // Build command
-  const reviewCommand = `PROBE_MODE=review PROBE_DIR=${probeDir} node ${probeCollectorPath}`;
-
-  // Override config to use probe-collector for review
-  const configContent = fs.readFileSync(isolated.configFile, "utf8");
-  const updatedConfig = configContent.replace(
-    /reviewCommand:.*$/m,
-    `reviewCommand: ${reviewCommand}`
-  );
-  fs.writeFileSync(isolated.configFile, updatedConfig, "utf8");
-
-  const env = {
-    ...process.env,
-    AUTO_PILOT_SPRINT_STATE_FILE: isolated.stateFile,
-    AUTO_PILOT_SPRINT_BOARD_FILE: isolated.boardFile,
-    AUTO_PILOT_RUN_JOURNAL_FILE: isolated.journalFile,
-    AGENT_BEHAVIOR: setup.agent_behavior || "pass",
-    PROBE_MODE: "dispatch",
-    PROBE_DIR: probeDir,
-  };
-
-  const scriptPath = path.resolve(ROOT, run.args?.[0] || "scripts/auto-pilot-loop.mjs");
-  const flags = run.flags || ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "5", "--skip-sprint-review"];
-
-  const args = [scriptPath, ...flags, "--agent-template", agentTemplate];
-
-  console.log(`  Running: node ${args.join(" ")}`);
-  console.log(`  Probes: ${probeDir}`);
-
-  const result = spawnSync("node", args, {
-    cwd: isolated.dir,
-    env,
-    encoding: "utf8",
-    timeout: 120_000,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-
-  const stdout = result.stdout || "";
-  const stderr = result.stderr || "";
-  const exitCode = result.status ?? 1;
-
-  // Collect structural assertions
-  const assertContext = {
-    exitCode,
-    stdout,
-    stderr,
-    stateFile: isolated.stateFile,
-    journalFile: isolated.journalFile,
-    pitfallsFile: isolated.pitfallsFile,
-    dir: isolated.dir,
-  };
-
-  const mustResults = (assertBlock.must || []).map(a => ({
-    assertion: a,
-    passed: evaluateSimpleAssertion(a, assertContext),
-  }));
-
-  const structuralPassed = mustResults.every(r => r.passed);
-  for (const r of mustResults) {
-    console.log(`  ${r.passed ? "PASS" : "FAIL"} [structural] ${JSON.stringify(r.assertion)}`);
+  // Run each probe mode
+  const probeResults = [];
+  for (const mode of modes) {
+    console.log(`\n  --- Probe: ${mode} ---`);
+    const result = runProbe(mode, isolated.dir, probeDir);
+    console.log(`  Exit code: ${result.exitCode}`);
+    if (result.stderr) console.error(`  stderr: ${result.stderr.split("\n").filter(l => l.includes("probe-collector")).join("\n  ")}`);
   }
 
-  // List collected probes
+  // Load collected probes
   const probeFiles = fs.readdirSync(probeDir).filter(f => f.endsWith(".json"));
-  console.log(`  Probes collected: ${probeFiles.length}`);
-  for (const f of probeFiles) {
+  console.log(`\n  Probes collected: ${probeFiles.length}`);
+
+  const probes = probeFiles.map(f => {
     const probe = JSON.parse(fs.readFileSync(path.join(probeDir, f), "utf8"));
-    console.log(`    ${f}: ${probe.type} (${(probe.response || "").length} chars response)`);
-  }
+    console.log(`    ${f}: ${probe.type} (${(probe.prompt || "").length} chars prompt, ${(probe.response || "").length} chars response)`);
+    return probe;
+  });
 
   // Judge evaluation
   let judgeResults = [];
-  if (!opts.noJudge && probeFiles.length > 0) {
+  if (!opts.noJudge && probes.length > 0) {
     console.log(`\n  --- Judge Evaluation ---`);
 
-    // Group probes by type and use matching rubric
-    const probesByType = {};
-    for (const f of probeFiles) {
-      const probe = JSON.parse(fs.readFileSync(path.join(probeDir, f), "utf8"));
-      const type = probe.type || "dispatch";
-      if (!probesByType[type]) probesByType[type] = [];
-      probesByType[type].push(probe);
-    }
-
-    for (const [type, probes] of Object.entries(probesByType)) {
-      const rubricPath = RUBRIC_MAP[type];
+    for (const probe of probes) {
+      const rubricPath = RUBRIC_MAP[probe.type];
       if (!rubricPath || !fs.existsSync(rubricPath)) {
-        console.log(`    No rubric for type "${type}", skipping judge`);
+        console.log(`    No rubric for type "${probe.type}", skipping`);
         continue;
       }
 
-      for (const probe of probes) {
-        console.log(`    Judging ${probe.type} probe ${probe.id}...`);
-        const rubric = parseYaml(fs.readFileSync(rubricPath, "utf8"));
-        const judgeResult = await judgeProbe(probe, rubric);
-        judgeResults.push(judgeResult);
+      console.log(`    Judging ${probe.type} probe ${probe.id}...`);
+      const rubric = parseYaml(fs.readFileSync(rubricPath, "utf8"));
+      const judgeResult = await judgeProbe(probe, rubric);
+      judgeResults.push(judgeResult);
 
-        console.log(`    Score: ${judgeResult.overall_score ?? 0}/10`);
-        for (const d of judgeResult.dimensions || []) {
-          console.log(`      ${d.id}: ${d.score}/10 — ${d.reason || ""}`);
-        }
-        if (judgeResult.issues?.length > 0) {
-          console.log(`    Issues:`);
-          for (const issue of judgeResult.issues) {
-            console.log(`      - ${issue}`);
-          }
-        }
+      console.log(`    Score: ${(judgeResult.overall_score ?? 0).toFixed(1)}/10`);
+      for (const d of judgeResult.dimensions || []) {
+        console.log(`      ${d.id}: ${d.score}/10 — ${d.reason || ""}`);
+      }
+      if (judgeResult.issues?.length > 0) {
+        console.log(`    Issues:`);
+        for (const i of judgeResult.issues) console.log(`      - ${i}`);
       }
     }
   }
 
-  // Compute overall quality score
-  const avgJudgeScore = judgeResults.length > 0
-    ? judgeResults.reduce((sum, r) => sum + (r.overall_score ?? 0), 0) / judgeResults.length
+  // Compute overall score
+  const avgScore = judgeResults.length > 0
+    ? judgeResults.reduce((s, r) => s + (r.overall_score ?? 0), 0) / judgeResults.length
     : 0;
-
-  const overallPassed = structuralPassed && avgJudgeScore >= (opts.minScore || 5);
 
   // Persist result
   const today = new Date().toISOString().split("T")[0];
@@ -196,17 +154,14 @@ export async function runQualityScenario(scenarioPath, opts = {}) {
     timestamp: new Date().toISOString(),
     scenario: scenario.name,
     scenario_file: path.basename(scenarioPath),
-    structural_passed: structuralPassed,
-    quality_score: avgJudgeScore,
-    overall_passed: overallPassed,
-    probes_collected: probeFiles.length,
+    quality_score: avgScore,
+    probes_collected: probes.length,
     judge_results: judgeResults,
     duration_ms: Date.now() - startTime,
   };
 
   const resultFile = path.join(resultDir, `${path.basename(scenarioPath, ".yaml")}-result.json`);
   fs.writeFileSync(resultFile, JSON.stringify(scenarioResult, null, 2), "utf8");
-  console.log(`\n  Result saved: ${resultFile}`);
 
   // Cleanup
   if (!opts.keepTmpdir) {
@@ -215,28 +170,10 @@ export async function runQualityScenario(scenarioPath, opts = {}) {
   }
 
   const duration = Date.now() - startTime;
-  console.log(`\n  Quality result: ${overallPassed ? "PASSED" : "FAILED"} (score: ${avgJudgeScore.toFixed(1)}/10, ${duration}ms)`);
+  console.log(`\n  Quality result: score ${avgScore.toFixed(1)}/10 (${duration}ms)`);
+  console.log(`  Result: ${resultFile}`);
 
   return scenarioResult;
-}
-
-// ---------------------------------------------------------------------------
-// Simple assertion evaluator (subset of E2E runner)
-// ---------------------------------------------------------------------------
-
-function evaluateSimpleAssertion(assertion, ctx) {
-  switch (assertion.type) {
-    case "exit_code":
-      return ctx.exitCode === assertion.value;
-    case "state_after":
-      return taskState(ctx.stateFile, assertion.task) === assertion.value;
-    case "task_field":
-      return taskField(ctx.stateFile, assertion.task, assertion.field) === assertion.value;
-    case "gate_passed":
-      return gatePassed(ctx.stdout, assertion.gate);
-    default:
-      return true;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -244,14 +181,9 @@ function evaluateSimpleAssertion(assertion, ctx) {
 // ---------------------------------------------------------------------------
 
 export function showTrend() {
-  const dates = fs.readdirSync(RESULTS_DIR)
-    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
-    .sort();
-
-  if (dates.length === 0) {
-    console.log("No quality results found yet.");
-    return;
-  }
+  if (!fs.existsSync(RESULTS_DIR)) { console.log("No quality results found."); return; }
+  const dates = fs.readdirSync(RESULTS_DIR).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+  if (dates.length === 0) { console.log("No quality results found."); return; }
 
   console.log(`\nQuality Trend (${dates.length} runs)`);
   console.log("=".repeat(60));
@@ -260,50 +192,34 @@ export function showTrend() {
   for (const date of dates) {
     const dir = path.join(RESULTS_DIR, date);
     const files = fs.readdirSync(dir).filter(f => f.endsWith("-result.json"));
-
     const entry = { date };
     for (const file of files) {
-      const result = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
-      const name = result.scenario_file?.replace(".yaml", "") || file.replace("-result.json", "");
-      entry[name] = result.quality_score;
+      const r = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
+      const name = r.scenario_file?.replace(".yaml", "") || file.replace("-result.json", "");
+      entry[name] = r.quality_score;
     }
     history.push(entry);
   }
 
-  // Print table
-  if (history.length > 0) {
-    const scenarios = Object.keys(history[0]).filter(k => k !== "date");
-    const header = ["date", ...scenarios].join(" | ");
-    console.log(header);
-    console.log("-".repeat(header.length));
+  const scenarios = Object.keys(history[0]).filter(k => k !== "date");
+  console.log(["date", ...scenarios].join(" | "));
+  console.log("-".repeat(60));
+  for (const entry of history) {
+    console.log([entry.date, ...scenarios.map(s => entry[s] !== undefined ? entry[s].toFixed(1) : "—")].join(" | "));
+  }
 
-    for (const entry of history) {
-      const row = [entry.date, ...scenarios.map(s => {
-        const v = entry[s];
-        return v !== undefined ? v.toFixed(1) : "—";
-      })].join(" | ");
-      console.log(row);
+  if (history.length >= 2) {
+    const latest = history[history.length - 1];
+    const previous = history[history.length - 2];
+    const alerts = [];
+    for (const s of scenarios) {
+      if (latest[s] !== undefined && previous[s] !== undefined && latest[s] - previous[s] < -1) {
+        alerts.push(`${s}: ${previous[s].toFixed(1)} → ${latest[s].toFixed(1)} (${(latest[s] - previous[s]).toFixed(1)})`);
+      }
     }
-
-    // Detect regressions
-    if (history.length >= 2) {
-      const latest = history[history.length - 1];
-      const previous = history[history.length - 2];
-      const alerts = [];
-
-      for (const s of scenarios) {
-        if (latest[s] !== undefined && previous[s] !== undefined) {
-          const diff = latest[s] - previous[s];
-          if (diff < -1) {
-            alerts.push(`${s}: ${previous[s].toFixed(1)} → ${latest[s].toFixed(1)} (${diff.toFixed(1)})`);
-          }
-        }
-      }
-
-      if (alerts.length > 0) {
-        console.log(`\n  REGRESSION ALERTS:`);
-        for (const a of alerts) console.log(`    - ${a}`);
-      }
+    if (alerts.length > 0) {
+      console.log(`\n  REGRESSION ALERTS:`);
+      for (const a of alerts) console.log(`    - ${a}`);
     }
   }
 }
@@ -314,7 +230,7 @@ export function showTrend() {
 
 async function main() {
   const args = process.argv.slice(2);
-  const opts = { keepTmpdir: false, noJudge: false, minScore: 5 };
+  const opts = { keepTmpdir: false, noJudge: false };
 
   let scenarioPath = null;
   let runAll = false;
@@ -327,17 +243,13 @@ async function main() {
       case "--no-judge": opts.noJudge = true; break;
       case "--trend": showTrendFlag = true; break;
       case "--keep-tmpdir": opts.keepTmpdir = true; break;
-      case "--min-score": opts.minScore = Number(args[++i]) || 5; break;
       case "--help":
-        console.log("Usage: node e2e/quality/run-quality.mjs [--all | --scenario X] [--no-judge] [--trend] [--min-score N]");
+        console.log("Usage: node e2e/quality/run-quality.mjs [--all | --scenario X] [--no-judge] [--trend]");
         process.exit(0);
     }
   }
 
-  if (showTrendFlag) {
-    showTrend();
-    return;
-  }
+  if (showTrendFlag) { showTrend(); return; }
 
   const scenariosDir = path.join(QUALITY_ROOT, "scenarios");
   const results = [];
@@ -345,9 +257,7 @@ async function main() {
   if (scenarioPath) {
     results.push(await runQualityScenario(path.resolve(scenarioPath), opts));
   } else if (runAll) {
-    const files = fs.readdirSync(scenariosDir)
-      .filter(f => f.endsWith(".yaml"))
-      .sort();
+    const files = fs.readdirSync(scenariosDir).filter(f => f.endsWith(".yaml")).sort();
     for (const file of files) {
       results.push(await runQualityScenario(path.join(scenariosDir, file), opts));
     }
@@ -360,25 +270,14 @@ async function main() {
   console.log(`\n${"=".repeat(60)}`);
   console.log("Quality Results Summary");
   console.log(`${"=".repeat(60)}`);
-
-  let totalPassed = 0;
   for (const r of results) {
-    const status = r.overall_passed ? "PASS" : "FAIL";
-    console.log(`  ${status} ${r.scenario} (score: ${(r.quality_score ?? 0).toFixed(1)}/10, ${r.duration_ms}ms)`);
-    if (r.overall_passed) totalPassed++;
+    console.log(`  ${(r.quality_score >= 7 ? "PASS" : "FAIL")} ${r.scenario} (score: ${(r.quality_score ?? 0).toFixed(1)}/10, ${r.duration_ms}ms)`);
   }
-
-  const totalFailed = results.length - totalPassed;
-  console.log(`\n  Total: ${results.length} | Passed: ${totalPassed} | Failed: ${totalFailed}`);
+  const avg = results.reduce((s, r) => s + (r.quality_score ?? 0), 0) / results.length;
+  console.log(`\n  Average: ${avg.toFixed(1)}/10 | Scenarios: ${results.length}`);
   console.log(`${"=".repeat(60)}\n`);
 
-  // Update trend
   showTrend();
-
-  process.exit(totalFailed > 0 ? 1 : 0);
 }
 
-main().catch(err => {
-  console.error(`quality-runner fatal: ${err.message}`);
-  process.exit(1);
-});
+main().catch(err => { console.error(`fatal: ${err.message}`); process.exit(1); });

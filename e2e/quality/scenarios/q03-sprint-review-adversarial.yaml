@@ -20,11 +20,9 @@ setup:
   pitfalls:
     entries: []
 
+probes:
+  - sprint
+
 run:
   args: ["scripts/auto-pilot-loop.mjs"]
   flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "1"]
-
-assert:
-  must:
-    - type: exit_code
-      value: 0

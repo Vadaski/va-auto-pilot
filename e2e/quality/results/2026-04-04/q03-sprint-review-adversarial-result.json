@@ -1,0 +1,53 @@
+{
+  "timestamp": "2026-04-04T17:42:27.618Z",
+  "scenario": "Q03: Sprint Review Adversarial Quality",
+  "scenario_file": "q03-sprint-review-adversarial.yaml",
+  "quality_score": 7.8,
+  "probes_collected": 1,
+  "judge_results": [
+    {
+      "probe_id": "1775324480583-dn7qai",
+      "type": "sprint",
+      "raw": "```json\n{\n  \"dimensions\": [\n    {\n      \"id\": \"adversarial_depth\",\n      \"score\": 7,\n      \"reason\": \"Given an empty changeset, the agent correctly treats the absence itself as an adversarial finding rather than rubber-stamping PASS, and probes multiple failure modes (dropped diff, untracked work, silent CI failure).\"\n    },\n    {\n      \"id\": \"stakeholder_authenticity\",\n      \"score\": 8,\n      \"reason\": \"Genuinely adopts the adversarial regression reviewer lens — frames everything in terms of hidden breakage, uncontrolled regression risk, and evasion of review, which are exactly this persona's concerns.\"\n    },\n    {\n      \"id\": \"coverage_completeness\",\n      \"score\": 7,\n      \"reason\": \"There are zero changed files to review; the agent appropriately flags the coverage gap itself as a finding and identifies multiple risk vectors, though it could enumerate more invisible-to-diff regression categories.\"\n    },\n    {\n      \"id\": \"finding_actionability\",\n      \"score\": 8,\n      \"reason\": \"The finding clearly identifies the problem, lists three plausible root causes, explains the regression impact, and proposes a concrete follow-up task title that could be assigned immediately.\"\n    },\n    {\n      \"id\": \"json_output_quality\",\n      \"score\": 9,\n      \"reason\": \"Well-formed JSON with all required fields present, severity reasonably calibrated to WARNING for an empty changeset, structured findings, and an actionable suggested task title.\"\n    }\n  ],\n  \"overall_score\": 7.8,\n  \"issues\": [\n    \"Could have explored additional regression-specific risks invisible to diff review such as config drift, database schema mutations, environment variable changes, or manual deployment steps.\",\n    \"The suggested task title is somewhat generic — it could include concrete verification steps like 'check CI pipeline logs for dropped artifacts' or 'verify deployment manifest matches production.'\"\n  ],\n  \"improvement_suggestions\": [\n    \"When the changeset is empty, enumerate specific classes of change that evade version-control-based review (e.g., infrastructure-as-code drift, secrets rotation, CDN cache invalidation) to deepen adversarial value.\",\n    \"Include concrete verification actions in the finding detail or suggested task, such as 'compare last-known-good commit SHA in CI logs against HEAD' or 'audit deployment history for out-of-band changes.'\",\n    \"Consider whether a CRITICAL status is more appropriate than WARNING when an adversarial reviewer has zero visibility into what changed — the inability to verify is itself a high-severity regression risk.\"\n  ]\n}\n```",
+      "parsed": true,
+      "dimensions": [
+        {
+          "id": "adversarial_depth",
+          "score": 7,
+          "reason": "Given an empty changeset, the agent correctly treats the absence itself as an adversarial finding rather than rubber-stamping PASS, and probes multiple failure modes (dropped diff, untracked work, silent CI failure)."
+        },
+        {
+          "id": "stakeholder_authenticity",
+          "score": 8,
+          "reason": "Genuinely adopts the adversarial regression reviewer lens — frames everything in terms of hidden breakage, uncontrolled regression risk, and evasion of review, which are exactly this persona's concerns."
+        },
+        {
+          "id": "coverage_completeness",
+          "score": 7,
+          "reason": "There are zero changed files to review; the agent appropriately flags the coverage gap itself as a finding and identifies multiple risk vectors, though it could enumerate more invisible-to-diff regression categories."
+        },
+        {
+          "id": "finding_actionability",
+          "score": 8,
+          "reason": "The finding clearly identifies the problem, lists three plausible root causes, explains the regression impact, and proposes a concrete follow-up task title that could be assigned immediately."
+        },
+        {
+          "id": "json_output_quality",
+          "score": 9,
+          "reason": "Well-formed JSON with all required fields present, severity reasonably calibrated to WARNING for an empty changeset, structured findings, and an actionable suggested task title."
+        }
+      ],
+      "overall_score": 7.8,
+      "issues": [
+        "Could have explored additional regression-specific risks invisible to diff review such as config drift, database schema mutations, environment variable changes, or manual deployment steps.",
+        "The suggested task title is somewhat generic — it could include concrete verification steps like 'check CI pipeline logs for dropped artifacts' or 'verify deployment manifest matches production.'"
+      ],
+      "improvement_suggestions": [
+        "When the changeset is empty, enumerate specific classes of change that evade version-control-based review (e.g., infrastructure-as-code drift, secrets rotation, CDN cache invalidation) to deepen adversarial value.",
+        "Include concrete verification actions in the finding detail or suggested task, such as 'compare last-known-good commit SHA in CI logs against HEAD' or 'audit deployment history for out-of-band changes.'",
+        "Consider whether a CRITICAL status is more appropriate than WARNING when an adversarial reviewer has zero visibility into what changed — the inability to verify is itself a high-severity regression risk."
+      ]
+    }
+  ],
+  "duration_ms": 68059
+}

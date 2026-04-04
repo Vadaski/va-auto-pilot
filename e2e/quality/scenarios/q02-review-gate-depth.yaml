@@ -26,11 +26,9 @@ setup:
         createdAt: "2026-04-03T12:00:00Z"
         resolvedAt: ""
 
+probes:
+  - review
+
 run:
   args: ["scripts/auto-pilot-loop.mjs"]
   flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "5", "--skip-sprint-review"]
-
-assert:
-  must:
-    - type: exit_code
-      value: 0

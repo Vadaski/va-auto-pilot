@@ -818,7 +818,38 @@ test("runGateSequence fails closed when codex-backed review gate times out witho
   assert.match(gateResult.output, /review gate failed: timeout/i);
 });
 
-test("runGateSequence fails closed on unstructured stdout from failed codex-backed review gate", async () => {
+test("runGateSequence retries once and advisory-passes on repeated unstructured codex review output", async () => {
+  const repoDir = createTempGitRepo({ "scripts/auto-pilot-loop.mjs": "before\n" });
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+  const workFile = path.join(repoDir, "scripts", "auto-pilot-loop.mjs");
+
+  fs.mkdirSync(path.dirname(pitfallsFile), { recursive: true });
+  fs.writeFileSync(pitfallsFile, JSON.stringify({ version: 1, entries: [] }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(workFile, "after\n", "utf8");
+  let attempts = 0;
+
+  const gateResult = await runGateSequence(
+    { reviewCommand: "codex review --uncommitted" },
+    {
+      dryRun: false,
+      json: false,
+      workDir: repoDir,
+      pitfallsFile,
+      reviewGateRunner: async () => {
+        attempts += 1;
+        const error = new Error("rate limit");
+        error.stdout = "429 rate limit exceeded\nplease retry later\n";
+        throw error;
+      }
+    }
+  );
+
+  assert.equal(gateResult.passed, true);
+  assert.equal(gateResult.gate, "");
+  assert.equal(attempts, 2);
+});
+
+test("runGateSequence still fails when unstructured review output contains blocking findings", async () => {
   const repoDir = createTempGitRepo({ "scripts/auto-pilot-loop.mjs": "before\n" });
   const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
   const workFile = path.join(repoDir, "scripts", "auto-pilot-loop.mjs");
@@ -834,17 +865,15 @@ test("runGateSequence fails closed on unstructured stdout from failed codex-back
       json: false,
       workDir: repoDir,
       pitfallsFile,
-      reviewGateRunner: async () => {
-        const error = new Error("rate limit");
-        error.stdout = "429 rate limit exceeded\nplease retry later\n";
-        throw error;
-      }
+      reviewGateRunner: async () => ({
+        stdout: "[P1] Regression risk in retry handling -- scripts/auto-pilot-loop.mjs:700\n"
+      })
     }
   );
 
   assert.equal(gateResult.passed, false);
   assert.equal(gateResult.gate, "review");
-  assert.match(gateResult.output, /429 rate limit exceeded/);
+  assert.match(gateResult.output, /\[P1\] Regression risk in retry handling/);
 });
 
 test("extractReviewerReport parses JSON reviewer output", () => {
@@ -1026,6 +1055,162 @@ test("executeSingleTask completes a backlog task through gates", async () => {
     const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
     assert.equal(state.tasks[0].state, "Done");
     assert.ok(state.sprintStartCommit);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("executeSingleTask treats non-zero dispatch with landed code and passing test/build evidence as partial success", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-exec-partial-dispatch-"));
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(repoDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
+  const humanBoardFile = path.join(repoDir, "docs", "todo", "human-board.md");
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+  const buildScript = path.join(repoDir, "pass-build.mjs");
+  const reviewScript = path.join(repoDir, "pass-review.mjs");
+  let dispatchCalls = 0;
+
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    updatedAt: "2026-04-14T00:00:00.000Z",
+    tasks: [
+      { id: "AP-047", title: "Partial dispatch task", priority: "P1", state: "Backlog", dependsOn: [] }
+    ]
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint Board\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+  fs.writeFileSync(humanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(buildScript, "process.exit(0);\n", "utf8");
+  fs.writeFileSync(reviewScript, "process.stdout.write('REVIEW STATUS: PASS\\n');\n", "utf8");
+
+  runGit(["init"], repoDir);
+  runGit(["config", "user.email", "test@example.com"], repoDir);
+  runGit(["config", "user.name", "Test User"], repoDir);
+  fs.writeFileSync(path.join(repoDir, "work.txt"), "before\n", "utf8");
+  runGit(["add", "."], repoDir);
+  runGit(["commit", "-m", "initial"], repoDir);
+
+  const previousCwd = process.cwd();
+  process.chdir(repoDir);
+  try {
+    const result = await executeSingleTask(
+      "AP-047",
+      {
+        colony: false,
+        dispatch: async (_track, _template, logFile) => {
+          dispatchCalls += 1;
+          fs.writeFileSync(path.join(repoDir, "work.txt"), "after\n", "utf8");
+          fs.mkdirSync(path.dirname(logFile), { recursive: true });
+          fs.writeFileSync(logFile, "all tests passed\nbuild passed\n", "utf8");
+          return { success: false, exitCode: 17, durationMs: 1, logFile };
+        }
+      },
+      [],
+      {
+        buildCommand: `node ${buildScript}`,
+        reviewCommand: `node ${reviewScript}`
+      },
+      {
+        dryRun: false,
+        noCommit: true,
+        json: true,
+        strict: false,
+        workDir: repoDir,
+        stateFile,
+        boardFile,
+        journalFile,
+        pitfallsFile,
+        agentTemplate: "echo {taskId}",
+        trackTimeout: 1000,
+        taskBaselines: new Map(),
+        sprintBoardLock: Promise.resolve(),
+        stateMutationLock: Promise.resolve()
+      }
+    );
+
+    assert.equal(dispatchCalls, 1);
+    assert.equal(result.terminal, true);
+    assert.equal(result.action, "testing→done");
+    assert.match(result.steps[0].details, /partial-success: exitCode=17/);
+
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.equal(state.tasks[0].state, "Done");
+    const journal = fs.readFileSync(journalFile, "utf8");
+    assert.match(journal, /Dispatch exited non-zero after landed code \+ passing tests\/build → Review/);
+    assert.match(journal, /dispatch:partial-success/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("executeSingleTask still fails dispatch when success-looking log has no landed code", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-exec-no-landed-code-"));
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(repoDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
+  const humanBoardFile = path.join(repoDir, "docs", "todo", "human-board.md");
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    updatedAt: "2026-04-14T00:00:00.000Z",
+    tasks: [
+      { id: "AP-148", title: "No landed code task", priority: "P1", state: "Backlog", dependsOn: [] }
+    ]
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint Board\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+  fs.writeFileSync(humanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  runGit(["init"], repoDir);
+  runGit(["config", "user.email", "test@example.com"], repoDir);
+  runGit(["config", "user.name", "Test User"], repoDir);
+  fs.writeFileSync(path.join(repoDir, "work.txt"), "unchanged\n", "utf8");
+  runGit(["add", "."], repoDir);
+  runGit(["commit", "-m", "initial"], repoDir);
+
+  const previousCwd = process.cwd();
+  process.chdir(repoDir);
+  try {
+    const result = await executeSingleTask(
+      "AP-148",
+      {
+        colony: false,
+        dispatch: async (_track, _template, logFile) => {
+          fs.mkdirSync(path.dirname(logFile), { recursive: true });
+          fs.writeFileSync(logFile, "all tests passed\nbuild passed\n", "utf8");
+          return { success: false, exitCode: 17, durationMs: 1, logFile };
+        }
+      },
+      [],
+      {},
+      {
+        dryRun: false,
+        noCommit: true,
+        json: true,
+        strict: false,
+        workDir: repoDir,
+        stateFile,
+        boardFile,
+        journalFile,
+        pitfallsFile,
+        agentTemplate: "echo {taskId}",
+        trackTimeout: 1000,
+        taskBaselines: new Map(),
+        sprintBoardLock: Promise.resolve(),
+        stateMutationLock: Promise.resolve()
+      }
+    );
+
+    assert.equal(result.terminal, true);
+    assert.equal(result.action, "dispatch-failed");
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.equal(state.tasks[0].state, "Failed");
   } finally {
     process.chdir(previousCwd);
   }

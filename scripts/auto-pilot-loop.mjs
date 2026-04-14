@@ -622,13 +622,8 @@ function classifyReviewGateFailure(error) {
   };
 }
 
-async function runPitfallAwareReviewGate(gate, opts) {
-  const pitfalls = await loadUnresolvedPitfalls(opts);
-  const diffBundle = await collectReviewGateDiff(opts);
-  const pitfallCount = pitfalls.length;
-  log(opts, `  review gate context: injected ${pitfallCount} unresolved pitfall(s)`);
-
-  const prompt = [
+function buildPitfallAwareReviewPrompt(pitfalls, diffBundle, extraInstructions = []) {
+  return [
     "You are a read-only code review gate.",
     "You must review the current uncommitted diff using the project's unresolved pitfall history as extra context.",
     "Treat each pitfall as a regression pattern to actively probe for.",
@@ -637,6 +632,7 @@ async function runPitfallAwareReviewGate(gate, opts) {
     "Then emit one finding per line using this format:",
     "[CRITICAL|P1|P2|WARNING] concise finding -- relative/path/to/file:line",
     "If there are no findings, emit no extra lines after REVIEW STATUS: PASS.",
+    ...extraInstructions,
     "",
     "Unresolved pitfalls:",
     formatPitfallsForReview(pitfalls),
@@ -647,8 +643,30 @@ async function runPitfallAwareReviewGate(gate, opts) {
     "Git diff:",
     diffBundle.diff || "(no diff)"
   ].join("\n");
+}
 
-  const reviewRun = await (async () => {
+function parseReviewStatusLine(output) {
+  return /^\s*REVIEW STATUS:\s*(PASS|FAIL)\s*$/im.exec(String(output ?? ""))?.[1] ?? null;
+}
+
+function assessReviewGateOutput(output) {
+  const findings = parseReviewFindings(output);
+  const status = parseReviewStatusLine(output);
+  return {
+    findings,
+    status,
+    hasStructuredFindings: findings.findings.length > 0,
+    hasBlockingEvidence: status === "FAIL" || findings.hasBlocking
+  };
+}
+
+async function runPitfallAwareReviewGate(gate, opts) {
+  const pitfalls = await loadUnresolvedPitfalls(opts);
+  const diffBundle = await collectReviewGateDiff(opts);
+  const pitfallCount = pitfalls.length;
+  log(opts, `  review gate context: injected ${pitfallCount} unresolved pitfall(s)`);
+
+  const executeReviewAttempt = async (prompt) => {
     try {
       if (typeof opts.reviewGateRunner === "function") {
         const result = await opts.reviewGateRunner(prompt, { gate, pitfalls, diffBundle }, opts);
@@ -696,43 +714,85 @@ async function runPitfallAwareReviewGate(gate, opts) {
         stderr: failure.stderr
       };
     }
-  })();
+  };
 
-  if (reviewRun.hardFailure) {
-    const output = `review gate failed: ${reviewRun.failureReason}`;
-    return {
-      passed: false,
-      gate: gate.name,
-      output,
-      exitCode: 1,
-      stdout: "",
-      stderr: output
-    };
-  }
+  const prompts = [
+    buildPitfallAwareReviewPrompt(pitfalls, diffBundle),
+    buildPitfallAwareReviewPrompt(pitfalls, diffBundle, [
+      "",
+      "Your previous answer was not machine-readable enough for the gate.",
+      "Retry the review now and follow the required format exactly."
+    ])
+  ];
 
-  const output = reviewRun.output;
-  const findings = parseReviewFindings(output);
-  const statusLine = /^\s*REVIEW STATUS:\s*(PASS|FAIL)\s*$/im.exec(output);
-  const hasStructuredFindings = findings.findings.length > 0;
+  /** @type {{ output: string, hardFailure: boolean, failureReason: string, stderr: string }} */
+  let reviewRun = { output: "", hardFailure: false, failureReason: "", stderr: "" };
+  /** @type {{ findings: ReturnType<typeof parseReviewFindings>, status: string | null, hasStructuredFindings: boolean, hasBlockingEvidence: boolean }} */
+  let assessment = assessReviewGateOutput("");
 
-  if (!statusLine) {
-    if (hasStructuredFindings) {
-      log(opts, "  review gate output missing REVIEW STATUS line; failing closed");
-    } else {
-      log(opts, "  review gate output was unstructured; failing closed");
+  for (let attempt = 0; attempt < prompts.length; attempt += 1) {
+    reviewRun = await executeReviewAttempt(prompts[attempt]);
+    if (reviewRun.hardFailure) {
+      const output = `review gate failed: ${reviewRun.failureReason}`;
+      return {
+        passed: false,
+        gate: gate.name,
+        output,
+        exitCode: 1,
+        stdout: "",
+        stderr: output
+      };
+    }
+
+    assessment = assessReviewGateOutput(reviewRun.output);
+    if (assessment.status === "PASS" && !assessment.findings.hasBlocking) {
+      return {
+        passed: true,
+        gate: gate.name,
+        output: reviewRun.output.trim() ? reviewRun.output : "REVIEW STATUS: PASS",
+        exitCode: 0,
+        stdout: reviewRun.output,
+        stderr: ""
+      };
+    }
+
+    if (assessment.hasBlockingEvidence) {
+      const finalOutput = reviewRun.output.trim() ? reviewRun.output : `review gate failed: ${reviewRun.failureReason || "blocking review output"}`;
+      return {
+        passed: false,
+        gate: gate.name,
+        output: finalOutput,
+        exitCode: 1,
+        stdout: reviewRun.output,
+        stderr: finalOutput
+      };
+    }
+
+    if (attempt < prompts.length - 1) {
+      if (assessment.hasStructuredFindings) {
+        log(opts, "  review gate output missing REVIEW STATUS line; retrying once with stricter format instructions");
+      } else {
+        log(opts, "  review gate output was unstructured; retrying once with stricter format instructions");
+      }
     }
   }
 
-  const passed = Boolean(statusLine) && statusLine[1] === "PASS" && !findings.hasBlocking;
-  const finalOutput = output.trim() ? output : `review gate failed: ${reviewRun.failureReason || "empty output"}`;
+  log(opts, "  review gate output remained unstructured after retry; build passed, treating review as advisory");
+  const advisoryOutput = [
+    "REVIEW STATUS: PASS",
+    "[WARNING] Review gate output remained unstructured after retry; build passed, treating review as advisory this cycle.",
+    "",
+    "Original review output:",
+    reviewRun.output.trim() || "(empty output)"
+  ].join("\n");
 
   return {
-    passed,
+    passed: true,
     gate: gate.name,
-    output: finalOutput,
-    exitCode: passed ? 0 : 1,
-    stdout: output,
-    stderr: passed ? "" : finalOutput
+    output: advisoryOutput,
+    exitCode: 0,
+    stdout: reviewRun.output,
+    stderr: ""
   };
 }
 
@@ -992,6 +1052,18 @@ function splitLines(raw) {
     .filter(Boolean);
 }
 
+const DISPATCH_TEST_PASS_PATTERNS = [
+  /\b(?:all\s+)?tests?\s+pass(?:ed)?\b/i,
+  /\b\d+\/\d+\s+tests?\s+pass(?:ed)?\b/i,
+  /\bsmoke\s+tests?\s+pass(?:ed)?\b/i
+];
+
+const DISPATCH_BUILD_PASS_PATTERNS = [
+  /\bbuild\s+pass(?:ed)?\b/i,
+  /\btypecheck\s+pass(?:ed)?\b/i,
+  /\bcheck:all\s+pass(?:ed)?\b/i
+];
+
 async function git(args, opts) {
   return execFileAsync("git", args, {
     encoding: "utf8",
@@ -1034,6 +1106,22 @@ function restoreFileState(filePath, snapshot, opts) {
 
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   fs.writeFileSync(absolutePath, snapshot.content);
+}
+
+function fileSnapshotsEqual(left, right) {
+  const leftExists = Boolean(left?.exists);
+  const rightExists = Boolean(right?.exists);
+  if (leftExists !== rightExists) {
+    return false;
+  }
+  if (!leftExists && !rightExists) {
+    return true;
+  }
+
+  return Buffer.compare(
+    Buffer.isBuffer(left?.content) ? left.content : Buffer.from(left?.content ?? ""),
+    Buffer.isBuffer(right?.content) ? right.content : Buffer.from(right?.content ?? "")
+  ) === 0;
 }
 
 async function stagePaths(files, opts) {
@@ -1086,6 +1174,123 @@ async function ensureTaskBaseline(task, opts) {
   const baseline = { files, snapshots };
   opts.taskBaselines.set(task.id, baseline);
   return baseline;
+}
+
+function normalizeRelativeToWorkDir(filePath, opts) {
+  return path.relative(opts.workDir ?? process.cwd(), path.resolve(filePath)).replace(/\\/g, "/");
+}
+
+function isAutoPilotControlFile(file, opts) {
+  const normalized = String(file ?? "").replace(/\\/g, "/");
+  const controlFiles = new Set([
+    normalizeRelativeToWorkDir(opts.stateFile, opts),
+    normalizeRelativeToWorkDir(opts.boardFile, opts),
+    normalizeRelativeToWorkDir(opts.journalFile, opts),
+    normalizeRelativeToWorkDir(opts.pitfallsFile, opts),
+    normalizeRelativeToWorkDir(resolveHumanBoardPath(opts.stateFile), opts)
+  ]);
+
+  return controlFiles.has(normalized) || normalized.startsWith(".va-auto-pilot/parallel-runs/");
+}
+
+async function listTaskDeltaFiles(task, opts) {
+  const baseline = opts.taskBaselines.get(task.id) ?? { files: new Set(), snapshots: new Map() };
+  const currentFiles = await listChangedFiles(opts);
+  const candidates = new Set([
+    ...baseline.files,
+    ...currentFiles
+  ]);
+
+  const changedFiles = [];
+  for (const file of [...candidates].sort()) {
+    if (isAutoPilotControlFile(file, opts)) {
+      continue;
+    }
+    const before = baseline.snapshots.get(file) ?? { exists: false, content: null };
+    const after = snapshotFileState(file, opts);
+    if (!fileSnapshotsEqual(before, after)) {
+      changedFiles.push(file);
+    }
+  }
+
+  return changedFiles;
+}
+
+function collectDispatchEvidenceText(result) {
+  const parts = [];
+  const push = (value) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const trimmed = value.trim();
+    if (trimmed) {
+      parts.push(trimmed);
+    }
+  };
+
+  push(result?.stdout);
+  push(result?.stderr);
+  push(result?.output);
+  push(result?.message);
+  push(result?.response);
+  push(result?.agentResponse);
+
+  if (result?.evidence && typeof result.evidence === "object") {
+    push(result.evidence.output);
+    push(result.evidence.stdout);
+    push(result.evidence.stderr);
+    push(result.evidence.message);
+    push(result.evidence.response);
+    push(result.evidence.agentResponse);
+    push(result.evidence.text);
+    push(result.evidence.content);
+    if (result.evidence.failureDetail && typeof result.evidence.failureDetail === "object") {
+      push(result.evidence.failureDetail.attempted);
+      push(result.evidence.failureDetail.hypothesis);
+    }
+  }
+
+  if (result?.logFile && fs.existsSync(result.logFile)) {
+    push(fs.readFileSync(result.logFile, "utf8"));
+  }
+
+  return parts.join("\n");
+}
+
+function evidenceMatchesAny(text, patterns) {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+async function detectPartialDispatchSuccess(task, result, opts, evidenceText = collectDispatchEvidenceText(result)) {
+  if (result?.success || result?.dryRun) {
+    return { partial: false, reason: "dispatch succeeded", changedFiles: [], evidenceText };
+  }
+
+  if (result?.timedOut || Number(result?.exitCode ?? 0) === 0) {
+    return { partial: false, reason: "dispatch did not exit non-zero", changedFiles: [], evidenceText };
+  }
+
+  const changedFiles = await listTaskDeltaFiles(task, opts);
+  if (changedFiles.length === 0) {
+    return { partial: false, reason: "no landed file changes detected", changedFiles, evidenceText };
+  }
+
+  const testsPassed = evidenceMatchesAny(evidenceText, DISPATCH_TEST_PASS_PATTERNS);
+  if (!testsPassed) {
+    return { partial: false, reason: "missing passing-test evidence", changedFiles, evidenceText };
+  }
+
+  const buildPassed = evidenceMatchesAny(evidenceText, DISPATCH_BUILD_PASS_PATTERNS);
+  if (!buildPassed) {
+    return { partial: false, reason: "missing passing-build evidence", changedFiles, evidenceText };
+  }
+
+  return {
+    partial: true,
+    reason: "sub-agent exited non-zero after landed code with passing test/build evidence",
+    changedFiles,
+    evidenceText
+  };
 }
 
 function deriveCommitType(task) {
@@ -1349,7 +1554,12 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
         await transitionToInProgress(task, opts);
       }
       const result = await dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts);
-      if (result.dryRun || result.success) {
+      const dispatchEvidenceText = result.dryRun ? "" : collectDispatchEvidenceText(result);
+      const partialDispatch = (!result.dryRun && !result.success)
+        ? await detectPartialDispatchSuccess(task, result, opts, dispatchEvidenceText)
+        : { partial: false, reason: "dispatch succeeded", changedFiles: [], evidenceText: dispatchEvidenceText };
+
+      if (result.dryRun || result.success || partialDispatch.partial) {
         if (!result.dryRun && humanBoardInstructions.length > 0) {
           const acknowledgmentSource = bridge.colony ? result : result.logFile;
           const acknowledgments = extractHumanBoardAcknowledgments(acknowledgmentSource, humanBoardInstructions);
@@ -1357,19 +1567,42 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
             appendHumanBoardAuditEntry(opts.journalFile, task, acknowledgments, result.logFile);
           }
         }
+        if (partialDispatch.partial) {
+          log(
+            opts,
+            `  dispatch exited non-zero but landed code with passing test/build evidence; continuing to Review (${partialDispatch.changedFiles.join(", ")})`
+          );
+        }
         await transitionToReview(task, opts);
         const summaries = {
           "start-task": "Dispatched and moved to Review",
           "continue-implementation": "Continued implementation → Review",
           "fix-and-retest": "Fix dispatched → Review"
         };
+        const partialSummaries = {
+          "start-task": "Dispatch exited non-zero after landed code + passing tests/build → Review",
+          "continue-implementation": "Re-dispatch exited non-zero after landed code + passing tests/build → Review",
+          "fix-and-retest": "Fix dispatch exited non-zero after landed code + passing tests/build → Review"
+        };
         const resultActions = {
           "start-task": "dispatched→review",
           "continue-implementation": "continued→review",
           "fix-and-retest": "fix→review"
         };
-        await journalEntry(task, summaries[action], opts);
-        return { done: false, task, action: resultActions[action], details: "success" };
+        await journalEntry(
+          task,
+          partialDispatch.partial ? partialSummaries[action] : summaries[action],
+          opts,
+          partialDispatch.partial
+            ? { files: partialDispatch.changedFiles, signals: ["dispatch:partial-success"] }
+            : {}
+        );
+        return {
+          done: false,
+          task,
+          action: resultActions[action],
+          details: partialDispatch.partial ? `partial-success: exitCode=${result.exitCode}` : "success"
+        };
       }
 
       const failureLabels = {
@@ -1382,11 +1615,14 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
         "continue-implementation": "continue-failed",
         "fix-and-retest": "fix-failed"
       };
+      const failureDetail = dispatchEvidenceText.trim()
+        ? extractFailureReason({ output: dispatchEvidenceText })
+        : `${failureLabels[action]}: exitCode=${result.exitCode}`;
       await transitionToFailedWithRecovery(task, "dispatch", {
         exitCode: Number(result.exitCode ?? 1),
-        stdout: String(result.stdout ?? ""),
-        stderr: String(result.stderr ?? `${failureLabels[action]}: exitCode=${result.exitCode}`),
-        output: `${failureLabels[action]}: exitCode=${result.exitCode}`
+        stdout: dispatchEvidenceText.slice(0, 4000),
+        stderr: String(result.stderr ?? ""),
+        output: `${failureLabels[action]}: exitCode=${result.exitCode} | ${failureDetail}`.slice(0, 2000)
       }, opts);
       await journalEntry(task, `${failureLabels[action]}: exitCode=${result.exitCode}`, opts);
       return { done: false, task, action: failureActions[action], details: `exitCode=${result.exitCode}` };

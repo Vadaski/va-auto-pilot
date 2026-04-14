@@ -20,7 +20,7 @@ import { acquireLock, releaseLock } from "./locking.mjs";
 import { buildDefaultIndex, createRecord, createRegistry, patchRecord, syncRegistry, validateStoreVersion } from "./store-models.mjs";
 import { recoverPendingTransactions } from "./store-recovery.mjs";
 import { validateStore } from "./store-validation.mjs";
-import { JOURNAL_FILE, buildArtifactPath, buildDocumentId, cloneValue, ensureStoreLayout, nowIso, pathExists, slugify } from "./shared.mjs";
+import { JOURNAL_FILE, buildArtifactPath, cloneValue, ensureStoreLayout, nowIso, pathExists } from "./shared.mjs";
 
 // single-handle-per-root is the Sprint 1 contract per design §10; multi-handle support is future work
 const OPEN_HANDLES = new Map();
@@ -140,6 +140,51 @@ function syncInboundRefMirrors(previousIndex, stagedRecords, sourceRef, previous
     }
   }
   return touchedTargets;
+}
+
+async function buildLegacyImportState(filePath, options, registry) {
+  const { kind = "process", title, slug, metadata = {} } = options;
+  const content = await fs.readFile(filePath, "utf8");
+  const inferredTitle = title ?? content.match(/^#\s+(.*)$/m)?.[1] ?? path.basename(filePath, path.extname(filePath));
+  const input = {
+    title: inferredTitle,
+    slug: slug ?? inferredTitle,
+    body: content,
+    metadata: { ...metadata, importedFrom: filePath }
+  };
+  return {
+    content,
+    record: createRecord(kind, input, registry)
+  };
+}
+
+async function moveLegacySource(rootPath, filePath, targetPath, preferGitMove) {
+  if (preferGitMove) {
+    const sourceRelativePath = path.relative(rootPath, filePath);
+    const targetRelativePath = path.relative(rootPath, targetPath);
+    const sourceInsideRoot = sourceRelativePath !== ""
+      && !sourceRelativePath.startsWith("..")
+      && !path.isAbsolute(sourceRelativePath);
+
+    if (sourceInsideRoot) {
+      try {
+        const { execFileSync } = await import("node:child_process");
+        execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+          cwd: rootPath,
+          stdio: "ignore"
+        });
+        execFileSync("git", ["mv", "--", sourceRelativePath, targetRelativePath], {
+          cwd: rootPath,
+          stdio: "ignore"
+        });
+        return;
+      } catch {
+        // Fall back to a plain rename when git metadata is unavailable or the file is not tracked.
+      }
+    }
+  }
+
+  await fs.rename(filePath, targetPath);
 }
 
 /**
@@ -285,19 +330,6 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
       );
     }
     async function importLegacyDocument(filePath, options = {}) {
-      const { kind = "process", title, slug, metadata = {} } = options;
-      const content = await fs.readFile(filePath, "utf8");
-      
-      // Basic metadata inference: title from first # line or filename, slug from filename
-      const inferredTitle = title ?? content.match(/^#\s+(.*)$/m)?.[1] ?? path.basename(filePath, path.extname(filePath));
-      const inferredSlug = slug ?? slugify(inferredTitle);
-      
-      const input = {
-        title: inferredTitle,
-        body: content,
-        metadata: { ...metadata, importedFrom: filePath }
-      };
-
       /** @type {import("./types.mjs").DocumentRecord | null} */
       let record = null;
       let previousIndex = null;
@@ -305,12 +337,9 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
 
       return runMutation(
         "import-legacy",
-        () => {
+        async () => {
           previousIndex = cloneValue(index);
-          record = createRecord(kind, input, registry);
-          record.frontmatter.slug = inferredSlug; // override with inferred slug
-          record.id = buildDocumentId(kind, inferredSlug);
-          record.path = buildArtifactPath(kind, inferredSlug);
+          ({ record } = await buildLegacyImportState(filePath, options, registry));
           return record;
         },
         async () => {
@@ -350,23 +379,76 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
     }
 
     async function adoptDocument(filePath, options = {}) {
-      const { preferGitMove = true } = options;
-      const record = await importLegacyDocument(filePath, options);
-      const targetPath = resolveArtifactPath(rootPath, record);
-      
-      if (preferGitMove) {
-        try {
-          const { execSync } = await import("node:child_process");
-          // Check if we are in a git repo
-          execSync("git rev-parse --is-inside-work-tree", { stdio: "ignore" });
-          execSync(`git mv "${filePath}" "${targetPath}"`);
-        } catch (err) {
-          console.warn("Git move failed or not a git repo, artifact created anyway.", err);
+      const preferGitMove = options.preferGitMove ?? true;
+      /** @type {import("./types.mjs").DocumentRecord | null} */
+      let record = null;
+      /** @type {import("./types.mjs").StoreIndex | null} */
+      let previousIndex = null;
+      /** @type {string[]} */
+      let mirroredTargetRefs = [];
+      let sourceContent = "";
+      let sourceMoved = false;
+
+      return runMutation(
+        "adopt-legacy",
+        async () => {
+          previousIndex = cloneValue(index);
+          const state = await buildLegacyImportState(filePath, options, registry);
+          sourceContent = state.content;
+          record = state.record;
+          return record;
+        },
+        async () => {
+          if (!record || !previousIndex) throw new DocStoreError("Adopt mutation missing state.", { code: "MUTATION_STATE_MISSING" });
+          if (index.entries[record.id]) throw new DocStoreError(`Document already exists: ${record.id}`, { code: "DOCUMENT_EXISTS" });
+
+          const stagedRecords = new Map([[record.id, record]]);
+          const mirroredTargets = syncInboundRefMirrors(
+            previousIndex,
+            stagedRecords,
+            record.id,
+            [],
+            record.refs,
+            "adoptDocument target is archived"
+          );
+          mirroredTargetRefs = [...mirroredTargets];
+
+          const touchedAt = nowIso();
+          for (const targetRef of mirroredTargetRefs) {
+            const targetRecord = stagedRecords.get(targetRef);
+            targetRecord.revision += 1;
+            targetRecord.frontmatter.updatedAt = touchedAt;
+            index.entries[targetRef] = targetRecord;
+          }
+
+          const targetPath = resolveArtifactPath(rootPath, record);
+          await moveLegacySource(rootPath, filePath, targetPath, preferGitMove);
+          sourceMoved = true;
+
+          index.entries[record.id] = record;
+          await writeArtifact(rootPath, record);
+          for (const targetRef of mirroredTargetRefs) {
+            await writeArtifact(rootPath, index.entries[targetRef]);
+          }
+          await persistIndex(index);
+          return record;
+        },
+        async () => {
+          if (!previousIndex) return;
+          index = previousIndex;
+          for (const targetRef of mirroredTargetRefs) {
+            await writeArtifact(rootPath, previousIndex.entries[targetRef]);
+          }
+          if (record) {
+            await removeArtifact(rootPath, record);
+          }
+          if (sourceMoved) {
+            await fs.mkdir(path.dirname(filePath), { recursive: true });
+            await fs.writeFile(filePath, sourceContent, "utf8");
+          }
+          await writeIndexAtomic(indexPath, previousIndex);
         }
-      } else {
-        await fs.unlink(filePath);
-      }
-      return record;
+      );
     }
 
     async function updateDocument(ref, patch) {

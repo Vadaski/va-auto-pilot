@@ -25,8 +25,22 @@ import { readIndex, writeIndexAtomic } from "./lib/doc-store/index-file.mjs";
 import { buildArtifactPath } from "./lib/doc-store/shared.mjs";
 import { buildDefaultIndex, createRecord, createRegistry } from "./lib/doc-store/store-models.mjs";
 
+const TEMP_ROOTS = new Set();
+
+process.on("exit", () => {
+  for (const root of TEMP_ROOTS) {
+    try {
+      fs.rmSync(root, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup for temp store tests.
+    }
+  }
+});
+
 function createRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "doc-store-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "doc-store-"));
+  TEMP_ROOTS.add(root);
+  return root;
 }
 
 async function openStore() {
@@ -61,6 +75,19 @@ test("createDocument writes artifact, index, and journal", async () => {
   assert.ok(fs.existsSync(path.join(root, record.path)));
   assert.equal(index.entries[record.id].frontmatter.title, "Managed SDK");
   assert.equal(journal.at(-1)?.status, "committed");
+});
+
+test("adoptDocument falls back to fs.rename outside git worktrees", async () => {
+  const { root, store } = await openStore();
+  const legacyFile = path.join(root, "legacy.md");
+  fs.writeFileSync(legacyFile, "# Legacy doc\nbody\n", "utf8");
+
+  const record = await store.adoptDocument(legacyFile, { kind: "process", title: "Legacy doc" });
+  const artifact = readArtifact(root, record.path);
+
+  assert.equal(record.frontmatter.title, "Legacy doc");
+  assert.equal(fs.existsSync(legacyFile), false);
+  assert.equal(artifact.frontmatter.body, "# Legacy doc\nbody\n");
 });
 
 test("startup recovery aborts pending journal entries", async () => {

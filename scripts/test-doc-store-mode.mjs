@@ -23,6 +23,32 @@ import {
 
 const REPO_ROOT = process.cwd();
 const CLI = path.join(REPO_ROOT, "scripts/doc-store-cli.mjs");
+const TEMP_DIRS = new Set();
+const REPO_ROOT_GUARDED_PATHS = [".journal", "test-adopt-tmp"];
+const REPO_ROOT_BASELINE = new Map(
+  REPO_ROOT_GUARDED_PATHS.map((relativePath) => [relativePath, fs.existsSync(path.join(REPO_ROOT, relativePath))])
+);
+
+process.on("exit", () => {
+  for (const dir of TEMP_DIRS) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup for temp repos.
+    }
+  }
+  for (const relativePath of REPO_ROOT_GUARDED_PATHS) {
+    const absolutePath = path.join(REPO_ROOT, relativePath);
+    if (REPO_ROOT_BASELINE.get(relativePath) || !fs.existsSync(absolutePath)) {
+      continue;
+    }
+    try {
+      fs.rmSync(absolutePath, { recursive: true, force: true });
+    } catch {
+      // Only clean up artifacts the tests created in the repo root.
+    }
+  }
+});
 
 const json = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const writeJson = (file, value) => fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -36,6 +62,7 @@ const journalPathFor = (cwd) => path.join(cwd, ".docstore", ".journal", "current
 
 function repo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "doc-store-mode-"));
+  TEMP_DIRS.add(dir);
   git(dir, "init", "-q");
   git(dir, "config", "user.email", "test@example.com");
   git(dir, "config", "user.name", "Test User");
@@ -232,6 +259,29 @@ test("doctor remains read-only while the write lock is held", async () => {
   const result = runCli(cwd, "doctor");
   await releaseLock(lock);
   assert.equal(result.status, 0);
+});
+
+test("adopt CLI writes into .docstore without leaking repo-root journal state", async () => {
+  const cwd = repo();
+  await initStore(cwd);
+  const legacyFile = path.join(cwd, "legacy.md");
+  fs.writeFileSync(legacyFile, "# Legacy Adopt\nbody\n", "utf8");
+  stage(cwd, "legacy.md");
+  commitAll(cwd, "add legacy source");
+
+  const result = runCli(cwd, "adopt", "legacy.md", "--kind=process", "--title=Legacy Adopt");
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Adopted document: process:legacy-adopt/);
+  assert.equal(fs.existsSync(path.join(cwd, ".journal")), false);
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, ".journal")), REPO_ROOT_BASELINE.get(".journal"));
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, "test-adopt-tmp")), REPO_ROOT_BASELINE.get("test-adopt-tmp"));
+  assert.equal(fs.existsSync(legacyFile), false);
+  assert.equal(fs.existsSync(path.join(cwd, ".docstore", "process", "legacy-adopt.json")), true);
+
+  const journal = await readAll(journalPathFor(cwd));
+  assert.equal(journal.at(-1)?.op, "adopt-legacy");
+  assert.equal(journal.at(-1)?.status, "committed");
 });
 
 test("init --force can synchronize config and INDEX managedRoots", async () => {

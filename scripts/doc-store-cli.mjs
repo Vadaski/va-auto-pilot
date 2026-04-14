@@ -115,13 +115,14 @@ async function run() {
   if (parsed.command === "import") {
     const filePath = process.argv[3];
     if (!filePath) {
-      console.error("Missing file path.");
+      console.error("Usage: node ./scripts/doc-store-cli.mjs import <file-path> [--kind=<kind>] [--title=<title>] [--slug=<slug>]");
       process.exit(1);
     }
-    const store = await openManagedDocStore(process.cwd());
+    const store = await openManagedDocStore(resolveStorePaths(process.cwd()).storeRoot);
     const record = await store.importLegacyDocument(filePath, {
       kind: parsed.options.kind,
-      title: parsed.options.title
+      title: parsed.options.title,
+      slug: parsed.options.slug
     });
     console.log(`Imported document: ${record.id}`);
     await store.close();
@@ -129,15 +130,16 @@ async function run() {
   }
 
   if (parsed.command === "adopt") {
-    const filePath = process.argv[3]; // process.argv = [node, script, command, file, ...]
+    const filePath = process.argv[3];
     if (!filePath) {
-      console.error("Missing file path.");
+      console.error("Usage: node ./scripts/doc-store-cli.mjs adopt <file-path> [--kind=<kind>] [--title=<title>] [--slug=<slug>]");
       process.exit(1);
     }
-    const store = await openManagedDocStore(process.cwd());
+    const store = await openManagedDocStore(resolveStorePaths(process.cwd()).storeRoot);
     const record = await store.adoptDocument(filePath, {
       kind: parsed.options.kind,
-      title: parsed.options.title
+      title: parsed.options.title,
+      slug: parsed.options.slug
     });
     console.log(`Adopted document: ${record.id}`);
     await store.close();

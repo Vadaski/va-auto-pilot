@@ -177,7 +177,7 @@ async function recordPitfallAndSuggestGates(task, details, opts) {
   const pitfallResult = await sprintBoard(args, opts);
   const pitfallId = parsePitfallIdFromStdout(pitfallResult.stdout);
   const pitfalls = await loadUnresolvedPitfalls(opts);
-  const suggestions = suggestGatesFromPitfalls(pitfalls)
+  const suggestions = suggestGatesFromPitfalls(pitfalls, { projectDir: opts.workDir })
     .filter((suggestion) => !pitfallId || suggestion.triggeredBy === pitfallId);
 
   if (pitfallId) {
@@ -809,12 +809,28 @@ async function runPitfallAwareReviewGate(gate, opts) {
  * @param {object} opts
  * @returns {Promise<object>}
  */
+async function computeTaskScope(opts) {
+  try {
+    const changedFiles = await listChangedFiles(opts);
+    const trackedDiff = (await git(["diff", "HEAD"], opts)).stdout;
+    const addedLines = (trackedDiff.match(/^\+[^+]/gm) ?? []).length;
+    const removedLines = (trackedDiff.match(/^-[^-]/gm) ?? []).length;
+    return {
+      changedFileCount: changedFiles.size,
+      estimatedDiffLines: addedLines + removedLines,
+    };
+  } catch {
+    return { changedFileCount: 0, estimatedDiffLines: 0 };
+  }
+}
+
 async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts) {
   const template = opts.agentTemplate.replace("{taskId}", task.id);
   const logDir = path.resolve(".va-auto-pilot/parallel-runs");
   const logFile = path.join(logDir, `${task.id}-${Date.now()}.log`);
   const notes = [task.notes, humanBoardBlock].filter(Boolean).join("\n\n");
 
+  const scope = await computeTaskScope(opts);
   const track = {
     taskId: task.id,
     command: template,
@@ -822,6 +838,7 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
     priority: task.priority,
     dependsOn: task.dependsOn,
     notes,
+    metadata: { scope },
   };
 
   if (opts.dryRun) {
@@ -902,21 +919,23 @@ async function journalFailureRecoveryDecision(task, failureDetails, opts) {
   const state = readSprintState(opts.stateFile);
   const persistedTask = findTaskById(state, task.id);
   const failCount = Number(persistedTask?.failCount ?? task.failCount ?? 0);
+  const gateId = normalizeGateId(failureDetails.gateId ?? failureDetails.gateName);
   const classified = classifyFailure(
     Number(failureDetails.exitCode ?? 1),
     String(failureDetails.stderr ?? ""),
     String(failureDetails.stdout ?? ""),
-    failureDetails.gateName
+    gateId || failureDetails.gateName
   );
   const strategy = getRecoveryStrategy(classified, failCount);
   const parts = [
     `Failure classified: type=${classified.type}`,
     `severity=${classified.severity}`,
     `pattern=${classified.pattern}`,
+    gateId ? `failedGate=${gateId}` : "",
     `failCount=${failCount}`,
     `strategy=${strategy.action}`,
     `reason=${strategy.reason}`
-  ];
+  ].filter(Boolean);
 
   if (strategy.nextModel) {
     parts.push(`nextModel=${strategy.nextModel}`);
@@ -926,7 +945,11 @@ async function journalFailureRecoveryDecision(task, failureDetails, opts) {
   }
 
   await journalEntry(task, parts.join(" | "), opts, {
-    signals: [`failure:${classified.type}`, `strategy:${strategy.action}`]
+    signals: [
+      `failure:${classified.type}`,
+      `strategy:${strategy.action}`,
+      gateId ? `failed-gate:${gateId}` : ""
+    ].filter(Boolean)
   });
 
   return { classified, strategy, failCount };
@@ -1255,6 +1278,69 @@ function collectDispatchEvidenceText(result) {
   }
 
   return parts.join("\n");
+}
+
+function normalizeGateId(value) {
+  const gateId = String(value ?? "").trim();
+  if (!gateId || /^(undefined|null)$/i.test(gateId)) {
+    return "";
+  }
+  return gateId;
+}
+
+function extractGateIdFromText(text) {
+  const source = String(text ?? "");
+  const patterns = [
+    /Quality gate failed:\s*([A-Za-z0-9._-]+)/i,
+    /gate\s+"([^"\r\n]+)"\s+failed/i,
+    /\bfailedGate\s*[:=]\s*"?([A-Za-z0-9._-]+)"?/i,
+    /\bgate(?:Id|Name)?\s*[:=]\s*"?([A-Za-z0-9._-]+)"?/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    const gateId = normalizeGateId(match?.[1]);
+    if (gateId) {
+      return gateId;
+    }
+  }
+
+  return "";
+}
+
+function resolveDispatchFailureGate(result, evidenceText = collectDispatchEvidenceText(result)) {
+  const gateResults = [
+    ...(Array.isArray(result?.gateResults) ? result.gateResults : []),
+    ...(Array.isArray(result?.evidence?.gateResults) ? result.evidence.gateResults : [])
+  ];
+
+  for (const gateResult of gateResults) {
+    if (gateResult?.passed === false) {
+      const gateId = normalizeGateId(gateResult.gate);
+      if (gateId) {
+        return gateId;
+      }
+    }
+  }
+
+  const candidateTexts = [
+    result?.evidence?.failureDetail?.attempted,
+    result?.evidence?.failureDetail?.hypothesis,
+    result?.message,
+    result?.output,
+    result?.stdout,
+    result?.stderr,
+    evidenceText
+  ];
+
+  for (const candidate of candidateTexts) {
+    const gateId = extractGateIdFromText(candidate);
+    if (gateId) {
+      return gateId;
+    }
+  }
+
+  return "";
 }
 
 function evidenceMatchesAny(text, patterns) {
@@ -1615,17 +1701,36 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
         "continue-implementation": "continue-failed",
         "fix-and-retest": "fix-failed"
       };
+      const failedGateId = resolveDispatchFailureGate(result, dispatchEvidenceText);
       const failureDetail = dispatchEvidenceText.trim()
         ? extractFailureReason({ output: dispatchEvidenceText })
         : `${failureLabels[action]}: exitCode=${result.exitCode}`;
-      await transitionToFailedWithRecovery(task, "dispatch", {
+      await transitionToFailedWithRecovery(task, failedGateId || "dispatch", {
         exitCode: Number(result.exitCode ?? 1),
         stdout: dispatchEvidenceText.slice(0, 4000),
         stderr: String(result.stderr ?? ""),
-        output: `${failureLabels[action]}: exitCode=${result.exitCode} | ${failureDetail}`.slice(0, 2000)
+        output: [
+          `${failureLabels[action]}: exitCode=${result.exitCode}`,
+          failedGateId ? `failedGate=${failedGateId}` : "",
+          failureDetail
+        ].filter(Boolean).join(" | ").slice(0, 2000),
+        gateId: failedGateId
       }, opts);
-      await journalEntry(task, `${failureLabels[action]}: exitCode=${result.exitCode}`, opts);
-      return { done: false, task, action: failureActions[action], details: `exitCode=${result.exitCode}` };
+      await journalEntry(
+        task,
+        [
+          `${failureLabels[action]}: exitCode=${result.exitCode}`,
+          failedGateId ? `failedGate=${failedGateId}` : ""
+        ].filter(Boolean).join(" | "),
+        opts,
+        failedGateId ? { signals: [`failed-gate:${failedGateId}`] } : {}
+      );
+      return {
+        done: false,
+        task,
+        action: failureActions[action],
+        details: failedGateId ? `exitCode=${result.exitCode}; failedGate=${failedGateId}` : `exitCode=${result.exitCode}`
+      };
     }
 
     case "run-review": {
@@ -2240,6 +2345,7 @@ export {
   deriveCommitType,
   deriveCommitScope,
   buildCommitHeader,
+  resolveDispatchFailureGate,
   detectStopCondition,
   autoCommitTask,
   finalizeDoneTaskCommit,

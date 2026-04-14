@@ -13,9 +13,10 @@ Core loop:
 6. Update task state with `node scripts/sprint-board.mjs update ...` (never hand-edit sprint rows).
 7. Run quality gate: `{{BUILD_COMMAND}}`.
 8. Run review gate: `{{REVIEW_COMMAND}}`.
-9. Run acceptance gate: `{{TEST_COMMAND}}`.
-10. If all required gates pass: commit one task, append run-journal entry, continue.
-11. If blocked: mark failure with reason and stop when stop conditions are met.
+9. Run project test command: `{{PROJECT_TEST_COMMAND}}`.
+10. Run acceptance gate: `{{TEST_COMMAND}}`.
+11. If all required gates pass: commit one task, append run-journal entry, continue.
+12. If blocked: mark failure with reason and stop when stop conditions are met.
 
 Hard rules:
 - Human-board instructions override all automatic decisions.

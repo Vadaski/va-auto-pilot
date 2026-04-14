@@ -3,6 +3,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  inferProjectGateCommands,
+  selectAcceptanceGateCommand,
+  selectProjectTestCommand
+} from "../scripts/lib/project-gates.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -188,16 +193,20 @@ function applyTemplate(raw, context) {
   return output;
 }
 
-function resolveContext(opts) {
+function resolveContext(opts, targetDir) {
+  const inferredCommands = inferProjectGateCommands(targetDir);
+  const projectTestCommand = selectProjectTestCommand(inferredCommands);
+  const acceptanceCommand = selectAcceptanceGateCommand(inferredCommands);
   const context = {
     DATE_ISO: new Date().toISOString().slice(0, 10),
     PROJECT_PREFIX: opts["project-prefix"] ?? DEFAULTS.PROJECT_PREFIX,
     SPRINT_STATE_FILE: DEFAULTS.SPRINT_STATE_FILE,
     SPRINT_BOARD_FILE: DEFAULTS.SPRINT_BOARD_FILE,
     RUN_JOURNAL_FILE: DEFAULTS.RUN_JOURNAL_FILE,
-    BUILD_COMMAND: opts["build-cmd"] ?? DEFAULTS.BUILD_COMMAND,
+    BUILD_COMMAND: opts["build-cmd"] ?? inferredCommands.buildCommand ?? DEFAULTS.BUILD_COMMAND,
     REVIEW_COMMAND: opts["review-cmd"] ?? DEFAULTS.REVIEW_COMMAND,
-    TEST_COMMAND: opts["test-cmd"] ?? DEFAULTS.TEST_COMMAND,
+    PROJECT_TEST_COMMAND: projectTestCommand ?? acceptanceCommand ?? DEFAULTS.TEST_COMMAND,
+    TEST_COMMAND: opts["test-cmd"] ?? acceptanceCommand ?? DEFAULTS.TEST_COMMAND,
     DOMAIN_ROLE_NAME: opts["domain-role"] ?? DEFAULTS.DOMAIN_ROLE_NAME,
     DOMAIN_EXPERT_PROMPT:
       opts["domain-prompt"] ?? DEFAULTS.DOMAIN_EXPERT_PROMPT,
@@ -310,7 +319,7 @@ function runInit(parsed) {
   const force = parsed.flags.has("force");
   const dryRun = parsed.flags.has("dry-run");
   const targetDir = path.resolve(process.cwd(), parsed.targetDir);
-  const context = resolveContext(parsed.options);
+  const context = resolveContext(parsed.options, targetDir);
 
   if (!dryRun) {
     fs.mkdirSync(targetDir, { recursive: true });
@@ -361,6 +370,9 @@ function runInit(parsed) {
  * missing key (e.g. legacy projects that pre-date a config field).
  */
 function resolveContextFromConfig(targetDir) {
+  const inferredCommands = inferProjectGateCommands(targetDir);
+  const projectTestCommand = selectProjectTestCommand(inferredCommands);
+  const acceptanceCommand = selectAcceptanceGateCommand(inferredCommands);
   const configPath = path.join(targetDir, ".va-auto-pilot/config.yaml");
   const context = {
     DATE_ISO: new Date().toISOString().slice(0, 10),
@@ -368,9 +380,10 @@ function resolveContextFromConfig(targetDir) {
     SPRINT_STATE_FILE: DEFAULTS.SPRINT_STATE_FILE,
     SPRINT_BOARD_FILE: DEFAULTS.SPRINT_BOARD_FILE,
     RUN_JOURNAL_FILE: DEFAULTS.RUN_JOURNAL_FILE,
-    BUILD_COMMAND: DEFAULTS.BUILD_COMMAND,
+    BUILD_COMMAND: inferredCommands.buildCommand ?? DEFAULTS.BUILD_COMMAND,
     REVIEW_COMMAND: DEFAULTS.REVIEW_COMMAND,
-    TEST_COMMAND: DEFAULTS.TEST_COMMAND,
+    PROJECT_TEST_COMMAND: projectTestCommand ?? acceptanceCommand ?? DEFAULTS.TEST_COMMAND,
+    TEST_COMMAND: acceptanceCommand ?? DEFAULTS.TEST_COMMAND,
     DOMAIN_ROLE_NAME: DEFAULTS.DOMAIN_ROLE_NAME,
     DOMAIN_EXPERT_PROMPT: DEFAULTS.DOMAIN_EXPERT_PROMPT,
     DEBUG_SETUP_ENDPOINT: DEFAULTS.DEBUG_SETUP_ENDPOINT,

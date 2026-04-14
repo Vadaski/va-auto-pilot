@@ -54,7 +54,7 @@ async function isBinaryAvailable(bin) {
 
 /**
  * Convert a track into a va-agent-protocol TaskUnit with rich metadata.
- * @param {{ taskId: string, command?: string, title?: string, verification?: string[], notes?: string, priority?: string, dependsOn?: string[], qualityGates?: string[] }} track
+ * @param {{ taskId: string, command?: string, title?: string, verification?: string[], notes?: string, priority?: string, dependsOn?: string[], qualityGates?: string[], metadata?: object }} track
  * @param {string} workDir
  */
 export function trackToTaskUnit(track, workDir) {
@@ -69,7 +69,10 @@ export function trackToTaskUnit(track, workDir) {
   };
   if (track.priority) unit.priority = track.priority;
   if (Array.isArray(track.dependsOn) && track.dependsOn.length > 0) unit.dependsOn = track.dependsOn;
-  if (track.qualityGates) unit.metadata = { qualityGates: track.qualityGates };
+  const metadata = {};
+  if (track.qualityGates) metadata.qualityGates = track.qualityGates;
+  if (track.metadata) Object.assign(metadata, track.metadata);
+  if (Object.keys(metadata).length > 0) unit.metadata = metadata;
   return unit;
 }
 
@@ -94,6 +97,47 @@ export function colonyResultToRunnerResult(taskId, command, durationMs, logFile,
     durationMs, timedOut: isTimeout, logFile,
     ...(evidence ? { evidence } : {}),
   };
+}
+
+/**
+ * Detect whether a task is a Sprint-level multi-file task that should avoid Kimi.
+ * Thresholds: >3 files or >200 lines of diff.
+ * Uses explicit scope metadata when available, falling back to text heuristics.
+ */
+export function isSprintLevelMultiFileTask(taskUnit) {
+  const scope = taskUnit.metadata?.scope;
+  if (scope) {
+    if (scope.changedFileCount > 3) {
+      return { isLarge: true, reason: `${scope.changedFileCount} changed files` };
+    }
+    if (scope.estimatedDiffLines > 200) {
+      return { isLarge: true, reason: `${scope.estimatedDiffLines} estimated diff lines` };
+    }
+  }
+
+  const text = `${taskUnit.objective ?? ""} ${(taskUnit.constraints ?? []).join(" ")}`.toLowerCase();
+
+  // Count explicit file references by common code extensions
+  const fileRefs = [...text.matchAll(/\b[\w\-/]+\.(?:js|ts|mjs|cjs|jsx|tsx|py|go|rs|java|cpp|c|h|md|yaml|yml|json|html|css|scss)\b/g)]
+    .map((m) => m[0]);
+  const uniqueFiles = new Set(fileRefs);
+  if (uniqueFiles.size > 3) {
+    return { isLarge: true, reason: `${uniqueFiles.size} file references` };
+  }
+
+  // Objective length as a rough proxy for complexity
+  const objective = String(taskUnit.objective ?? "");
+  if (objective.length > 150) {
+    return { isLarge: true, reason: "objective length > 150 chars" };
+  }
+
+  // Acceptance criteria count
+  const acceptanceCriteria = taskUnit.acceptanceCriteria ?? [];
+  if (acceptanceCriteria.length > 3) {
+    return { isLarge: true, reason: `${acceptanceCriteria.length} acceptance criteria` };
+  }
+
+  return { isLarge: false, reason: "" };
 }
 
 // CLI adapter config table (GLM is API-based, handled separately)
@@ -193,7 +237,20 @@ export class ColonyBridge {
   }
 
   async dispatch(track, agentTemplate, logFile, timeoutMs) {
-    if (this.colony) return this.dispatchViaColony(track, agentTemplate, logFile, timeoutMs);
+    if (this.colony) {
+      const taskUnit = trackToTaskUnit(track, this.workDir);
+      const largeCheck = isSprintLevelMultiFileTask(taskUnit);
+      if (largeCheck.isLarge) {
+        const routeResult = this.colony.routeTask(taskUnit);
+        if (routeResult && /kimi/i.test(routeResult.agentId)) {
+          appendLog(logFile,
+            `[${nowIso()}] task=${track.taskId} [colony-bypass]\nreason: ${largeCheck.reason}; would route to ${routeResult.agentId}\nfalling back to agentTemplate spawn\n---\n`
+          );
+          return this.dispatchViaSpawn(track, agentTemplate, logFile, timeoutMs);
+        }
+      }
+      return this.dispatchViaColony(track, agentTemplate, logFile, timeoutMs);
+    }
     return this.dispatchViaSpawn(track, agentTemplate, logFile, timeoutMs);
   }
 

@@ -10,6 +10,7 @@ import { test } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
 // Import helpers from sprint-utils
@@ -32,6 +33,7 @@ import {
   deriveCommitType,
   deriveCommitScope,
   buildCommitHeader,
+  resolveDispatchFailureGate,
   detectStopCondition,
   autoCommitTask,
   finalizeDoneTaskCommit,
@@ -47,6 +49,7 @@ import {
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
 import { suggestGateFromPitfall, suggestGatesFromPitfalls } from "./lib/adaptive-gates.mjs";
+import { inferProjectGateCommands, selectProjectTestCommand } from "./lib/project-gates.mjs";
 
 // ---------------------------------------------------------------------------
 // Import pure functions from sprint-board via a thin re-export shim.
@@ -699,21 +702,122 @@ test("runCycle review failure creates fix tasks for blocking review findings", a
   }
 });
 
+test("inferProjectGateCommands reads actual package.json scripts", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-gates-node-"));
+  fs.writeFileSync(path.join(repoDir, "package.json"), JSON.stringify({
+    name: "fixture",
+    packageManager: "pnpm@10.0.0",
+    scripts: {
+      "check:all": "pnpm run lint && pnpm run test:unit",
+      "test:unit": "vitest run",
+      lint: "eslint ."
+    }
+  }, null, 2));
+
+  const commands = inferProjectGateCommands(repoDir);
+  assert.equal(commands.stack, "node");
+  assert.equal(commands.packageManager, "pnpm");
+  assert.equal(commands.buildCommand, "pnpm run check:all");
+  assert.equal(commands.testCommand, "pnpm run test:unit");
+  assert.equal(commands.lintCommand, "pnpm run lint");
+});
+
+test("inferProjectGateCommands detects nonstandard package.json test scripts", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-gates-node-check-units-"));
+  fs.writeFileSync(path.join(repoDir, "package.json"), JSON.stringify({
+    name: "fixture",
+    scripts: {
+      "check:all": "npm run check && npm run check:units && npm run validate:distribution",
+      "check:units": "node ./scripts/test-units.mjs",
+      "validate:distribution": "node ./scripts/validate-distribution.mjs"
+    }
+  }, null, 2));
+
+  const commands = inferProjectGateCommands(repoDir);
+  assert.equal(commands.buildCommand, "npm run check:all");
+  assert.equal(commands.testCommand, "npm run check:units");
+  assert.equal(commands.acceptanceCommand, "npm run validate:distribution");
+  assert.equal(selectProjectTestCommand(commands), "npm run check:units");
+});
+
 test("suggestGateFromPitfall maps gate pitfall into required suggestion", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-suggest-gate-"));
+  fs.writeFileSync(path.join(repoDir, "package.json"), JSON.stringify({
+    name: "fixture",
+    packageManager: "pnpm@10.0.0",
+    scripts: {
+      "test:unit": "vitest run"
+    }
+  }, null, 2));
+
   const suggestion = suggestGateFromPitfall({
     id: "PF-001",
     failureType: "gate",
-    attempted: "npm test",
+    attempted: "tests failed during verification",
     hypothesis: "tests failed because a regression escaped"
+  }, {
+    projectDir: repoDir
   });
 
   assert.equal(suggestion.required, true);
   assert.equal(suggestion.triggeredBy, "PF-001");
-  assert.equal(suggestion.command, "npm test");
+  assert.equal(suggestion.command, "pnpm run test:unit");
   assert.match(suggestion.description, /PF-001/);
 });
 
+test("suggestGateFromPitfall replaces generic npm test with the project's actual test script", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-suggest-gate-actual-test-"));
+  fs.writeFileSync(path.join(repoDir, "package.json"), JSON.stringify({
+    name: "fixture",
+    packageManager: "pnpm@10.0.0",
+    scripts: {
+      "test:unit": "vitest run"
+    }
+  }, null, 2));
+
+  const suggestion = suggestGateFromPitfall({
+    id: "PF-002",
+    failureType: "gate",
+    attempted: "npm test",
+    hypothesis: "tests failed because a regression escaped"
+  }, {
+    projectDir: repoDir
+  });
+
+  assert.equal(suggestion.command, "pnpm run test:unit");
+});
+
+test("suggestGateFromPitfall prefers discovered project test scripts over acceptance scripts", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-suggest-gate-check-units-"));
+  fs.writeFileSync(path.join(repoDir, "package.json"), JSON.stringify({
+    name: "fixture",
+    scripts: {
+      "check:units": "node ./scripts/test-units.mjs",
+      "validate:distribution": "node ./scripts/validate-distribution.mjs"
+    }
+  }, null, 2));
+
+  const suggestion = suggestGateFromPitfall({
+    id: "PF-002B",
+    failureType: "gate",
+    attempted: "npm test",
+    hypothesis: "tests failed because a regression escaped"
+  }, {
+    projectDir: repoDir
+  });
+
+  assert.equal(suggestion.command, "npm run check:units");
+});
+
 test("suggestGatesFromPitfalls filters resolved entries", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-suggest-gates-"));
+  fs.writeFileSync(path.join(repoDir, "package.json"), JSON.stringify({
+    name: "fixture",
+    scripts: {
+      smoke: "playwright test"
+    }
+  }, null, 2));
+
   const suggestions = suggestGatesFromPitfalls([
     {
       id: "PF-001",
@@ -729,11 +833,146 @@ test("suggestGatesFromPitfalls filters resolved entries", () => {
       hypothesis: "lint missed a rule",
       resolvedAt: "2026-03-29T00:00:00.000Z"
     }
-  ]);
+  ], {
+    projectDir: repoDir
+  });
 
   assert.equal(suggestions.length, 1);
   assert.equal(suggestions[0].triggeredBy, "PF-001");
   assert.equal(suggestions[0].required, false);
+  assert.equal(suggestions[0].command, "npm run smoke");
+});
+
+test("sprint-board suggest-gate resolves project stack from pitfalls file path, not cwd", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-suggest-gate-cwd-"));
+  const outsiderDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-suggest-gate-outside-"));
+  const pitfallsDir = path.join(repoDir, ".va-auto-pilot");
+  const pitfallsFile = path.join(pitfallsDir, "pitfalls.json");
+
+  fs.mkdirSync(pitfallsDir, { recursive: true });
+  fs.writeFileSync(path.join(repoDir, "Cargo.toml"), [
+    "[package]",
+    'name = "fixture"',
+    'version = "0.1.0"',
+    'edition = "2021"'
+  ].join("\n"));
+  fs.writeFileSync(pitfallsFile, JSON.stringify({
+    version: 1,
+    entries: [
+      {
+        id: "PF-004",
+        taskId: "AP-004",
+        failureType: "gate",
+        attempted: "tests failed during verification",
+        hypothesis: "acceptance gate is missing",
+        missingContext: "",
+        resolution: "",
+        resolvedAt: null,
+        createdAt: "2026-04-14T00:00:00.000Z"
+      }
+    ]
+  }, null, 2));
+
+  const output = execFileSync(process.execPath, [
+    path.resolve("scripts/sprint-board.mjs"),
+    "suggest-gate",
+    "--pitfalls-file",
+    pitfallsFile
+  ], {
+    cwd: outsiderDir,
+    encoding: "utf8"
+  });
+
+  assert.match(output, /command: cargo test/);
+});
+
+test("va-auto-pilot init renders prompt gates from target package.json scripts", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-init-target-"));
+  fs.writeFileSync(path.join(repoDir, "package.json"), JSON.stringify({
+    name: "fixture",
+    packageManager: "pnpm@10.0.0",
+    scripts: {
+      "check:all": "pnpm run lint && pnpm run test:unit",
+      "test:unit": "vitest run"
+    }
+  }, null, 2));
+
+  execFileSync(process.execPath, [
+    path.resolve("bin/va-auto-pilot.mjs"),
+    "init",
+    repoDir,
+    "--project-prefix",
+    "TMP"
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8"
+  });
+
+  const config = fs.readFileSync(path.join(repoDir, ".va-auto-pilot", "config.yaml"), "utf8");
+  const prompt = fs.readFileSync(path.join(repoDir, "docs", "operations", "start-va-auto-pilot-prompt.md"), "utf8");
+
+  assert.match(config, /buildCommand: "pnpm run check:all"/);
+  assert.match(config, /acceptanceTestCommand: "pnpm run test:unit"/);
+  assert.match(prompt, /Run quality gate: `pnpm run check:all`\./);
+  assert.match(prompt, /Run project test command: `pnpm run test:unit`\./);
+  assert.match(prompt, /Run acceptance gate: `pnpm run test:unit`\./);
+});
+
+test("va-auto-pilot init renders prompt gates for non-node stacks", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-init-rust-target-"));
+  fs.writeFileSync(path.join(repoDir, "Cargo.toml"), [
+    "[package]",
+    'name = "fixture"',
+    'version = "0.1.0"',
+    'edition = "2021"'
+  ].join("\n"));
+
+  execFileSync(process.execPath, [
+    path.resolve("bin/va-auto-pilot.mjs"),
+    "init",
+    repoDir,
+    "--project-prefix",
+    "RST"
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8"
+  });
+
+  const config = fs.readFileSync(path.join(repoDir, ".va-auto-pilot", "config.yaml"), "utf8");
+  const prompt = fs.readFileSync(path.join(repoDir, "docs", "operations", "start-va-auto-pilot-prompt.md"), "utf8");
+
+  assert.match(config, /buildCommand: "cargo check && cargo test"/);
+  assert.match(config, /acceptanceTestCommand: "cargo test"/);
+  assert.match(prompt, /Run quality gate: `cargo check && cargo test`\./);
+  assert.match(prompt, /Run project test command: `cargo test`\./);
+  assert.match(prompt, /Run acceptance gate: `cargo test`\./);
+});
+
+test("va-auto-pilot init prompt separates project test and acceptance gates when both exist", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-init-target-separate-test-"));
+  fs.writeFileSync(path.join(repoDir, "package.json"), JSON.stringify({
+    name: "fixture",
+    scripts: {
+      "check:all": "npm run check && npm run check:units && npm run validate:distribution",
+      "check:units": "node ./scripts/test-units.mjs",
+      "validate:distribution": "node ./scripts/validate-distribution.mjs"
+    }
+  }, null, 2));
+
+  execFileSync(process.execPath, [
+    path.resolve("bin/va-auto-pilot.mjs"),
+    "init",
+    repoDir,
+    "--project-prefix",
+    "TMP"
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8"
+  });
+
+  const prompt = fs.readFileSync(path.join(repoDir, "docs", "operations", "start-va-auto-pilot-prompt.md"), "utf8");
+  assert.match(prompt, /Run project test command: `npm run check:units`\./);
+  assert.match(prompt, /Run acceptance gate: `npm run validate:distribution`\./);
 });
 
 test("runGateSequence injects unresolved pitfalls into codex-backed review gate context", async () => {
@@ -1211,6 +1450,111 @@ test("executeSingleTask still fails dispatch when success-looking log has no lan
     assert.equal(result.action, "dispatch-failed");
     const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
     assert.equal(state.tasks[0].state, "Failed");
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("executeSingleTask propagates failed review gate context through fix-and-retest journaling", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-exec-fix-gate-context-"));
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(repoDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
+  const humanBoardFile = path.join(repoDir, "docs", "todo", "human-board.md");
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    updatedAt: "2026-04-14T00:00:00.000Z",
+    tasks: [
+      {
+        id: "AP-151",
+        title: "Failed task awaiting fix",
+        priority: "P1",
+        state: "Failed",
+        failCount: 0,
+        dependsOn: []
+      }
+    ]
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint Board\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+  fs.writeFileSync(humanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  runGit(["init"], repoDir);
+  runGit(["config", "user.email", "test@example.com"], repoDir);
+  runGit(["config", "user.name", "Test User"], repoDir);
+  fs.writeFileSync(path.join(repoDir, "work.txt"), "baseline\n", "utf8");
+  runGit(["add", "."], repoDir);
+  runGit(["commit", "-m", "initial"], repoDir);
+
+  const previousCwd = process.cwd();
+  process.chdir(repoDir);
+  try {
+    const result = await executeSingleTask(
+      "AP-151",
+      {
+        colony: true,
+        dispatch: async (_track, _template, logFile) => {
+          fs.mkdirSync(path.dirname(logFile), { recursive: true });
+          fs.writeFileSync(logFile, 'Codex completed but gate "undefined" failed\n', "utf8");
+          return {
+            success: false,
+            exitCode: 1,
+            durationMs: 1,
+            logFile,
+            evidence: {
+              failureDetail: {
+                attempted: 'Codex completed but gate "undefined" failed',
+                hypothesis: "Gate check failed"
+              },
+              gateResults: [
+                { gate: "review", passed: false, output: "[CRITICAL] Missing guard" }
+              ]
+            }
+          };
+        }
+      },
+      [],
+      {},
+      {
+        dryRun: false,
+        noCommit: true,
+        json: true,
+        strict: false,
+        workDir: repoDir,
+        stateFile,
+        boardFile,
+        journalFile,
+        pitfallsFile,
+        agentTemplate: "echo {taskId}",
+        trackTimeout: 1000,
+        taskBaselines: new Map(),
+        sprintBoardLock: Promise.resolve(),
+        stateMutationLock: Promise.resolve()
+      }
+    );
+
+    assert.equal(result.terminal, true);
+    assert.equal(result.action, "fix-failed");
+    assert.match(result.details, /failedGate=review/);
+
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.equal(state.tasks[0].state, "Failed");
+    assert.equal(state.tasks[0].failureDetail.failureType, "review");
+    assert.match(state.tasks[0].failureDetail.attempted, /auto-pilot review/);
+
+    const pitfalls = JSON.parse(fs.readFileSync(pitfallsFile, "utf8"));
+    assert.equal(pitfalls.entries.length, 1);
+    assert.equal(pitfalls.entries[0].failureType, "review");
+
+    const journal = fs.readFileSync(journalFile, "utf8");
+    assert.match(journal, /Failure classified: type=review/);
+    assert.match(journal, /failedGate=review/);
+    assert.match(journal, /Fix dispatch failed: exitCode=1 \| failedGate=review/);
+    assert.match(journal, /failed-gate:review/);
   } finally {
     process.chdir(previousCwd);
   }
@@ -2264,6 +2608,7 @@ import {
   isColonyAvailable,
   trackToTaskUnit,
   colonyResultToRunnerResult,
+  isSprintLevelMultiFileTask,
 } from "./lib/colony-bridge.mjs";
 
 test("isColonyAvailable returns a boolean", () => {
@@ -2411,6 +2756,132 @@ test("ColonyBridge: shutdown is safe to call when colony is null", async () => {
   // Should not throw
   await bridge.shutdown();
   assert.equal(bridge.colony, null);
+});
+
+test("trackToTaskUnit: merges metadata from track", () => {
+  const track = {
+    taskId: "AP-006",
+    title: "Test metadata merge",
+    metadata: { scope: { changedFileCount: 5, estimatedDiffLines: 300 } },
+  };
+  const task = trackToTaskUnit(track, "/proj");
+  assert.equal(task.metadata.scope.changedFileCount, 5);
+  assert.equal(task.metadata.scope.estimatedDiffLines, 300);
+});
+
+test("trackToTaskUnit: qualityGates and metadata merge together", () => {
+  const track = {
+    taskId: "AP-007",
+    title: "Merge test",
+    qualityGates: ["build"],
+    metadata: { custom: true },
+  };
+  const task = trackToTaskUnit(track, "/proj");
+  assert.deepEqual(task.metadata.qualityGates, ["build"]);
+  assert.equal(task.metadata.custom, true);
+});
+
+test("isSprintLevelMultiFileTask: detects >3 changed files from scope", () => {
+  const task = { objective: "Fix bug", metadata: { scope: { changedFileCount: 5, estimatedDiffLines: 10 } } };
+  const result = isSprintLevelMultiFileTask(task);
+  assert.equal(result.isLarge, true);
+  assert.match(result.reason, /5 changed files/);
+});
+
+test("isSprintLevelMultiFileTask: detects >200 diff lines from scope", () => {
+  const task = { objective: "Refactor", metadata: { scope: { changedFileCount: 2, estimatedDiffLines: 250 } } };
+  const result = isSprintLevelMultiFileTask(task);
+  assert.equal(result.isLarge, true);
+  assert.match(result.reason, /250 estimated diff lines/);
+});
+
+test("isSprintLevelMultiFileTask: detects >3 file references in text", () => {
+  const task = {
+    objective: "Update src/app.ts, src/lib.ts, src/utils.ts, src/config.ts and src/main.ts",
+  };
+  const result = isSprintLevelMultiFileTask(task);
+  assert.equal(result.isLarge, true);
+  assert.match(result.reason, /5 file references/);
+});
+
+test("isSprintLevelMultiFileTask: detects long objective", () => {
+  const task = { objective: "a".repeat(200) };
+  const result = isSprintLevelMultiFileTask(task);
+  assert.equal(result.isLarge, true);
+  assert.match(result.reason, /objective length > 150 chars/);
+});
+
+test("isSprintLevelMultiFileTask: detects many acceptance criteria", () => {
+  const task = { objective: "Test", acceptanceCriteria: ["a", "b", "c", "d", "e"] };
+  const result = isSprintLevelMultiFileTask(task);
+  assert.equal(result.isLarge, true);
+  assert.match(result.reason, /5 acceptance criteria/);
+});
+
+test("isSprintLevelMultiFileTask: small task returns false", () => {
+  const task = { objective: "Fix typo" };
+  const result = isSprintLevelMultiFileTask(task);
+  assert.equal(result.isLarge, false);
+  assert.equal(result.reason, "");
+});
+
+test("ColonyBridge: dispatch bypasses colony for large tasks routed to kimi", async () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  // Mock colony with a kimi router
+  bridge.colony = {
+    routeTask: () => ({ agentId: "kimi:/tmp", score: 0.9, reason: "best match" }),
+  };
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-bypass-"));
+  const logFile = path.join(tmpDir, "bypass.log");
+  const track = {
+    taskId: "CB-BYPASS",
+    command: "echo bypass-ok",
+    metadata: { scope: { changedFileCount: 5, estimatedDiffLines: 10 } },
+  };
+  const result = await bridge.dispatch(track, "echo bypass-ok", logFile, 10_000);
+  assert.equal(result.success, true);
+  assert.equal(result.taskId, "CB-BYPASS");
+  const logContent = fs.readFileSync(logFile, "utf8");
+  assert.ok(logContent.includes("[colony-bypass]"), `log should note bypass, got: ${logContent}`);
+  assert.ok(logContent.includes("kimi"), `log should mention kimi, got: ${logContent}`);
+});
+
+test("ColonyBridge: dispatch does not bypass colony when route is not kimi", async () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  let colonyDispatchCalled = false;
+  bridge.colony = {
+    routeTask: () => ({ agentId: "claude:/tmp", score: 0.9, reason: "best match" }),
+  };
+  bridge.dispatchViaColony = async () => {
+    colonyDispatchCalled = true;
+    return { success: true, taskId: "CB-NOBYPASS" };
+  };
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-nobypass-"));
+  const logFile = path.join(tmpDir, "nobypass.log");
+  const track = {
+    taskId: "CB-NOBYPASS",
+    command: "echo ok",
+    metadata: { scope: { changedFileCount: 5, estimatedDiffLines: 10 } },
+  };
+  await bridge.dispatch(track, "echo ok", logFile, 10_000);
+  assert.equal(colonyDispatchCalled, true);
+});
+
+test("ColonyBridge: dispatch does not bypass colony for small tasks even if routed to kimi", async () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  let colonyDispatchCalled = false;
+  bridge.colony = {
+    routeTask: () => ({ agentId: "kimi:/tmp", score: 0.9, reason: "best match" }),
+  };
+  bridge.dispatchViaColony = async () => {
+    colonyDispatchCalled = true;
+    return { success: true, taskId: "CB-SMALL" };
+  };
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-small-"));
+  const logFile = path.join(tmpDir, "small.log");
+  const track = { taskId: "CB-SMALL", command: "echo ok" };
+  await bridge.dispatch(track, "echo ok", logFile, 10_000);
+  assert.equal(colonyDispatchCalled, true);
 });
 
 // ---------------------------------------------------------------------------
@@ -3061,6 +3532,35 @@ test("colonyResultToRunnerResult: non-timeout failureType keeps timedOut false",
   });
   assert.equal(result.timedOut, false);
   assert.equal(result.success, false);
+});
+
+test("resolveDispatchFailureGate prefers failed gateResults over undefined failure detail text", () => {
+  const gateId = resolveDispatchFailureGate({
+    evidence: {
+      failureDetail: {
+        attempted: 'Codex completed but gate "undefined" failed',
+        hypothesis: "Gate check failed"
+      },
+      gateResults: [
+        { gate: "review", passed: false, output: "review output" }
+      ]
+    }
+  });
+
+  assert.equal(gateId, "review");
+});
+
+test("resolveDispatchFailureGate falls back to parsing gate id from failure text", () => {
+  const gateId = resolveDispatchFailureGate({
+    evidence: {
+      failureDetail: {
+        attempted: 'Codex completed but gate "lint" failed',
+        hypothesis: "Gate check failed"
+      }
+    }
+  });
+
+  assert.equal(gateId, "lint");
 });
 
 test("ColonyBridge: dispatchViaSpawn handles command failure (exit code != 0)", async () => {

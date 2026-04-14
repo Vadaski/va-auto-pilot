@@ -446,6 +446,18 @@ ${rowsForSection(backlog, ["Priority", "ID", "Task", "Depends On", "Owner", "Sou
 }
 
 /**
+ * @param {string} filePath
+ * @returns {string}
+ */
+function resolveProjectDirFromPilotArtifact(filePath) {
+  const resolvedPath = path.resolve(filePath);
+  const parentDir = path.dirname(resolvedPath);
+  return path.basename(parentDir) === ".va-auto-pilot"
+    ? path.dirname(parentDir)
+    : parentDir;
+}
+
+/**
  * @param {string} boardFile
  * @param {SprintState} state
  * @returns {void}
@@ -1198,10 +1210,11 @@ function resolvePitfall(pitfallsFile, options, runtime = {}) {
   entry.resolvedAt = nowIso();
   writePitfalls(pitfallsFile, data);
 
-  const suggestion = suggestGateFromPitfall(entry);
   const configFile = runtime.configFile
     ? path.resolve(runtime.configFile)
     : path.resolve(path.dirname(pitfallsFile), "..", DEFAULT_CONFIG_FILE);
+  const projectDir = resolveProjectDirFromPilotArtifact(configFile);
+  const suggestion = suggestGateFromPitfall(entry, { projectDir });
   const suggestionResult = appendSuggestedGate(configFile, suggestion);
   if (runtime.journalFile) {
     const summary = suggestionResult.added
@@ -1581,7 +1594,9 @@ function main() {
   }
 
   if (parsed.command === "suggest-gate") {
-    const suggestions = suggestGatesFromPitfalls(readPitfalls(pitfallsFile).entries);
+    const suggestions = suggestGatesFromPitfalls(readPitfalls(pitfallsFile).entries, {
+      projectDir: resolveProjectDirFromPilotArtifact(pitfallsFile)
+    });
     process.stdout.write(stringifyYaml(suggestions));
     return;
   }

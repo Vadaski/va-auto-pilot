@@ -12,6 +12,56 @@ flows:
         - stdout_contains: ["upgrade", "Update scripts"]
       should: []
 
+  - name: "init: infers prompt gate commands from target package.json"
+    command: "bash"
+    args:
+      - "-c"
+      - |
+        set -e
+        DIR=$(mktemp -d)
+        cat > "$DIR/package.json" <<'EOF'
+        {
+          "name": "fixture",
+          "packageManager": "pnpm@10.0.0",
+          "scripts": {
+            "check:all": "pnpm run lint && pnpm run test:unit",
+            "test:unit": "vitest run"
+          }
+        }
+        EOF
+        node bin/va-auto-pilot.mjs init "$DIR" --project-prefix INF
+        grep -n "pnpm run test:unit" "$DIR/.va-auto-pilot/config.yaml"
+        grep -n "Run acceptance gate: \`pnpm run test:unit\`." "$DIR/docs/operations/start-va-auto-pilot-prompt.md"
+        rm -rf "$DIR"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["pnpm run test:unit"]
+      should: []
+
+  - name: "init: infers prompt gate commands for rust projects"
+    command: "bash"
+    args:
+      - "-c"
+      - |
+        set -e
+        DIR=$(mktemp -d)
+        cat > "$DIR/Cargo.toml" <<'EOF'
+        [package]
+        name = "fixture"
+        version = "0.1.0"
+        edition = "2021"
+        EOF
+        node bin/va-auto-pilot.mjs init "$DIR" --project-prefix INF
+        grep -n 'acceptanceTestCommand: "cargo test"' "$DIR/.va-auto-pilot/config.yaml"
+        grep -n 'Run acceptance gate: `cargo test`\.' "$DIR/docs/operations/start-va-auto-pilot-prompt.md"
+        rm -rf "$DIR"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["cargo test"]
+      should: []
+
   - name: "upgrade --dry-run: works on current project"
     command: "node"
     args: ["bin/va-auto-pilot.mjs", "upgrade", ".", "--dry-run"]

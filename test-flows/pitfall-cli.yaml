@@ -226,6 +226,15 @@ flows:
         set -euo pipefail
         tmpdir="$(mktemp -d)"
         pitfalls="$tmpdir/pitfalls.json"
+        cat > "$tmpdir/package.json" <<'EOF'
+        {
+          "name": "fixture",
+          "packageManager": "pnpm@10.0.0",
+          "scripts": {
+            "test:unit": "vitest run"
+          }
+        }
+        EOF
         cat > "$pitfalls" <<'EOF'
         {
           "version": 1,
@@ -244,12 +253,155 @@ flows:
           ]
         }
         EOF
-        node scripts/sprint-board.mjs suggest-gate --pitfalls-file "$pitfalls"
+        (
+          cd "$tmpdir"
+          node /Users/vadaski/vadaski/Code/va-auto-pilot/scripts/sprint-board.mjs suggest-gate --pitfalls-file "$pitfalls"
+        )
     assert:
       must:
         - exit_code: 0
         - stdout_contains:
             - "triggeredBy: PF-001"
-            - "command: npm test"
+            - "command: pnpm run test:unit"
+            - "required: true"
+      should: []
+
+  - name: "suggest-gate: infers test command from target package.json"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        cat > "$tmpdir/package.json" <<'EOF'
+        {
+          "name": "fixture",
+          "packageManager": "pnpm@10.0.0",
+          "scripts": {
+            "test:unit": "vitest run"
+          }
+        }
+        EOF
+        cat > "$tmpdir/pitfalls.json" <<'EOF'
+        {
+          "version": 1,
+          "entries": [
+            {
+              "id": "PF-003",
+              "taskId": "AP-003",
+              "failureType": "gate",
+              "attempted": "tests failed during verification",
+              "hypothesis": "a persistent test gate is missing",
+              "missingContext": "",
+              "resolution": "",
+              "resolvedAt": null,
+              "createdAt": "2026-03-29T00:00:00.000Z"
+            }
+          ]
+        }
+        EOF
+        (
+          cd "$tmpdir"
+          node /Users/vadaski/vadaski/Code/va-auto-pilot/scripts/sprint-board.mjs suggest-gate --pitfalls-file "$tmpdir/pitfalls.json"
+        )
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains:
+            - "triggeredBy: PF-003"
+            - "command: pnpm run test:unit"
+            - "required: true"
+      should: []
+
+  - name: "suggest-gate: prefers discovered project test script over acceptance script"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        cat > "$tmpdir/package.json" <<'EOF'
+        {
+          "name": "fixture",
+          "scripts": {
+            "check:units": "node ./scripts/test-units.mjs",
+            "validate:distribution": "node ./scripts/validate-distribution.mjs"
+          }
+        }
+        EOF
+        cat > "$tmpdir/pitfalls.json" <<'EOF'
+        {
+          "version": 1,
+          "entries": [
+            {
+              "id": "PF-003B",
+              "taskId": "AP-003",
+              "failureType": "gate",
+              "attempted": "npm test",
+              "hypothesis": "a persistent test gate is missing",
+              "missingContext": "",
+              "resolution": "",
+              "resolvedAt": null,
+              "createdAt": "2026-03-29T00:00:00.000Z"
+            }
+          ]
+        }
+        EOF
+        (
+          cd "$tmpdir"
+          node /Users/vadaski/vadaski/Code/va-auto-pilot/scripts/sprint-board.mjs suggest-gate --pitfalls-file "$tmpdir/pitfalls.json"
+        )
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains:
+            - "triggeredBy: PF-003B"
+            - "command: npm run check:units"
+            - "required: true"
+      should: []
+
+  - name: "suggest-gate: resolves project stack from pitfalls file path outside cwd"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        project_dir="$(mktemp -d)"
+        outside_dir="$(mktemp -d)"
+        mkdir -p "$project_dir/.va-auto-pilot"
+        cat > "$project_dir/Cargo.toml" <<'EOF'
+        [package]
+        name = "fixture"
+        version = "0.1.0"
+        edition = "2021"
+        EOF
+        cat > "$project_dir/.va-auto-pilot/pitfalls.json" <<'EOF'
+        {
+          "version": 1,
+          "entries": [
+            {
+              "id": "PF-004",
+              "taskId": "AP-004",
+              "failureType": "gate",
+              "attempted": "tests failed during verification",
+              "hypothesis": "acceptance gate is missing",
+              "missingContext": "",
+              "resolution": "",
+              "resolvedAt": null,
+              "createdAt": "2026-04-14T00:00:00.000Z"
+            }
+          ]
+        }
+        EOF
+        (
+          cd "$outside_dir"
+          node /Users/vadaski/vadaski/Code/va-auto-pilot/scripts/sprint-board.mjs suggest-gate --pitfalls-file "$project_dir/.va-auto-pilot/pitfalls.json"
+        )
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains:
+            - "triggeredBy: PF-004"
+            - "command: cargo test"
             - "required: true"
       should: []

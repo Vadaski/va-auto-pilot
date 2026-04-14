@@ -13,3 +13,9 @@ Hard rules:
 - Read operational memory through `node scripts/sprint-board.mjs journal --view`, not by dumping the full raw journal.
 
 Read the protocol. Execute the loop. Begin first cycle now.
+
+Current repo gates:
+- Run quality gate: `npm run check:all`.
+- Run review gate: `codex review --uncommitted`.
+- Run project test command: `npm run check:units`.
+- Run acceptance gate: `npm run validate:distribution`.

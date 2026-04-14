@@ -17,6 +17,11 @@ import {
   readHumanBoardInstructions
 } from "./lib/human-board.mjs";
 import { VAPilotError } from "./lib/errors.mjs";
+import {
+  withPilotFileLock,
+  writeJsonFileAtomicSync,
+  writeTextFileAtomicSync
+} from "./lib/pilot-state.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -106,6 +111,7 @@ Options (add):
 Options (update):
   --title <text>
   --priority <P0|P1|P2|P3>
+  --if-state <state>       Only update when the current task state matches
   --owner <text>
   --source <text>
   --verification <text>
@@ -355,8 +361,7 @@ function readState(filePath) {
  * @returns {void}
  */
 function writeState(filePath, data) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  writeJsonFileAtomicSync(filePath, data);
 }
 
 /**
@@ -464,8 +469,7 @@ function resolveProjectDirFromPilotArtifact(filePath) {
  */
 function writeBoard(boardFile, state) {
   const markdown = renderBoardMarkdown(state);
-  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
-  fs.writeFileSync(boardFile, markdown, "utf8");
+  writeTextFileAtomicSync(boardFile, markdown);
 }
 
 /**
@@ -718,12 +722,42 @@ function updateTask(state, options, flags) {
     throw new VAPilotError("INVALID_TASK", `Task not found: ${id}`, { taskId: id });
   }
 
+  const expectedState = options["if-state"];
+  if (expectedState !== undefined) {
+    if (!VALID_STATES.includes(expectedState)) {
+      throw new VAPilotError(
+        "INVALID_STATE",
+        `Invalid --if-state '${expectedState}'. Expected one of: ${VALID_STATES.join(", ")}`,
+        { state: expectedState, validStates: [...VALID_STATES] }
+      );
+    }
+
+    if (task.state !== expectedState) {
+      throw new VAPilotError(
+        "STATE_CONFLICT",
+        `Task ${id} is ${task.state}; expected ${expectedState}. Refusing stale update.`,
+        {
+          taskId: id,
+          actualState: task.state,
+          expectedState
+        }
+      );
+    }
+  }
+
   if (options.state) {
     if (!VALID_STATES.includes(options.state)) {
       throw new VAPilotError("INVALID_STATE", `Invalid state '${options.state}'. Expected one of: ${VALID_STATES.join(", ")}`, { state: options.state, validStates: [...VALID_STATES] });
     }
 
     task.state = options.state;
+
+    if (task.state !== "Done") {
+      task.completedAt = "";
+      if (!options.verification) {
+        task.verification = "";
+      }
+    }
 
     if (task.state === "In Progress" && !task.startedAt) {
       task.startedAt = nowIso();
@@ -1068,8 +1102,7 @@ function readPitfalls(filePath) {
  * @returns {void}
  */
 function writePitfalls(filePath, data) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  writeJsonFileAtomicSync(filePath, data);
 }
 
 /**
@@ -1095,8 +1128,7 @@ function readConfigDocument(filePath) {
  * @returns {void}
  */
 function writeConfigDocument(filePath, config) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, stringifyYaml(config), "utf8");
+  writeTextFileAtomicSync(filePath, stringifyYaml(config));
 }
 
 /**
@@ -1485,7 +1517,7 @@ async function runReviewCommand(pitfallsFile, options) {
   exit(1);
 }
 
-function main() {
+async function main() {
   const argv = process.argv.slice(2);
   const parsed = parseArgv(argv, new Set(["json", "help", "reset-fail-count", "unresolved", "list", "strict", "view"]));
 
@@ -1602,17 +1634,26 @@ function main() {
   }
 
   if (parsed.command === "render") {
-    const state = readState(stateFile);
-    writeBoard(boardFile, state);
+    await withPilotFileLock(stateFile, async () => {
+      const state = readState(stateFile);
+      writeBoard(boardFile, state);
+    });
     console.log(`Sprint board rendered: ${path.relative(process.cwd(), boardFile)}`);
     return;
   }
 
   if (parsed.command === "add") {
-    const state = readState(stateFile);
-    const task = addTask(state, parsed.options);
-    writeState(stateFile, state);
-    writeBoard(boardFile, state);
+    /** @type {Task | null} */
+    let task = null;
+    await withPilotFileLock(stateFile, async () => {
+      const state = readState(stateFile);
+      task = addTask(state, parsed.options);
+      writeState(stateFile, state);
+      writeBoard(boardFile, state);
+    });
+    if (!task) {
+      throw new Error("Task add did not produce a task.");
+    }
     console.log(`Task added: ${task.id}`);
     console.log(`State file: ${path.relative(process.cwd(), stateFile)}`);
     console.log(`Board file: ${path.relative(process.cwd(), boardFile)}`);
@@ -1620,10 +1661,17 @@ function main() {
   }
 
   if (parsed.command === "update") {
-    const state = readState(stateFile);
-    const task = updateTask(state, parsed.options, parsed.flags);
-    writeState(stateFile, state);
-    writeBoard(boardFile, state);
+    /** @type {Task | null} */
+    let task = null;
+    await withPilotFileLock(stateFile, async () => {
+      const state = readState(stateFile);
+      task = updateTask(state, parsed.options, parsed.flags);
+      writeState(stateFile, state);
+      writeBoard(boardFile, state);
+    });
+    if (!task) {
+      throw new Error("Task update did not find a task.");
+    }
     console.log(`Task updated: ${task.id} -> ${task.state}`);
     console.log(`State file: ${path.relative(process.cwd(), stateFile)}`);
     console.log(`Board file: ${path.relative(process.cwd(), boardFile)}`);
@@ -1706,11 +1754,9 @@ const isMain = process.argv[1] && (
 );
 
 if (isMain) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     const wantsJson = process.argv.slice(2).some((token) => token === "--json" || token.startsWith("--json="));
     printCommandError(wantsJson, error instanceof Error ? error : new Error(String(error)));
     process.exit(1);
-  }
+  });
 }

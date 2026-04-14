@@ -93,7 +93,8 @@ function shouldReplaceAttemptedCommand(attempted, preferredCommand) {
 
   return /^(?:npm|pnpm)\s+(?:run\s+)?test$/i.test(attempted)
     || /^yarn\s+test$/i.test(attempted)
-    || /^bun\s+test$/i.test(attempted);
+    || /^bun\s+test$/i.test(attempted)
+    || /missing script:\s*"test"/i.test(attempted);
 }
 
 function inferCommand(pitfall, projectCommands) {

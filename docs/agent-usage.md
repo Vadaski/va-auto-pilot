@@ -337,7 +337,7 @@ node scripts/smoke-test-runner.mjs --config .va-auto-pilot/smoke-config.yaml \
 node scripts/sprint-board.mjs pitfall \
   --task AP-017 \
   --failure-type gate \
-  --attempted "npm test failed on retry.test.ts" \
+  --attempted "npm run check:units failed on retry.test.ts" \
   --hypothesis "Missing mock for HTTP client in test setup" \
   --missing-context "retry.test.ts depends on undocumented test fixture"
 # Expected: Pitfall recorded: PF-001
@@ -347,7 +347,7 @@ node scripts/sprint-board.mjs pitfall --list --unresolved
 # Expected:
 # 1 entries, 1 unresolved
 # PF-001 [AP-017] [gate] unresolved
-#   attempted: npm test failed on retry.test.ts
+#   attempted: npm run check:units failed on retry.test.ts
 #   hypothesis: Missing mock for HTTP client in test setup
 #   missingContext: retry.test.ts depends on undocumented test fixture
 
@@ -473,9 +473,9 @@ node scripts/sprint-board.mjs journal --task AP-016 --summary "Implemented featu
 
 # 8. On failure: record failure + pitfall
 node scripts/sprint-board.mjs update --id AP-016 --state Failed \
-  --failure-type gate --attempted "npm test" --hypothesis "Missing import"
+  --failure-type gate --attempted "npm run check:units" --hypothesis "Missing import"
 node scripts/sprint-board.mjs pitfall --task AP-016 \
-  --failure-type gate --attempted "npm test" --hypothesis "Missing import"
+  --failure-type gate --attempted "npm run check:units" --hypothesis "Missing import"
 ```
 
 ---
@@ -658,7 +658,7 @@ claude -p "Task AP-016: Implement retry logic. File: src/retry.ts. \
 
 # Delegate to Codex
 codex -p "Task AP-017: Write integration tests for retry. \
-  File: src/retry.test.ts. Run npm test to verify."
+  File: src/retry.test.ts. Run npm run check:units to verify."
 
 # Delegate to Gemini
 gemini -p "Task AP-018: Review retry implementation for edge cases."
@@ -746,7 +746,7 @@ qualityGate:
       "id": "PF-001",
       "taskId": "AP-003",
       "failureType": "gate",
-      "attempted": "npm test",
+      "attempted": "npm run check:units",
       "hypothesis": "Missing import in test file",
       "missingContext": "",
       "resolution": "Added missing import",
@@ -878,9 +878,9 @@ node scripts/sprint-board.mjs update --id AP-016 --state Failed
 
 # RIGHT: record structured failure metadata AND create pitfall entry
 node scripts/sprint-board.mjs update --id AP-016 --state Failed \
-  --failure-type gate --attempted "npm test" --hypothesis "Timeout in async test"
+  --failure-type gate --attempted "npm run check:units" --hypothesis "Timeout in async test"
 node scripts/sprint-board.mjs pitfall --task AP-016 \
-  --failure-type gate --attempted "npm test" --hypothesis "Timeout in async test"
+  --failure-type gate --attempted "npm run check:units" --hypothesis "Timeout in async test"
 ```
 
 Without pitfall records, the same failure will repeat. The pitfall guide is the durable, queryable memory that prevents recurring mistakes.

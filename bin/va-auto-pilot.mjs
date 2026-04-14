@@ -30,7 +30,7 @@ const DEFAULTS = {
   SPRINT_STATE_FILE: ".va-auto-pilot/sprint-state.json",
   SPRINT_BOARD_FILE: "docs/todo/sprint.md",
   RUN_JOURNAL_FILE: "docs/todo/run-journal.md",
-  BUILD_COMMAND: "pnpm typecheck && pnpm lint && pnpm test",
+  BUILD_COMMAND: "pnpm run check:all",
   REVIEW_COMMAND: "codex review --uncommitted",
   TEST_COMMAND: "npx tsx scripts/test-runner.ts --flow test-flows/{feature}.yaml",
   DOMAIN_ROLE_NAME: "Domain Expert",
@@ -103,7 +103,7 @@ Options (shared):
 Examples:
   va-auto-pilot init .
   va-auto-pilot init /tmp/project --project-prefix VERA
-  va-auto-pilot init . --dry-run --build-cmd "pnpm test"
+  va-auto-pilot init . --dry-run --build-cmd "pnpm run check:all"
   va-auto-pilot upgrade .
   va-auto-pilot upgrade . --dry-run
   va-auto-pilot upgrade . --force

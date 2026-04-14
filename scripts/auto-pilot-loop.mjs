@@ -38,6 +38,7 @@ import {
 import { ColonyBridge } from "./lib/colony-bridge.mjs";
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
+import { withPilotFileLock, writeJsonFileAtomicSync } from "./lib/pilot-state.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -95,6 +96,38 @@ async function sprintBoard(args, opts = {}) {
   return next;
 }
 
+function parseSprintBoardError(result) {
+  const stdout = String(result?.stdout ?? "");
+  const stderr = String(result?.stderr ?? "");
+  const combined = `${stdout}\n${stderr}`;
+  const match = combined.match(/\[([A-Z_]+)\]\s+([^\n]+)/);
+  const fallbackMessage = stderr.trim() || stdout.trim() || "sprint-board command failed";
+  const code = match?.[1] ?? "";
+  const message = match?.[2]?.trim() || fallbackMessage;
+  return {
+    code,
+    message,
+    stdout,
+    stderr
+  };
+}
+
+async function requireSprintBoard(args, opts, context = "sprint-board command") {
+  const result = await sprintBoard(args, opts);
+  if (result.exitCode === 0) {
+    return result;
+  }
+
+  const parsed = parseSprintBoardError(result);
+  const error = new Error(parsed.message || `${context} failed`);
+  error.code = parsed.code || "SPRINT_BOARD_FAILED";
+  error.context = context;
+  error.stdout = parsed.stdout;
+  error.stderr = parsed.stderr;
+  error.exitCode = result.exitCode;
+  throw error;
+}
+
 function mapGateToFailureType(gateName) {
   if (gateName === "review") return "review";
   if (gateName === "acceptance" || gateName === "smoke-test") return "acceptance";
@@ -140,18 +173,20 @@ async function recordSprintStartCommit(opts) {
   }
 
   return withStateMutationLock(opts, async () => {
-    const state = readSprintState(opts.stateFile);
-    if (state.sprintStartCommit) {
-      return String(state.sprintStartCommit);
-    }
+    return withPilotFileLock(opts.stateFile, async () => {
+      const state = readSprintState(opts.stateFile);
+      if (state.sprintStartCommit) {
+        return String(state.sprintStartCommit);
+      }
 
-    const sprintStartCommit = await git(["rev-parse", "HEAD"], opts)
-      .then((head) => head.stdout.trim())
-      .catch(() => "");
+      const sprintStartCommit = await git(["rev-parse", "HEAD"], opts)
+        .then((head) => head.stdout.trim())
+        .catch(() => "");
 
-    state.sprintStartCommit = sprintStartCommit;
-    fs.writeFileSync(opts.stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-    return sprintStartCommit;
+      state.sprintStartCommit = sprintStartCommit;
+      writeJsonFileAtomicSync(opts.stateFile, state);
+      return sprintStartCommit;
+    });
   });
 }
 
@@ -867,41 +902,51 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
 async function transitionToInProgress(task, opts) {
   if (opts.dryRun) return;
   await recordSprintStartCommit(opts);
-  await sprintBoard([
+  await requireSprintBoard([
     "update", "--id", task.id, "--state", "In Progress",
-  ], opts);
+    "--if-state", task.state
+  ], opts, `transition ${task.id} -> In Progress`);
 }
 
-async function transitionToReview(task, opts) {
+async function transitionToReview(task, opts, expectedState = "In Progress") {
   if (opts.dryRun) return;
-  await sprintBoard([
+  await requireSprintBoard([
     "update", "--id", task.id, "--state", "Review",
-  ], opts);
+    "--if-state", expectedState
+  ], opts, `transition ${task.id} -> Review`);
 }
 
-async function transitionToTesting(task, opts) {
+async function transitionToTesting(task, opts, expectedState = "Review") {
   if (opts.dryRun) return;
-  await sprintBoard([
+  await requireSprintBoard([
     "update", "--id", task.id, "--state", "Testing",
-  ], opts);
+    "--if-state", expectedState
+  ], opts, `transition ${task.id} -> Testing`);
 }
 
-async function transitionToDone(task, opts) {
+async function transitionToDone(task, opts, expectedState = "Testing") {
   if (opts.dryRun) return;
-  await sprintBoard([
+  await requireSprintBoard([
     "update", "--id", task.id, "--state", "Done",
     "--verification", `Auto-pilot loop: all gates passed at ${nowIso()}`,
-  ], opts);
+    "--if-state", expectedState
+  ], opts, `transition ${task.id} -> Done`);
 }
 
-async function transitionToFailed(task, gate, output, opts) {
+async function transitionToFailed(task, gate, output, opts, expectedState) {
   if (opts.dryRun) return;
-  await sprintBoard([
+  const args = [
     "update", "--id", task.id, "--state", "Failed",
     "--failure-type", mapGateToFailureType(gate),
     "--attempted", `auto-pilot ${gate}`,
     "--hypothesis", output.slice(0, 500),
-  ], opts);
+  ];
+
+  if (expectedState) {
+    args.push("--if-state", expectedState);
+  }
+
+  await requireSprintBoard(args, opts, `transition ${task.id} -> Failed`);
 }
 
 function findTaskById(state, taskId) {
@@ -955,8 +1000,8 @@ async function journalFailureRecoveryDecision(task, failureDetails, opts) {
   return { classified, strategy, failCount };
 }
 
-async function transitionToFailedWithRecovery(task, gateName, failureDetails, opts) {
-  await transitionToFailed(task, gateName, failureDetails.output, opts);
+async function transitionToFailedWithRecovery(task, gateName, failureDetails, opts, expectedState) {
+  await transitionToFailed(task, gateName, failureDetails.output, opts, expectedState);
   await recordPitfallAndSuggestGates(task, {
     gateName,
     attempted: extractFailureReason({
@@ -1075,16 +1120,35 @@ function splitLines(raw) {
     .filter(Boolean);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 const DISPATCH_TEST_PASS_PATTERNS = [
   /\b(?:all\s+)?tests?\s+pass(?:ed)?\b/i,
   /\b\d+\/\d+\s+tests?\s+pass(?:ed)?\b/i,
+  /\btests?:\s*\d+\s+pass(?:ed)?\b/i,
+  /\bpass(?:ed)?\s+\d+\s+tests?\b/i,
   /\bsmoke\s+tests?\s+pass(?:ed)?\b/i
 ];
 
 const DISPATCH_BUILD_PASS_PATTERNS = [
   /\bbuild\s+pass(?:ed)?\b/i,
+  /\bbuild\s+succeed(?:ed|s)?\b/i,
   /\btypecheck\s+pass(?:ed)?\b/i,
+  /\btypecheck\s+succeed(?:ed|s)?\b/i,
   /\bcheck:all\s+pass(?:ed)?\b/i
+];
+
+const DISPATCH_TEST_GATE_PATTERNS = [
+  /^acceptance$/i,
+  /^smoke-test$/i,
+  /\b(?:test|tests|smoke|acceptance|e2e|unit|spec)\b/i
+];
+
+const DISPATCH_BUILD_GATE_PATTERNS = [
+  /^build$/i,
+  /\b(?:build|typecheck|lint|check)\b/i
 ];
 
 async function git(args, opts) {
@@ -1194,7 +1258,11 @@ async function ensureTaskBaseline(task, opts) {
     snapshots.set(file, snapshotFileState(file, opts));
   }
 
-  const baseline = { files, snapshots };
+  const head = await git(["rev-parse", "HEAD"], opts)
+    .then((result) => result.stdout.trim())
+    .catch(() => "");
+
+  const baseline = { files, snapshots, head };
   opts.taskBaselines.set(task.id, baseline);
   return baseline;
 }
@@ -1217,14 +1285,30 @@ function isAutoPilotControlFile(file, opts) {
 }
 
 async function listTaskDeltaFiles(task, opts) {
-  const baseline = opts.taskBaselines.get(task.id) ?? { files: new Set(), snapshots: new Map() };
+  const baseline = opts.taskBaselines.get(task.id) ?? { files: new Set(), snapshots: new Map(), head: "" };
   const currentFiles = await listChangedFiles(opts);
   const candidates = new Set([
     ...baseline.files,
     ...currentFiles
   ]);
+  const changedFiles = new Set();
 
-  const changedFiles = [];
+  if (baseline.head) {
+    const currentHead = await git(["rev-parse", "HEAD"], opts)
+      .then((result) => result.stdout.trim())
+      .catch(() => "");
+    if (currentHead && currentHead !== baseline.head) {
+      const committedDelta = await git(["diff", "--name-only", "--relative", `${baseline.head}..${currentHead}`, "--"], opts)
+        .then((result) => splitLines(result.stdout))
+        .catch(() => []);
+      for (const file of committedDelta) {
+        if (!isAutoPilotControlFile(file, opts)) {
+          changedFiles.add(file);
+        }
+      }
+    }
+  }
+
   for (const file of [...candidates].sort()) {
     if (isAutoPilotControlFile(file, opts)) {
       continue;
@@ -1232,11 +1316,11 @@ async function listTaskDeltaFiles(task, opts) {
     const before = baseline.snapshots.get(file) ?? { exists: false, content: null };
     const after = snapshotFileState(file, opts);
     if (!fileSnapshotsEqual(before, after)) {
-      changedFiles.push(file);
+      changedFiles.add(file);
     }
   }
 
-  return changedFiles;
+  return [...changedFiles].sort();
 }
 
 function collectDispatchEvidenceText(result) {
@@ -1347,7 +1431,21 @@ function evidenceMatchesAny(text, patterns) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
-async function detectPartialDispatchSuccess(task, result, opts, evidenceText = collectDispatchEvidenceText(result)) {
+function collectDispatchGateResults(result) {
+  return [
+    ...(Array.isArray(result?.gateResults) ? result.gateResults : []),
+    ...(Array.isArray(result?.evidence?.gateResults) ? result.evidence.gateResults : [])
+  ];
+}
+
+function gateResultsContainPass(result, gatePatterns) {
+  return collectDispatchGateResults(result).some((gateResult) => (
+    gateResult?.passed === true
+    && gatePatterns.some((pattern) => pattern.test(String(gateResult?.gate ?? "")))
+  ));
+}
+
+async function inspectPartialDispatchSuccess(task, result, opts, evidenceText) {
   if (result?.success || result?.dryRun) {
     return { partial: false, reason: "dispatch succeeded", changedFiles: [], evidenceText };
   }
@@ -1361,12 +1459,14 @@ async function detectPartialDispatchSuccess(task, result, opts, evidenceText = c
     return { partial: false, reason: "no landed file changes detected", changedFiles, evidenceText };
   }
 
-  const testsPassed = evidenceMatchesAny(evidenceText, DISPATCH_TEST_PASS_PATTERNS);
+  const testsPassed = evidenceMatchesAny(evidenceText, DISPATCH_TEST_PASS_PATTERNS)
+    || gateResultsContainPass(result, DISPATCH_TEST_GATE_PATTERNS);
   if (!testsPassed) {
     return { partial: false, reason: "missing passing-test evidence", changedFiles, evidenceText };
   }
 
-  const buildPassed = evidenceMatchesAny(evidenceText, DISPATCH_BUILD_PASS_PATTERNS);
+  const buildPassed = evidenceMatchesAny(evidenceText, DISPATCH_BUILD_PASS_PATTERNS)
+    || gateResultsContainPass(result, DISPATCH_BUILD_GATE_PATTERNS);
   if (!buildPassed) {
     return { partial: false, reason: "missing passing-build evidence", changedFiles, evidenceText };
   }
@@ -1377,6 +1477,30 @@ async function detectPartialDispatchSuccess(task, result, opts, evidenceText = c
     changedFiles,
     evidenceText
   };
+}
+
+async function detectPartialDispatchSuccess(task, result, opts, evidenceText = collectDispatchEvidenceText(result)) {
+  const retryDelaysMs = [0, 300, 900];
+  let latest = {
+    partial: false,
+    reason: "dispatch evidence unavailable",
+    changedFiles: [],
+    evidenceText
+  };
+
+  for (let index = 0; index < retryDelaysMs.length; index += 1) {
+    if (index > 0) {
+      await sleep(retryDelaysMs[index]);
+      evidenceText = collectDispatchEvidenceText(result);
+    }
+
+    latest = await inspectPartialDispatchSuccess(task, result, opts, evidenceText);
+    if (latest.partial) {
+      return latest;
+    }
+  }
+
+  return latest;
 }
 
 function deriveCommitType(task) {
@@ -1494,16 +1618,7 @@ function formatGitError(error) {
 
 async function rollbackDoneTaskOnCommitFailure(task, error, opts) {
   const details = `Auto-commit failed after Done transition: ${formatGitError(error)}`;
-  await transitionToFailed(task, "commit", details, opts);
-  const state = readSprintState(opts.stateFile);
-  const failedTask = Array.isArray(state.tasks)
-    ? state.tasks.find((item) => item?.id === task.id)
-    : null;
-  if (failedTask) {
-    failedTask.completedAt = "";
-    failedTask.verification = "";
-    fs.writeFileSync(opts.stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-  }
+  await transitionToFailed(task, "commit", details, opts, "Done");
   await journalEntry(task, "Auto-commit failed; task reverted to Failed", opts, {
     signals: ["auto-commit-rollback"]
   });
@@ -1715,7 +1830,7 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
           failureDetail
         ].filter(Boolean).join(" | ").slice(0, 2000),
         gateId: failedGateId
-      }, opts);
+      }, opts, "In Progress");
       await journalEntry(
         task,
         [
@@ -1739,11 +1854,11 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
         opts
       );
       if (gateResult.passed || opts.dryRun) {
-        await transitionToTesting(task, opts);
+        await transitionToTesting(task, opts, "Review");
         await journalEntry(task, "Review gates passed → Testing", opts);
         return { done: false, task, action: "review→testing", details: "gates passed" };
       }
-      await transitionToFailedWithRecovery(task, gateResult.gate, gateResult, opts);
+      await transitionToFailedWithRecovery(task, gateResult.gate, gateResult, opts, "Review");
       if (gateResult.gate === "review") {
         await createReviewFixTasks(task, gateResult.output, opts);
       }
@@ -1754,11 +1869,11 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
     case "run-acceptance": {
       const gateResult = await runGateSequence(gateConfig, opts);
       if (gateResult.passed || opts.dryRun) {
-        await transitionToDone(task, opts);
+        await transitionToDone(task, opts, "Testing");
         await journalEntry(task, "All gates passed → Done", opts);
         return { done: false, task, action: "testing→done", details: "all gates passed" };
       }
-      await transitionToFailedWithRecovery(task, gateResult.gate, gateResult, opts);
+      await transitionToFailedWithRecovery(task, gateResult.gate, gateResult, opts, "Testing");
       await journalEntry(task, `Acceptance gate "${gateResult.gate}" failed`, opts);
       return { done: false, task, action: "acceptance-failed", details: `gate: ${gateResult.gate}` };
     }
@@ -1778,7 +1893,23 @@ async function executeSingleTask(taskId, bridge, pitfalls, gateConfig, opts) {
       return { task: null, action: selection.action, details: selection.details, steps, terminal: true };
     }
 
-    const step = await executeTaskAction(selection, bridge, pitfalls, gateConfig, opts);
+    let step;
+    try {
+      step = await executeTaskAction(selection, bridge, pitfalls, gateConfig, opts);
+    } catch (error) {
+      if (error?.code === "STATE_CONFLICT") {
+        const refreshedState = readSprintState(opts.stateFile);
+        const refreshedTask = findTaskById(refreshedState, taskId);
+        return {
+          task: refreshedTask,
+          action: "state-conflict",
+          details: error.message,
+          steps,
+          terminal: true
+        };
+      }
+      throw error;
+    }
     steps.push(step);
 
     if (opts.dryRun) {

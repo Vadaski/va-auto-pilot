@@ -10,7 +10,7 @@ import { test } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
 // Import helpers from sprint-utils
@@ -50,6 +50,7 @@ import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
 import { suggestGateFromPitfall, suggestGatesFromPitfalls } from "./lib/adaptive-gates.mjs";
 import { inferProjectGateCommands, selectProjectTestCommand } from "./lib/project-gates.mjs";
+import { withPilotFileLock } from "./lib/pilot-state.mjs";
 
 // ---------------------------------------------------------------------------
 // Import pure functions from sprint-board via a thin re-export shim.
@@ -809,6 +810,27 @@ test("suggestGateFromPitfall prefers discovered project test scripts over accept
   assert.equal(suggestion.command, "npm run check:units");
 });
 
+test("suggestGateFromPitfall replaces missing npm test script errors with the project's actual test command", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-suggest-gate-missing-test-"));
+  fs.writeFileSync(path.join(repoDir, "package.json"), JSON.stringify({
+    name: "fixture",
+    scripts: {
+      "check:units": "node ./scripts/test-units.mjs"
+    }
+  }, null, 2));
+
+  const suggestion = suggestGateFromPitfall({
+    id: "PF-028",
+    failureType: "gate",
+    attempted: 'npm error Missing script: "test" | npm error | npm error To see a list of scripts, run:',
+    hypothesis: "tests failed because the project has no npm test script"
+  }, {
+    projectDir: repoDir
+  });
+
+  assert.equal(suggestion.command, "npm run check:units");
+});
+
 test("suggestGatesFromPitfalls filters resolved entries", () => {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-suggest-gates-"));
   fs.writeFileSync(path.join(repoDir, "package.json"), JSON.stringify({
@@ -1385,6 +1407,181 @@ test("executeSingleTask treats non-zero dispatch with landed code and passing te
   }
 });
 
+test("executeSingleTask treats non-zero dispatch with committed landed code and passing gate evidence as partial success", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-exec-partial-committed-dispatch-"));
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(repoDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
+  const humanBoardFile = path.join(repoDir, "docs", "todo", "human-board.md");
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+  const reviewScript = path.join(repoDir, "pass-review.mjs");
+
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    updatedAt: "2026-04-14T00:00:00.000Z",
+    tasks: [
+      { id: "AP-147", title: "Committed partial dispatch task", priority: "P1", state: "Backlog", dependsOn: [] }
+    ]
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint Board\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+  fs.writeFileSync(humanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(reviewScript, "process.stdout.write('REVIEW STATUS: PASS\\n');\n", "utf8");
+
+  runGit(["init"], repoDir);
+  runGit(["config", "user.email", "test@example.com"], repoDir);
+  runGit(["config", "user.name", "Test User"], repoDir);
+  fs.writeFileSync(path.join(repoDir, "work.txt"), "before\n", "utf8");
+  runGit(["add", "."], repoDir);
+  runGit(["commit", "-m", "initial"], repoDir);
+
+  const previousCwd = process.cwd();
+  process.chdir(repoDir);
+  try {
+    const result = await executeSingleTask(
+      "AP-147",
+      {
+        colony: false,
+        dispatch: async (_track, _template, logFile) => {
+          fs.writeFileSync(path.join(repoDir, "work.txt"), "after\n", "utf8");
+          runGit(["add", "work.txt"], repoDir);
+          runGit(["commit", "-m", "sub-agent landed code"], repoDir);
+          fs.mkdirSync(path.dirname(logFile), { recursive: true });
+          fs.writeFileSync(logFile, "sub-agent wrapper crashed after completion\n", "utf8");
+          return {
+            success: false,
+            exitCode: 17,
+            durationMs: 1,
+            logFile,
+            evidence: {
+              gateResults: [
+                { gate: "build", passed: true, output: "build passed" },
+                { gate: "acceptance", passed: true, output: "acceptance passed" }
+              ]
+            }
+          };
+        }
+      },
+      [],
+      {
+        reviewCommand: `node ${reviewScript}`
+      },
+      {
+        dryRun: false,
+        noCommit: true,
+        json: true,
+        strict: false,
+        workDir: repoDir,
+        stateFile,
+        boardFile,
+        journalFile,
+        pitfallsFile,
+        agentTemplate: "echo {taskId}",
+        trackTimeout: 1000,
+        taskBaselines: new Map(),
+        sprintBoardLock: Promise.resolve(),
+        stateMutationLock: Promise.resolve()
+      }
+    );
+
+    assert.equal(result.terminal, true);
+    assert.equal(result.action, "testing→done");
+    assert.match(result.steps[0].details, /partial-success: exitCode=17/);
+
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.equal(state.tasks[0].state, "Done");
+    const journal = fs.readFileSync(journalFile, "utf8");
+    assert.match(journal, /dispatch:partial-success/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("executeSingleTask re-checks dispatch evidence before failing landed code", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-exec-partial-dispatch-lag-"));
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(repoDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
+  const humanBoardFile = path.join(repoDir, "docs", "todo", "human-board.md");
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+  const buildScript = path.join(repoDir, "pass-build.mjs");
+  const reviewScript = path.join(repoDir, "pass-review.mjs");
+
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    updatedAt: "2026-04-14T00:00:00.000Z",
+    tasks: [
+      { id: "AP-248", title: "Lagged partial dispatch task", priority: "P1", state: "Backlog", dependsOn: [] }
+    ]
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint Board\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+  fs.writeFileSync(humanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(buildScript, "process.exit(0);\n", "utf8");
+  fs.writeFileSync(reviewScript, "process.stdout.write('REVIEW STATUS: PASS\\n');\n", "utf8");
+
+  runGit(["init"], repoDir);
+  runGit(["config", "user.email", "test@example.com"], repoDir);
+  runGit(["config", "user.name", "Test User"], repoDir);
+  fs.writeFileSync(path.join(repoDir, "work.txt"), "before\n", "utf8");
+  runGit(["add", "."], repoDir);
+  runGit(["commit", "-m", "initial"], repoDir);
+
+  const previousCwd = process.cwd();
+  process.chdir(repoDir);
+  try {
+    const result = await executeSingleTask(
+      "AP-248",
+      {
+        colony: false,
+        dispatch: async (_track, _template, logFile) => {
+          fs.mkdirSync(path.dirname(logFile), { recursive: true });
+          fs.writeFileSync(path.join(repoDir, "work.txt"), "after\n", "utf8");
+          fs.writeFileSync(logFile, "dispatch exiting early\n", "utf8");
+          setTimeout(() => {
+            fs.appendFileSync(logFile, "all tests passed\nbuild succeeded\n", "utf8");
+          }, 350);
+          return { success: false, exitCode: 17, durationMs: 1, logFile };
+        }
+      },
+      [],
+      {
+        buildCommand: `node ${buildScript}`,
+        reviewCommand: `node ${reviewScript}`
+      },
+      {
+        dryRun: false,
+        noCommit: true,
+        json: true,
+        strict: false,
+        workDir: repoDir,
+        stateFile,
+        boardFile,
+        journalFile,
+        pitfallsFile,
+        agentTemplate: "echo {taskId}",
+        trackTimeout: 1000,
+        taskBaselines: new Map(),
+        sprintBoardLock: Promise.resolve(),
+        stateMutationLock: Promise.resolve()
+      }
+    );
+
+    assert.equal(result.terminal, true);
+    assert.equal(result.action, "testing→done");
+    assert.match(result.steps[0].details, /partial-success: exitCode=17/);
+
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.equal(state.tasks[0].state, "Done");
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
 test("executeSingleTask still fails dispatch when success-looking log has no landed code", async () => {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-exec-no-landed-code-"));
   const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
@@ -1450,6 +1647,94 @@ test("executeSingleTask still fails dispatch when success-looking log has no lan
     assert.equal(result.action, "dispatch-failed");
     const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
     assert.equal(state.tasks[0].state, "Failed");
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("executeSingleTask stops when a manual sprint-board update changes task state mid-dispatch", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-exec-state-conflict-"));
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(repoDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
+  const humanBoardFile = path.join(repoDir, "docs", "todo", "human-board.md");
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    updatedAt: "2026-04-14T00:00:00.000Z",
+    tasks: [
+      { id: "AP-249", title: "Manual override task", priority: "P1", state: "Backlog", dependsOn: [] }
+    ]
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint Board\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+  fs.writeFileSync(humanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  runGit(["init"], repoDir);
+  runGit(["config", "user.email", "test@example.com"], repoDir);
+  runGit(["config", "user.name", "Test User"], repoDir);
+  fs.writeFileSync(path.join(repoDir, "work.txt"), "baseline\n", "utf8");
+  runGit(["add", "."], repoDir);
+  runGit(["commit", "-m", "initial"], repoDir);
+
+  const previousCwd = process.cwd();
+  process.chdir(repoDir);
+  try {
+    const result = await executeSingleTask(
+      "AP-249",
+      {
+        colony: false,
+        dispatch: async () => {
+          const manualUpdate = spawnSync("node", [
+            BOARD_SCRIPT,
+            "update",
+            "--id", "AP-249",
+            "--state", "Done",
+            "--verification", "human override",
+            "--state-file", stateFile,
+            "--board-file", boardFile
+          ], {
+            encoding: "utf8",
+            cwd: repoDir,
+            env: {
+              ...process.env,
+              AUTO_PILOT_SPRINT_BOARD_FILE: boardFile
+            }
+          });
+          assert.equal(manualUpdate.status, 0, manualUpdate.stderr);
+          return { success: true, exitCode: 0, durationMs: 1 };
+        }
+      },
+      [],
+      {},
+      {
+        dryRun: false,
+        noCommit: true,
+        json: true,
+        strict: false,
+        workDir: repoDir,
+        stateFile,
+        boardFile,
+        journalFile,
+        pitfallsFile,
+        agentTemplate: "echo {taskId}",
+        trackTimeout: 1000,
+        taskBaselines: new Map(),
+        sprintBoardLock: Promise.resolve(),
+        stateMutationLock: Promise.resolve()
+      }
+    );
+
+    assert.equal(result.terminal, true);
+    assert.equal(result.action, "state-conflict");
+    assert.match(result.details, /expected In Progress/i);
+
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.equal(state.tasks[0].state, "Done");
+    assert.equal(state.tasks[0].verification, "human override");
   } finally {
     process.chdir(previousCwd);
   }
@@ -1788,7 +2073,6 @@ test("requireOption throws when value is empty string", () => {
 // ---------------------------------------------------------------------------
 // sprint-board pure functions — tested via CLI child process
 // ---------------------------------------------------------------------------
-import { spawnSync } from "node:child_process";
 
 function runGit(args, cwd) {
   const result = spawnSync("git", args, {
@@ -1982,6 +2266,85 @@ test("update: sets state to In Progress and records startedAt", () => {
   const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   assert.equal(state.tasks[0].state, "In Progress");
   assert.ok(state.tasks[0].startedAt, "startedAt should be set");
+});
+
+test("update: preserves manual edits that land while the command is waiting on the state-file lock", async () => {
+  const { stateFile, tmpDir } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "Backlog", owner: "", source: "", dependsOn: [] }
+  ]);
+  const boardFile = path.join(tmpDir, "docs", "todo", "sprint.md");
+  writeTempHumanBoardFromState(stateFile, ["# Human Board", "", "## Instructions", ""]);
+
+  /** @type {Promise<{ code: number | null, stdout: string, stderr: string }>} */
+  let childResult;
+  await withPilotFileLock(stateFile, async () => {
+    const child = spawn("node", [
+      BOARD_SCRIPT,
+      "update",
+      "--id", "UT-001",
+      "--state", "In Progress",
+      "--state-file", stateFile,
+      "--board-file", boardFile
+    ], {
+      env: {
+        ...process.env,
+        AUTO_PILOT_SPRINT_BOARD_FILE: boardFile
+      }
+    });
+
+    childResult = new Promise((resolve) => {
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+      child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+      child.on("close", (code) => resolve({ code, stdout, stderr }));
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    state.tasks[0].owner = "human";
+    state.tasks[0].source = "manual-edit";
+    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + "\n", "utf8");
+  });
+
+  const result = await childResult;
+  assert.equal(result.code, 0, result.stderr);
+
+  const finalState = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(finalState.tasks[0].state, "In Progress");
+  assert.equal(finalState.tasks[0].owner, "human");
+  assert.equal(finalState.tasks[0].source, "manual-edit");
+});
+
+test("update: --if-state rejects stale state transitions and preserves manual state", () => {
+  const { stateFile, tmpDir } = writeTmpState([
+    { id: "UT-001", title: "Task", priority: "P1", state: "Done", verification: "human override", dependsOn: [] }
+  ]);
+  const boardFile = path.join(tmpDir, "docs", "todo", "sprint.md");
+  writeTempHumanBoardFromState(stateFile, ["# Human Board", "", "## Instructions", ""]);
+
+  const result = spawnSync("node", [
+    BOARD_SCRIPT,
+    "update",
+    "--id", "UT-001",
+    "--state", "Review",
+    "--if-state", "In Progress",
+    "--state-file", stateFile,
+    "--board-file", boardFile
+  ], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      AUTO_PILOT_SPRINT_BOARD_FILE: boardFile
+    }
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /\[STATE_CONFLICT\]/);
+
+  const finalState = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(finalState.tasks[0].state, "Done");
+  assert.equal(finalState.tasks[0].verification, "human override");
 });
 
 test("update: state Failed increments failCount", () => {

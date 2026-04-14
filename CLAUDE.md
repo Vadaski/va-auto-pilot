@@ -26,7 +26,7 @@ Quality gates are **pluggable per project** — see `docs/operations/va-auto-pil
 
 For va-auto-pilot itself (TypeScript):
 ```bash
-npm run build && npm run lint && npm test
+npm run build && npm run lint && npm run check:units
 ```
 
 For target projects, gates are defined in `.va-auto-pilot/quality-gates.yaml` or auto-detected:
@@ -62,4 +62,3 @@ type: feat | fix | refactor | docs | test | chore
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 ```
-

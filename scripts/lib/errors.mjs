@@ -9,7 +9,8 @@
 /**
  * @typedef {'INVALID_TASK' | 'INVALID_STATE' | 'FILE_NOT_FOUND' |
  *           'PARSE_ERROR' | 'CYCLE_DETECTED' | 'CONFIG_ERROR' |
- *           'DEPENDENCY_MISSING' | 'HUMAN_BOARD_BLOCKED'} ErrorCode
+ *           'DEPENDENCY_MISSING' | 'HUMAN_BOARD_BLOCKED' |
+ *           'STATE_CONFLICT'} ErrorCode
  */
 
 export class VAPilotError extends Error {

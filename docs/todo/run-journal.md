@@ -867,3 +867,18 @@
   - adaptive-gate:npm-test
   - adaptive-gate-trigger:PF-001
 ---
+
+## 2026-04-14T20:03:31.879Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm test
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-14T12:59:00.000Z - AP-043
+- Summary: Committed AP-043 (B13) and AP-045 (Sprint 3 migration engine). Changes were previously in working tree from dogfood round 3 but uncommitted. All gates pass post-commit.
+- Commit: d199904
+- Signals:
+  - commit-uncommitted-changes
+  - all-gates-pass

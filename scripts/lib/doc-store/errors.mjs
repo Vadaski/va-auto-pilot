@@ -129,3 +129,66 @@ export class InvalidInputError extends DocStoreError {
     });
   }
 }
+
+export class ConfigValidationError extends DocStoreError {
+  constructor(detail, options = {}) {
+    super(`Invalid store config: ${detail}`, {
+      code: "INVALID_CONFIG",
+      context: { detail, ...options },
+      recoverySuggestion: "Fix .docstore/store.config.json or rerun doc-store:init --force with valid options."
+    });
+  }
+}
+
+export class ConfigMissingError extends DocStoreError {
+  constructor(configPath) {
+    super(`Store config is missing: ${configPath}`, {
+      code: "CONFIG_MISSING",
+      context: { configPath },
+      recoverySuggestion: "Run doc-store:init to create .docstore/store.config.json."
+    });
+  }
+}
+
+export class InvalidStagedConfigError extends DocStoreError {
+  constructor(detail, options = {}) {
+    super(`staged store.config.json is invalid: ${detail}`, {
+      code: "INVALID_STAGED_CONFIG",
+      context: { detail, ...options },
+      recoverySuggestion: "Stage a valid .docstore/store.config.json before committing."
+    });
+  }
+}
+
+export class NonCanonicalStagedConfigError extends DocStoreError {
+  constructor(managedRoots) {
+    super(
+      `staged store.config.json is invalid: managedRoots must use canonical repo-relative paths (${managedRoots.join(", ")})`,
+      {
+        code: "NON_CANONICAL_STAGED_CONFIG",
+        context: { managedRoots },
+        recoverySuggestion: "Rewrite managedRoots to canonical repo-relative paths such as .docstore/designs before committing."
+      }
+    );
+  }
+}
+
+export class ConfigIndexDriftError extends DocStoreError {
+  constructor(drifts) {
+    super("store.config.json and INDEX.json managedRoots are out of sync.", {
+      code: "CONFIG_INDEX_DRIFT",
+      context: { drifts },
+      recoverySuggestion: "Sync config.managedRoots and INDEX.managedRoots via doc-store:init --force."
+    });
+  }
+}
+
+export class UntrackedManagedDeleteError extends DocStoreError {
+  constructor(documentPath, mode) {
+    super(`Managed document delete is not tracked in INDEX.json: ${documentPath}`, {
+      code: "UNTRACKED_MANAGED_DELETE",
+      context: { documentPath, mode },
+      recoverySuggestion: "Archive/remove the document through ManagedDocStore or stage the matching INDEX.json path change."
+    });
+  }
+}

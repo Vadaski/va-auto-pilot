@@ -27,8 +27,12 @@
  */
 
 export * from "./errors.mjs";
+export * from "./config-index-drift.mjs";
 export * from "./journal.mjs";
+export * from "./lifecycle.mjs";
 export * from "./locking.mjs";
+export * from "./mode-enforcement.mjs";
 export * from "./schema.mjs";
 export * from "./index-file.mjs";
 export * from "./managed-doc-store.mjs";
+export * from "./store-config.mjs";

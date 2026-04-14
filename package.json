@@ -16,17 +16,21 @@
     "check:sprint": "node ./scripts/sprint-board.mjs summary",
     "check:units": "node ./scripts/test-units.mjs",
     "check:doc-store": "node ./scripts/test-doc-store.mjs",
+    "check:doc-store-mode": "node ./scripts/test-doc-store-mode.mjs",
     "check:cli-flows": "node ./scripts/test-cli-flows.mjs --all",
     "lint": "npx eslint scripts/ bin/",
     "lint:fix": "npx eslint --fix scripts/ bin/",
     "check:coverage": "c8 --reporter=text node --test scripts/test-units.mjs",
     "typecheck": "npx tsc --noEmit",
-    "check:all": "npm run check && npm run check:sprint && npm run check:units && npm run check:doc-store && npm run check:cli-flows && npm run validate:distribution",
+    "check:all": "npm run check && npm run check:sprint && npm run check:units && npm run check:doc-store && npm run check:doc-store-mode && npm run check:cli-flows && npm run validate:distribution",
     "check:e2e": "node e2e/run-e2e.mjs --all",
     "check:quality": "node e2e/quality/run-quality.mjs --all",
     "validate:distribution": "node ./scripts/validate-distribution.mjs",
     "auto-pilot": "node scripts/auto-pilot-loop.mjs",
-    "doc-store:demo": "node ./scripts/doc-store-demo.mjs"
+    "doc-store:demo": "node ./scripts/doc-store-demo.mjs",
+    "doc-store:init": "node ./scripts/doc-store-cli.mjs init",
+    "doc-store:doctor": "node ./scripts/doc-store-cli.mjs doctor",
+    "doc-store:enforce-staged": "node ./scripts/doc-store-cli.mjs enforce-staged"
   },
   "dependencies": {
     "yaml": "^2.8.1"

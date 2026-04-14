@@ -1660,6 +1660,23 @@ export abstract class ManagedDocStoreError extends Error {
      - Sprint 1-bis 修法：recovery 对被 mirror 触及的所有 target 做一致性回滚
        （从 INDEX 的 old revision 重建 artifact，或把 mirror-targets 记入 journal payload
        便于针对性 rollback）。
+7. **Sprint 2 已知实现缺陷（Sprint 2-bis 处理）**
+   Sprint 2 连续 4 轮 review 都在 enforce-staged 同一主题找到 gap
+   （每轮 2–3 个）。现象性结论：enforce-staged 和 doctor 存在**重合逻辑但没共享
+   ground truth**——每次都是"doctor 覆盖的，enforce-staged 漏了其中一条"。
+   - **Sprint 2-bis 重构方向**：`enforce-staged = runDoctorOnSnapshot(stagedConfig, stagedIndex) + checkStagedDiff`。
+     让 doctor 成为 commit-time metadata integrity 的**唯一真源**，
+     enforce-staged 只负责组合调用 + 处理 staged/working-tree 的差异。
+     避免继续在 enforce-staged 里拼凑"同一套 doctor 检查但只做了一半"。
+   - 当前已知且未修的 gap（本次 commit 保留）：
+     - **B14 [P1]**：`parseJsonSnapshot()` 只做 `JSON.parse`，不验 staged INDEX 的
+       checksum/schema → 会让 commit 后 `readIndex()` 立即炸的状态溜过 hook。
+     - **B15 [P2]**：enforce-staged 不查 staged config ↔ staged INDEX 的
+       managedRoots drift → commit 后 doctor 立即报 `CONFIG_INDEX_DRIFT`。
+     - **B16 [P2]**：staged `store.config.json` 删除（`git rm .docstore/store.config.json`）
+       被当作"用 HEAD"放行 → commit 后 `doctor` 报 `CONFIG_MISSING`，
+       managed-mode enforcement 实际被禁用直到有人重建配置。
+   - Sprint 3（adopt/import、genesis 自举）不依赖这些 gap 的修复，可并行推进。
 
 ## 25. 结论
 

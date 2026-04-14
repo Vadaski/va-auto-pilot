@@ -155,7 +155,7 @@ Global options:
 }
 
 /**
- * @param {string} code
+ * @param {import("./lib/errors.mjs").ErrorCode} code
  * @param {string} message
  * @param {Record<string, unknown>} [context]
  * @returns {VAPilotError}
@@ -1095,10 +1095,10 @@ function writeConfigDocument(filePath, config) {
 function appendSuggestedGate(configFile, suggestion) {
   const config = readConfigDocument(configFile);
   const qualityGate = config.qualityGate && typeof config.qualityGate === "object"
-    ? config.qualityGate
+    ? /** @type {{ adaptiveGates?: Array<{ name?: string, command?: string, required?: boolean, description?: string, triggeredBy?: string }> }} */ (config.qualityGate)
     : {};
   const adaptiveGates = Array.isArray(qualityGate.adaptiveGates)
-    ? [...qualityGate.adaptiveGates]
+    ? /** @type {Array<{ name: string, command: string, required: boolean, description: string, triggeredBy: string }>} */ ([...qualityGate.adaptiveGates])
     : [];
   const duplicate = adaptiveGates.find((gate) =>
     String(gate?.triggeredBy ?? "") === suggestion.triggeredBy ||
@@ -1124,7 +1124,7 @@ function appendSuggestedGate(configFile, suggestion) {
     adaptiveGates
   };
   writeConfigDocument(configFile, config);
-  return { added: true, gate: adaptiveGates.at(-1) };
+  return { added: true, gate: adaptiveGates.at(-1) ?? suggestion };
 }
 
 /**
@@ -1180,7 +1180,7 @@ function addPitfall(pitfallsFile, options) {
  * @param {string} pitfallsFile
  * @param {Record<string, string>} options
  * @param {{ journalFile?: string, configFile?: string }} [runtime]
- * @returns {PitfallRecord}
+ * @returns {PitfallRecord | { skipped: true, reason: string, id: string }}
  */
 function resolvePitfall(pitfallsFile, options, runtime = {}) {
   const pfId = requireOption(options, "resolve");
@@ -1314,10 +1314,13 @@ function buildReviewPrompt({ perspective, pitfalls, changedFiles, diff }) {
  * @returns {string}
  */
 function formatReviewCommandError(error) {
-  const stderr = String(error?.stderr ?? "").trim();
+  const commandError = error && typeof error === "object"
+    ? /** @type {{ stderr?: unknown, stdout?: unknown }} */ (error)
+    : {};
+  const stderr = String(commandError.stderr ?? "").trim();
   if (stderr) return stderr;
 
-  const stdout = String(error?.stdout ?? "").trim();
+  const stdout = String(commandError.stdout ?? "").trim();
   if (stdout) return stdout;
 
   if (error instanceof Error) {
@@ -1619,7 +1622,7 @@ function main() {
         journalFile,
         configFile: path.resolve(DEFAULT_CONFIG_FILE)
       });
-      if (entry.skipped) {
+      if ("skipped" in entry && entry.skipped) {
         console.log(`Pitfall already resolved: ${entry.id} (skipped)`);
       } else {
         console.log(`Pitfall resolved: ${entry.id}`);

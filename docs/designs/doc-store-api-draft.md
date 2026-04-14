@@ -1638,6 +1638,28 @@ export abstract class ManagedDocStoreError extends Error {
 5. **压缩存储**
    - 备份和 archive 是否统一使用压缩包格式，
      以及压缩级别的默认值未定。
+6. **Sprint 1 已知实现缺陷（Sprint 1-bis 处理）**
+   以下 3 条在 Sprint 1 初始实现中由第 6 轮 codex review 暴露。
+   为避免把多个语义决定揉进同一 commit，约定在独立的
+   Sprint 1-bis 中完整处理并补齐回归测试。下游 Sprint（hook/CI、
+   adopt/import）不直接依赖 refs-mirror 完整性，可与 Sprint 1-bis 并行推进。
+   - **B11 [P1]**：`archiveDocument(B)` 成功后，若 `B` 仍有 `inboundRefs`，
+     源记录 `A` 的任何 `updateDocument` 改 `refs`（含移除指向 B 的边）
+     都会触发 `ArchiveImmutableError` — archive 语义与 refs-mirror 语义冲突。
+     - Sprint 1-bis 需要决定：archive 时拒绝有 live inbound 的目标（严格），
+       还是允许 source 在 retarget/remove 时绕过 immutable 检查（宽松）。
+   - **B12 [P2]**：`linkDocuments` 的 duplicate 检查忽略 `strength`；
+     weak → strong 升级时 outbound 保持 weak、inbound mirror 已经写 strong
+     → 同一关系图两侧描述不一致。
+     - Sprint 1-bis 修法：duplicate 判定同时比对 strength；
+       strength 升级走"替换旧 outbound"路径。
+   - **B13 [P2]**：`updateDocument` 改 `refs` 触发 target artifacts 重写（inbound mirror）；
+     crash 落在 target artifacts 已写、INDEX 未更新的窗口时，
+     recovery 只回滚 source，target artifacts 保留 speculative 状态
+     → 重启后 artifact rev 与 INDEX rev 不一致。
+     - Sprint 1-bis 修法：recovery 对被 mirror 触及的所有 target 做一致性回滚
+       （从 INDEX 的 old revision 重建 artifact，或把 mirror-targets 记入 journal payload
+       便于针对性 rollback）。
 
 ## 25. 结论
 

@@ -86,7 +86,9 @@ export function readHumanBoardInstructions(boardPath) {
       continue;
     }
 
-    const itemMatch = line.match(/^\s*[-*+]\s+(.*)$/);
+    // Only treat items with an explicit [ ] / [x] checkbox as instructions.
+    // Nested bullets without checkboxes are sub-notes, not active directives.
+    const itemMatch = line.match(/^\s*[-*+]\s+(\[[xX ]\]\s+.*)$/);
     if (!itemMatch) {
       continue;
     }

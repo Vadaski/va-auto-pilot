@@ -168,7 +168,10 @@ test("resolveHumanBoardPath anchors human-board.md to the sprint-state project r
   }
 });
 
-test("readHumanBoardInstructions returns unchecked items under Instructions only", () => {
+test("readHumanBoardInstructions returns unchecked checkbox items only, ignoring plain bullets", () => {
+  // Plain bullets (no [ ] / [x]) are sub-notes under processed items, not active
+  // directives. Treating them as instructions causes dozens of historical sub-bullets
+  // to be injected into delegate prompts on every cycle (observed 2026-04-14).
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-human-board-"));
   const boardPath = path.join(tmpDir, "human-board.md");
   fs.writeFileSync(boardPath, [
@@ -177,7 +180,7 @@ test("readHumanBoardInstructions returns unchecked items under Instructions only
     "## Instructions (highest priority)",
     "- [x] already handled",
     "- [ ] still pending",
-    "- plain bullet should block",
+    "- plain bullet is a sub-note, not an active instruction",
     "",
     "### Nested notes",
     "- [ ] nested pending",
@@ -189,7 +192,6 @@ test("readHumanBoardInstructions returns unchecked items under Instructions only
   const unchecked = readHumanBoardInstructions(boardPath);
   assert.deepEqual(unchecked, [
     { lineNumber: 5, text: "[ ] still pending" },
-    { lineNumber: 6, text: "plain bullet should block" },
     { lineNumber: 9, text: "[ ] nested pending" }
   ]);
 });

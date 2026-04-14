@@ -10,6 +10,8 @@
  * @typedef {{
  *   close: () => Promise<void>,
  *   createDocument: (kind: DocumentKind, input: Record<string, unknown>) => Promise<DocumentRecord>,
+ *   importLegacyDocument: (filePath: string, options?: Record<string, unknown>) => Promise<DocumentRecord>,
+ *   adoptDocument: (filePath: string, options?: Record<string, unknown>) => Promise<DocumentRecord>,
  *   updateDocument: (ref: string, patch: Record<string, unknown>) => Promise<DocumentRecord>,
  *   archiveDocument: (ref: string) => Promise<DocumentRecord>,
  *   linkDocuments: (fromRef: string, toRef: string, relation: string) => Promise<void>,

@@ -136,6 +136,35 @@ test("linkDocuments records inbound and outbound relations", async () => {
   assert.ok(resolvedDecision?.inboundRefs?.some((item) => item.to === design.id && item.relation === "depends"));
 });
 
+test("linkDocuments upgrades weak refs to strong without duplicating outbound or inbound mirrors", async () => {
+  const { store } = await openStore();
+  const target = await store.createDesign({ title: "Target first" });
+  const source = await store.createDesign({ title: "Source second", refs: [{ to: target.id, relation: "depends" }] });
+
+  const beforeUpgradeSource = await store.resolveDocumentRef(source.id);
+  const beforeUpgradeTarget = await store.resolveDocumentRef(target.id);
+  assert.deepEqual(beforeUpgradeSource?.refs, [{ to: target.id, relation: "depends", strength: "weak" }]);
+  assert.deepEqual(beforeUpgradeTarget?.inboundRefs, [{ to: source.id, relation: "depends", strength: "weak" }]);
+
+  await store.linkDocuments(source.id, target.id, "depends");
+
+  const upgradedSource = await store.resolveDocumentRef(source.id);
+  const upgradedTarget = await store.resolveDocumentRef(target.id);
+  assert.deepEqual(upgradedSource?.refs, [{ to: target.id, relation: "depends", strength: "strong" }]);
+  assert.deepEqual(upgradedTarget?.inboundRefs, [{ to: source.id, relation: "depends", strength: "strong" }]);
+
+  const sourceRevisionAfterUpgrade = upgradedSource?.revision;
+  const targetRevisionAfterUpgrade = upgradedTarget?.revision;
+  await store.linkDocuments(source.id, target.id, "depends");
+
+  const dedupedSource = await store.resolveDocumentRef(source.id);
+  const dedupedTarget = await store.resolveDocumentRef(target.id);
+  assert.deepEqual(dedupedSource?.refs, [{ to: target.id, relation: "depends", strength: "strong" }]);
+  assert.deepEqual(dedupedTarget?.inboundRefs, [{ to: source.id, relation: "depends", strength: "strong" }]);
+  assert.equal(dedupedSource?.revision, sourceRevisionAfterUpgrade);
+  assert.equal(dedupedTarget?.revision, targetRevisionAfterUpgrade);
+});
+
 test("createDocument mirrors refs into target inboundRefs", async () => {
   const { store } = await openStore();
   const target = await store.createDesign({ title: "Target first" });
@@ -286,6 +315,59 @@ test("archiveDocument rejects already archived refs without corrupting the store
   assert.equal(index.entries[design.id].path, archived.path);
   assert.equal(fs.existsSync(path.join(root, archived.path)), true);
   assert.equal(report.ok, true);
+});
+
+test("archiveDocument rejects live inboundRefs without mutating source or target", async () => {
+  const { root, store } = await openStore();
+  const target = await store.createDesign({ title: "Archive blocked target" });
+  const source = await store.createDesign({
+    title: "Archive blocked source",
+    refs: [{ to: target.id, relation: "depends" }]
+  });
+
+  const targetBefore = await store.resolveDocumentRef(target.id);
+  const sourceBefore = await store.resolveDocumentRef(source.id);
+
+  await assert.rejects(
+    () => store.archiveDocument(target.id),
+    (error) =>
+      error instanceof ArchiveImmutableError &&
+      error.code === "ARCHIVE_IMMUTABLE" &&
+      error.message.includes("live inboundRefs") &&
+      error.message.includes(source.id)
+  );
+
+  const targetAfter = await store.resolveDocumentRef(target.id);
+  const sourceAfter = await store.resolveDocumentRef(source.id);
+  const report = await store.validate();
+
+  assert.deepEqual(targetAfter, targetBefore);
+  assert.deepEqual(sourceAfter, sourceBefore);
+  assert.equal(fs.existsSync(path.join(root, target.path)), true);
+  assert.equal(fs.existsSync(path.join(root, buildArtifactPath("design", target.frontmatter.slug, true))), false);
+  assert.equal(report.ok, true);
+});
+
+test("archiveDocument allows inboundRefs that only come from archived sources", async () => {
+  const { root, store } = await openStore();
+  const target = await store.createDesign({ title: "Archive after source" });
+  const source = await store.createDesign({
+    title: "Source archived first",
+    refs: [{ to: target.id, relation: "depends" }]
+  });
+
+  await store.archiveDocument(source.id);
+  const archivedTarget = await store.archiveDocument(target.id);
+  const resolvedTarget = await store.resolveDocumentRef(target.id);
+  const archivedPath = path.join(root, buildArtifactPath("design", target.frontmatter.slug, true));
+
+  assert.equal(resolvedTarget?.archived, true);
+  assert.equal(resolvedTarget?.path, archivedTarget.path);
+  assert.equal(fs.existsSync(archivedPath), true);
+  assert.equal(
+    resolvedTarget?.inboundRefs?.some((item) => item.to === source.id && item.relation === "depends" && item.strength === "weak"),
+    true
+  );
 });
 
 test("validate reports duplicate INDEX paths", async () => {

@@ -21,20 +21,11 @@ function serializeCanonicalIndex(index) {
 }
 
 /**
- * @param {string} indexPath
- * @returns {Promise<import("./types.mjs").StoreIndex | null>}
+ * @param {string} content
+ * @param {string} [indexPath]
+ * @returns {import("./types.mjs").StoreIndex}
  */
-export async function readIndex(indexPath) {
-  let content;
-  try {
-    content = await fs.readFile(indexPath, "utf8");
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      return null;
-    }
-    throw error;
-  }
-
+export function validateIndexContent(content, indexPath = "INDEX.json") {
   const parsed = JSON.parse(content);
   const expectedChecksum = typeof parsed?.[INDEX_CHECKSUM_FIELD] === "string" ? parsed[INDEX_CHECKSUM_FIELD].trim() : "";
   const canonical = stripChecksum(parsed);
@@ -52,6 +43,23 @@ export async function readIndex(indexPath) {
     });
   }
   return canonical;
+}
+
+/**
+ * @param {string} indexPath
+ * @returns {Promise<import("./types.mjs").StoreIndex | null>}
+ */
+export async function readIndex(indexPath) {
+  let content;
+  try {
+    content = await fs.readFile(indexPath, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+  return validateIndexContent(content, indexPath);
 }
 
 async function writeAtomic(filePath, content) {

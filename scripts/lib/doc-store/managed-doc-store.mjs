@@ -2,10 +2,6 @@
  * Sprint 1 implementation of ManagedDocStore.
  *
  * Known limitations tracked for Sprint 1-bis (see design doc §24):
- *   B11 [P1]: archiving a document with live inboundRefs blocks future
- *     updateDocument edits on the source that reference it.
- *   B12 [P2]: linkDocuments duplicate check ignores strength; weak→strong
- *     upgrade leaves outbound weak while inbound mirror already holds strong.
  *   B13 [P2]: crash after mirror target rewrites but before INDEX update
  *     leaves target artifacts ahead of INDEX revision after recovery.
  *
@@ -24,7 +20,7 @@ import { acquireLock, releaseLock } from "./locking.mjs";
 import { buildDefaultIndex, createRecord, createRegistry, patchRecord, syncRegistry, validateStoreVersion } from "./store-models.mjs";
 import { recoverPendingTransactions } from "./store-recovery.mjs";
 import { validateStore } from "./store-validation.mjs";
-import { JOURNAL_FILE, buildArtifactPath, cloneValue, ensureStoreLayout, nowIso, pathExists } from "./shared.mjs";
+import { JOURNAL_FILE, buildArtifactPath, buildDocumentId, cloneValue, ensureStoreLayout, nowIso, pathExists, slugify } from "./shared.mjs";
 
 // single-handle-per-root is the Sprint 1 contract per design §10; multi-handle support is future work
 const OPEN_HANDLES = new Map();
@@ -46,6 +42,38 @@ function uniqueRelations(relations = []) {
   return byIdentity;
 }
 
+function upsertStrongRelation(relations = [], outbound) {
+  let matchingCount = 0;
+  let hasExactStrong = false;
+  for (const relation of relations) {
+    if (relation.to !== outbound.to || relation.relation !== outbound.relation) continue;
+    matchingCount += 1;
+    if (relationIdentity(relation) === relationIdentity(outbound)) {
+      hasExactStrong = true;
+    }
+  }
+  if (matchingCount === 1 && hasExactStrong) {
+    return relations;
+  }
+
+  let inserted = false;
+  const nextRelations = [];
+  for (const relation of relations) {
+    if (relation.to !== outbound.to || relation.relation !== outbound.relation) {
+      nextRelations.push(relation);
+      continue;
+    }
+    if (!inserted) {
+      nextRelations.push(outbound);
+      inserted = true;
+    }
+  }
+  if (!inserted) {
+    nextRelations.push(outbound);
+  }
+  return nextRelations;
+}
+
 function addInboundMirror(targetRecord, sourceRef, relation) {
   const inbound = buildInboundRelation(sourceRef, relation);
   if ((targetRecord.inboundRefs ?? []).some((item) => relationIdentity(item) === relationIdentity(inbound))) {
@@ -64,6 +92,17 @@ function removeInboundMirror(targetRecord, sourceRef, relation) {
   }
   targetRecord.inboundRefs = nextInboundRefs;
   return true;
+}
+
+function findLiveInboundSources(previousIndex, inboundRefs = []) {
+  const liveSources = new Set();
+  for (const inbound of inboundRefs) {
+    const sourceRecord = previousIndex.entries[inbound.to];
+    if (sourceRecord && !sourceRecord.archived) {
+      liveSources.add(inbound.to);
+    }
+  }
+  return [...liveSources].sort();
 }
 
 function requireLiveMirrorTarget(previousIndex, stagedRecords, sourceRef, targetRef, archivedDetail) {
@@ -204,7 +243,7 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
           previousIndex = cloneValue(index);
           // Build inside the serialized mutation so subtype validation sees the latest INDEX-backed registry state.
           record = createRecord(kind, input, registry);
-          return { ref: record.id, kind, path: record.path };
+          return record;
         },
         async () => {
           if (!record || !previousIndex) throw new DocStoreError("Create mutation missing state.", { code: "MUTATION_STATE_MISSING" });
@@ -232,7 +271,7 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
             await writeArtifact(rootPath, index.entries[targetRef]);
           }
           await persistIndex(index);
-          return cloneValue(record);
+          return record;
         },
         async () => {
           if (!previousIndex) return;
@@ -245,6 +284,91 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
         }
       );
     }
+    async function importLegacyDocument(filePath, options = {}) {
+      const { kind = "process", title, slug, metadata = {} } = options;
+      const content = await fs.readFile(filePath, "utf8");
+      
+      // Basic metadata inference: title from first # line or filename, slug from filename
+      const inferredTitle = title ?? content.match(/^#\s+(.*)$/m)?.[1] ?? path.basename(filePath, path.extname(filePath));
+      const inferredSlug = slug ?? slugify(inferredTitle);
+      
+      const input = {
+        title: inferredTitle,
+        body: content,
+        metadata: { ...metadata, importedFrom: filePath }
+      };
+
+      /** @type {import("./types.mjs").DocumentRecord | null} */
+      let record = null;
+      let previousIndex = null;
+      let mirroredTargetRefs = [];
+
+      return runMutation(
+        "import-legacy",
+        () => {
+          previousIndex = cloneValue(index);
+          record = createRecord(kind, input, registry);
+          record.frontmatter.slug = inferredSlug; // override with inferred slug
+          record.id = buildDocumentId(kind, inferredSlug);
+          record.path = buildArtifactPath(kind, inferredSlug);
+          return record;
+        },
+        async () => {
+          if (!record || !previousIndex) throw new DocStoreError("Import mutation missing state.", { code: "MUTATION_STATE_MISSING" });
+          if (index.entries[record.id]) throw new DocStoreError(`Document already exists: ${record.id}`, { code: "DOCUMENT_EXISTS" });
+          
+          const stagedRecords = new Map([[record.id, record]]);
+          const mirroredTargets = syncInboundRefMirrors(previousIndex, stagedRecords, record.id, [], record.refs, "importLegacyDocument target is archived");
+          mirroredTargetRefs = [...mirroredTargets];
+          
+          const touchedAt = nowIso();
+          for (const targetRef of mirroredTargetRefs) {
+            const targetRecord = stagedRecords.get(targetRef);
+            targetRecord.revision += 1;
+            targetRecord.frontmatter.updatedAt = touchedAt;
+            index.entries[targetRef] = targetRecord;
+          }
+          
+          index.entries[record.id] = record;
+          await writeArtifact(rootPath, record);
+          for (const targetRef of mirroredTargetRefs) {
+            await writeArtifact(rootPath, index.entries[targetRef]);
+          }
+          await persistIndex(index);
+          return record;
+        },
+        async () => {
+          if (!previousIndex) return;
+          index = previousIndex;
+          for (const targetRef of mirroredTargetRefs) {
+            await writeArtifact(rootPath, previousIndex.entries[targetRef]);
+          }
+          await removeArtifact(rootPath, record);
+          await writeIndexAtomic(indexPath, previousIndex);
+        }
+      );
+    }
+
+    async function adoptDocument(filePath, options = {}) {
+      const { preferGitMove = true } = options;
+      const record = await importLegacyDocument(filePath, options);
+      const targetPath = resolveArtifactPath(rootPath, record);
+      
+      if (preferGitMove) {
+        try {
+          const { execSync } = await import("node:child_process");
+          // Check if we are in a git repo
+          execSync("git rev-parse --is-inside-work-tree", { stdio: "ignore" });
+          execSync(`git mv "${filePath}" "${targetPath}"`);
+        } catch (err) {
+          console.warn("Git move failed or not a git repo, artifact created anyway.", err);
+        }
+      } else {
+        await fs.unlink(filePath);
+      }
+      return record;
+    }
+
     async function updateDocument(ref, patch) {
       /** @type {import("./types.mjs").StoreIndex | null} */
       let previousIndex = null;
@@ -318,6 +442,13 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
             // Archive is intentionally not idempotent so callers get the same immutable failure mode as updateDocument().
             throw new ArchiveImmutableError(ref, "archiveDocument target is already archived");
           }
+          const liveInboundSources = findLiveInboundSources(previousIndex, current.inboundRefs);
+          if (liveInboundSources.length > 0) {
+            throw new ArchiveImmutableError(
+              ref,
+              `archiveDocument target has live inboundRefs from: ${liveInboundSources.join(", ")}`
+            );
+          }
           next = cloneValue(current);
           next.archived = true;
           next.revision += 1;
@@ -380,18 +511,42 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
           if (!from || !to || !previousIndex) throw new DocStoreError("Link mutation missing state.", { code: "MUTATION_STATE_MISSING" });
           /** @type {import("./types.mjs").DocumentRelation} */
           const outbound = { to: toRef, relation, strength: "strong" };
-          if (!from.refs.some((item) => item.to === toRef && item.relation === relation)) {
-            from.refs.push(outbound);
+          const previousRefs = from.refs;
+          const nextRefs = upsertStrongRelation(previousRefs, outbound);
+          const sourceChanged = nextRefs !== previousRefs;
+          const stagedRecords = new Map([[fromRef, from]]);
+          const mirroredTargetRefs = sourceChanged
+            ? [
+                ...syncInboundRefMirrors(
+                  previousIndex,
+                  stagedRecords,
+                  fromRef,
+                  previousRefs,
+                  nextRefs,
+                  "linkDocuments target is archived"
+                )
+              ]
+            : [];
+
+          if (!sourceChanged && mirroredTargetRefs.length === 0) {
+            return;
           }
-          addInboundMirror(to, fromRef, outbound);
-          from.revision += 1;
-          to.revision += 1;
-          from.frontmatter.updatedAt = nowIso();
-          to.frontmatter.updatedAt = from.frontmatter.updatedAt;
-          index.entries[fromRef] = from;
-          index.entries[toRef] = to;
-          await writeArtifact(rootPath, from);
-          await writeArtifact(rootPath, to);
+
+          if (sourceChanged) {
+            from.refs = nextRefs;
+          }
+          const changedRefs = new Set([fromRef, ...mirroredTargetRefs]);
+          const touchedAt = nowIso();
+          for (const changedRef of changedRefs) {
+            const record = stagedRecords.get(changedRef);
+            if (!record) continue;
+            record.revision += 1;
+            record.frontmatter.updatedAt = touchedAt;
+            index.entries[changedRef] = record;
+          }
+          for (const changedRef of changedRefs) {
+            await writeArtifact(rootPath, index.entries[changedRef]);
+          }
           await persistIndex(index);
         },
         async () => {
@@ -470,6 +625,8 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
     const api = {
       close,
       createDocument,
+      importLegacyDocument,
+      adoptDocument,
       updateDocument,
       archiveDocument,
       linkDocuments,

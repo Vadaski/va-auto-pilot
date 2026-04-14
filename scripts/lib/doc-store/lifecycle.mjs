@@ -209,6 +209,39 @@ export async function initStore(projectRoot, options = {}) {
   return { ok: true, action: storeExists ? (force ? "forced" : "repaired") : "initialized", warnings };
 }
 
+export function runDoctorOnSnapshot(config, index) {
+  const report = { ok: true, findings: [] };
+
+  if (!config) {
+    report.findings.push({
+      source: "config",
+      code: "CONFIG_MISSING",
+      message: "Staged store.config.json is missing.",
+      suggestion: "Stage .docstore/store.config.json or do not delete it."
+    });
+  }
+
+  if (!index) {
+    report.findings.push({
+      source: "index",
+      code: "INDEX_MISSING",
+      message: "Staged INDEX.json is missing.",
+      suggestion: "Stage .docstore/INDEX.json."
+    });
+  }
+
+  if (config && index) {
+    const drift = detectConfigIndexDrift(config, index);
+    if (!drift.ok) {
+      const error = new ConfigIndexDriftError(drift.drifts);
+      report.findings.push({ ...findingFromError("drift", error), drifts: drift.drifts });
+    }
+  }
+
+  report.ok = report.findings.length === 0;
+  return report;
+}
+
 export async function runDoctor(projectRoot) {
   const paths = resolveStorePaths(projectRoot);
   const report = { ok: true, storeRoot: paths.storeRoot, findings: [] };

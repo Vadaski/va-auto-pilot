@@ -1646,8 +1646,10 @@ export abstract class ManagedDocStoreError extends Error {
    - **B11 [P1]**：`archiveDocument(B)` 成功后，若 `B` 仍有 `inboundRefs`，
      源记录 `A` 的任何 `updateDocument` 改 `refs`（含移除指向 B 的边）
      都会触发 `ArchiveImmutableError` — archive 语义与 refs-mirror 语义冲突。
-     - Sprint 1-bis 需要决定：archive 时拒绝有 live inbound 的目标（严格），
-       还是允许 source 在 retarget/remove 时绕过 immutable 检查（宽松）。
+     - Sprint 1-bis 决策：采用**严格策略**。`archiveDocument` 必须拒绝仍有
+       live inboundRefs 的目标；只有当 inbound 来源都已 archived（或不存在）时，
+       target 才允许进入 archive。这样 archived artifact 继续保持完全 immutable，
+       source 侧也不需要引入“retarget/remove 时可写 archived target”的特例。
    - **B12 [P2]**：`linkDocuments` 的 duplicate 检查忽略 `strength`；
      weak → strong 升级时 outbound 保持 weak、inbound mirror 已经写 strong
      → 同一关系图两侧描述不一致。

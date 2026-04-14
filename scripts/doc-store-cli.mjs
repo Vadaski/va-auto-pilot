@@ -1,32 +1,24 @@
 #!/usr/bin/env node
 
 /**
- * Sprint 2 implementation of doc-store CLI.
+ * Sprint 2-bis implementation of doc-store CLI.
  *
- * Known limitations tracked for Sprint 2-bis (see design doc §24 item 7):
- *   B14 [P1]: enforce-staged does not validate staged INDEX checksum/schema;
- *     a commit that corrupts INDEX post-hook is accepted and fails readIndex()
- *     on the next operation.
- *   B15 [P2]: enforce-staged does not compare staged config.managedRoots vs
- *     staged index.managedRoots; commits with drift pass hook but doctor
- *     immediately reports CONFIG_INDEX_DRIFT.
- *   B16 [P2]: staged deletion of store.config.json falls back to HEAD config;
- *     commit-time removal of the config silently disables managed-mode
- *     enforcement until someone recreates it.
- *
- * Sprint 2-bis direction: refactor enforce-staged to reuse doctor's checks
- * against the staged snapshot (single source of truth), rather than
- * duplicating a subset of doctor logic here.
+ * enforce-staged now reuses doctor checks against the staged snapshot:
+ *   runDoctorOnSnapshot(stagedConfig, stagedIndex) + checkStagedDiff
+ * This resolves B14 (staged INDEX checksum/schema), B15 (config/index drift),
+ * and B16 (staged config deletion fallback).
  */
 
 import { execFileSync } from "node:child_process";
 
 import { parseArgv } from "./lib/sprint-utils.mjs";
 import { checkStagedDiff } from "./lib/doc-store/mode-enforcement.mjs";
-import { initStore, resolveStorePaths, runDoctor } from "./lib/doc-store/lifecycle.mjs";
+import { initStore, resolveStorePaths, runDoctor, runDoctorOnSnapshot } from "./lib/doc-store/lifecycle.mjs";
 import { buildDefaultConfig, validateStoreConfig } from "./lib/doc-store/store-config.mjs";
 import { canonicalizeManagedRoots, findNonCanonicalManagedRoots } from "./lib/doc-store/managed-roots.mjs";
-import { InvalidStagedConfigError, NonCanonicalStagedConfigError } from "./lib/doc-store/errors.mjs";
+import { DocStoreError, InvalidStagedConfigError, NonCanonicalStagedConfigError } from "./lib/doc-store/errors.mjs";
+import { validateIndexContent } from "./lib/doc-store/index-file.mjs";
+import { openManagedDocStore } from "./lib/doc-store/managed-doc-store.mjs";
 
 function printHuman(report) {
   if (report.ok) {
@@ -87,17 +79,7 @@ function readGitText(projectRoot, objectSpec) {
   }
 }
 
-function parseJsonSnapshot(projectRoot, primarySpec, fallbackSpec) {
-  const content = readGitText(projectRoot, primarySpec) ?? readGitText(projectRoot, fallbackSpec);
-  return content === null ? null : JSON.parse(content);
-}
-
-function readStagedConfig(projectRoot) {
-  const content = readGitText(projectRoot, ":.docstore/store.config.json") ?? readGitText(projectRoot, "HEAD:.docstore/store.config.json");
-  if (content === null) {
-    return { ...buildDefaultConfig(), mode: "legacy", managedRoots: [] };
-  }
-
+function parseStagedConfigText(content) {
   let parsed;
   try {
     parsed = JSON.parse(content);
@@ -126,7 +108,39 @@ async function run() {
   const format = parsed.options.format === "human" ? "human" : "json";
 
   if (!parsed.command || parsed.flags.has("help")) {
-    console.log("Usage: node ./scripts/doc-store-cli.mjs <init|doctor|enforce-staged> [--force] [--format=json|human]");
+    console.log("Usage: node ./scripts/doc-store-cli.mjs <init|doctor|enforce-staged|import|adopt> [--force] [--format=json|human] [--kind=<kind>] [--title=<title>]");
+    process.exit(0);
+  }
+
+  if (parsed.command === "import") {
+    const filePath = process.argv[3];
+    if (!filePath) {
+      console.error("Missing file path.");
+      process.exit(1);
+    }
+    const store = await openManagedDocStore(process.cwd());
+    const record = await store.importLegacyDocument(filePath, {
+      kind: parsed.options.kind,
+      title: parsed.options.title
+    });
+    console.log(`Imported document: ${record.id}`);
+    await store.close();
+    process.exit(0);
+  }
+
+  if (parsed.command === "adopt") {
+    const filePath = process.argv[3]; // process.argv = [node, script, command, file, ...]
+    if (!filePath) {
+      console.error("Missing file path.");
+      process.exit(1);
+    }
+    const store = await openManagedDocStore(process.cwd());
+    const record = await store.adoptDocument(filePath, {
+      kind: parsed.options.kind,
+      title: parsed.options.title
+    });
+    console.log(`Adopted document: ${record.id}`);
+    await store.close();
     process.exit(0);
   }
 
@@ -157,29 +171,63 @@ async function run() {
 
   if (parsed.command === "enforce-staged") {
     const paths = resolveStorePaths(process.cwd());
-    // enforce-staged must validate the index snapshot Git will commit. If the index does not yet
-    // contain store metadata, fall back to HEAD. If neither exists, treat the repo as legacy bootstrap.
-    let config;
-    try {
-      config = readStagedConfig(paths.projectRoot);
-    } catch (error) {
-      if (error instanceof InvalidStagedConfigError || error instanceof NonCanonicalStagedConfigError) {
-        console.error(`[${error.code}] ${error.message}`);
-        if (error.recoverySuggestion) {
-          console.error(`  suggestion: ${error.recoverySuggestion}`);
+
+    const stagedConfigText = readGitText(paths.projectRoot, ":.docstore/store.config.json");
+    const headConfigText = readGitText(paths.projectRoot, "HEAD:.docstore/store.config.json");
+    let config = null;
+    if (stagedConfigText !== null) {
+      try {
+        config = parseStagedConfigText(stagedConfigText);
+      } catch (error) {
+        if (error instanceof InvalidStagedConfigError || error instanceof NonCanonicalStagedConfigError) {
+          console.error(`[${error.code}] ${error.message}`);
+          if (error.recoverySuggestion) {
+            console.error(`  suggestion: ${error.recoverySuggestion}`);
+          }
+          process.exit(1);
+        }
+        throw error;
+      }
+    }
+
+    const stagedIndexText = readGitText(paths.projectRoot, ":.docstore/INDEX.json");
+    let index = null;
+    if (stagedIndexText !== null) {
+      try {
+        index = validateIndexContent(stagedIndexText, ":.docstore/INDEX.json");
+      } catch (error) {
+        if (error instanceof DocStoreError) {
+          console.error(`[${error.code}] ${error.message}`);
+          if (error.recoverySuggestion) {
+            console.error(`  suggestion: ${error.recoverySuggestion}`);
+          }
+          process.exit(1);
+        }
+        throw error;
+      }
+    }
+
+    const headIndexText = readGitText(paths.projectRoot, "HEAD:.docstore/INDEX.json");
+    const hasStoreMetadata = stagedConfigText !== null || headConfigText !== null || stagedIndexText !== null || headIndexText !== null;
+
+    if (hasStoreMetadata) {
+      const doctorReport = runDoctorOnSnapshot(config, index);
+      if (!doctorReport.ok) {
+        for (const finding of doctorReport.findings) {
+          console.error(`[${finding.code}] ${finding.message}`);
+          if (finding.suggestion) {
+            console.error(`  suggestion: ${finding.suggestion}`);
+          }
         }
         process.exit(1);
       }
-      throw error;
     }
-    const stagedIndex = parseJsonSnapshot(paths.projectRoot, ":.docstore/INDEX.json", "HEAD:.docstore/INDEX.json");
-    const previousIndex = readGitText(paths.projectRoot, "HEAD:.docstore/INDEX.json");
-    const index = stagedIndex ?? { entries: {} };
+
     const result = checkStagedDiff({
       stagedFiles: parseStagedFiles(paths.projectRoot),
-      config,
-      index,
-      previousIndex: previousIndex === null ? { entries: {} } : JSON.parse(previousIndex)
+      config: config ?? { ...buildDefaultConfig(), mode: "legacy", managedRoots: [] },
+      index: index ?? { entries: {} },
+      previousIndex: headIndexText === null ? { entries: {} } : JSON.parse(headIndexText)
     });
     if (!result.ok) {
       for (const violation of result.violations) {

@@ -53,12 +53,12 @@ function setMode(cwd, mode) {
   writeJson(configPath, config);
 }
 
-function bumpIndexTimestamp(cwd, updater = (index) => index) {
+async function bumpIndexTimestamp(cwd, updater = (index) => index) {
   const indexPath = indexPathFor(cwd);
   const index = json(indexPath);
   const next = updater(index);
   next.lastUpdated = new Date(Date.now() + 1000).toISOString();
-  writeJson(indexPath, next);
+  await writeIndexAtomic(indexPath, next);
 }
 
 function corruptIndex(cwd, transform) {
@@ -342,7 +342,7 @@ test("enforce-staged end to end returns non-zero and prints violation", async ()
   setMode(cwd, "managed");
   fs.mkdirSync(path.join(cwd, ".docstore", "designs"), { recursive: true });
   writeJson(path.join(cwd, ".docstore", "designs", "manual.json"), { title: "manual" });
-  stage(cwd, ".docstore/store.config.json", ".docstore/designs/manual.json");
+  stage(cwd, ".docstore/store.config.json", ".docstore/INDEX.json", ".docstore/designs/manual.json");
   const result = runCli(cwd, "enforce-staged");
   assert.equal(result.status, 1);
   assert.match(result.stderr, /UNREGISTERED_MANAGED_ADD/);
@@ -357,7 +357,7 @@ test("enforce-staged rejects bare managed modify with orthogonal INDEX tweak", a
   const artifact = json(artifactPath);
   artifact.frontmatter.body = "hand edit";
   writeJson(artifactPath, artifact);
-  bumpIndexTimestamp(cwd);
+  await bumpIndexTimestamp(cwd);
   stage(cwd, ".docstore/INDEX.json", `.docstore/${record.path}`);
 
   const result = runCli(cwd, "enforce-staged");
@@ -389,7 +389,7 @@ test("enforce-staged rejects unregistered managed .json add", async () => {
     id: "design:foo",
     frontmatter: { title: "Foo" }
   });
-  bumpIndexTimestamp(cwd);
+  await bumpIndexTimestamp(cwd);
   stage(cwd, ".docstore/INDEX.json", ".docstore/designs/foo.json");
 
   const result = runCli(cwd, "enforce-staged");
@@ -406,10 +406,10 @@ test("enforce-staged uses staged INDEX instead of working tree INDEX", async () 
   const artifact = json(artifactPath);
   artifact.frontmatter.body = "staged change";
   writeJson(artifactPath, artifact);
-  bumpIndexTimestamp(cwd);
+  await bumpIndexTimestamp(cwd);
   stage(cwd, ".docstore/INDEX.json", `.docstore/${record.path}`);
 
-  bumpIndexTimestamp(cwd, (index) => {
+  await bumpIndexTimestamp(cwd, (index) => {
     index.entries[record.id].revision += 1;
     return index;
   });
@@ -464,7 +464,10 @@ test("enforce-staged accepts staged canonical config with no managed violations"
   const config = json(configPathFor(cwd));
   config.managedRoots = [".docstore/designs", ".docstore/process"];
   writeJson(configPathFor(cwd), config);
-  stage(cwd, ".docstore/store.config.json");
+  const index = json(indexPathFor(cwd));
+  index.managedRoots = [".docstore/designs", ".docstore/process"];
+  await writeIndexAtomic(indexPathFor(cwd), index);
+  stage(cwd, ".docstore/store.config.json", ".docstore/INDEX.json");
 
   const result = runCli(cwd, "enforce-staged");
   assert.equal(result.status, 0, result.stderr);
@@ -476,7 +479,7 @@ test("enforce-staged rejects managed delete with manual INDEX revision bump", as
   const record = await createCommittedDesign(cwd, "Delete Me");
 
   git(cwd, "rm", "-q", `.docstore/${record.path}`);
-  bumpIndexTimestamp(cwd);
+  await bumpIndexTimestamp(cwd);
   stage(cwd, ".docstore/INDEX.json");
 
   const result = runCli(cwd, "enforce-staged");
@@ -539,4 +542,35 @@ test("init without --force fails on corrupt INDEX.json and points to --force", a
   const result = runCli(cwd, "init");
   assert.equal(result.status, 1);
   assert.match(result.stderr, /--force/);
+});
+
+test("enforce-staged rejects staged INDEX with bad checksum (B14)", async () => {
+  const cwd = repo();
+  await initManagedRepo(cwd);
+  corruptIndex(cwd, (content) => content.replace(/"__checksum":\s*"[^"]+"/, '"__checksum": "broken"'));
+  stage(cwd, ".docstore/INDEX.json");
+  const result = runCli(cwd, "enforce-staged");
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /CHECKSUM_MISMATCH/);
+});
+
+test("enforce-staged rejects staged config and INDEX drift (B15)", async () => {
+  const cwd = repo();
+  await initManagedRepo(cwd);
+  const config = json(configPathFor(cwd));
+  config.managedRoots = [".docstore/process"];
+  writeJson(configPathFor(cwd), config);
+  stage(cwd, ".docstore/store.config.json");
+  const result = runCli(cwd, "enforce-staged");
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /CONFIG_INDEX_DRIFT/);
+});
+
+test("enforce-staged rejects staged deletion of store.config.json (B16)", async () => {
+  const cwd = repo();
+  await initManagedRepo(cwd);
+  git(cwd, "rm", "-q", ".docstore/store.config.json");
+  const result = runCli(cwd, "enforce-staged");
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /CONFIG_MISSING/);
 });

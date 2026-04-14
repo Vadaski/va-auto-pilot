@@ -18,7 +18,11 @@ import {
   appendEntry,
   openManagedDocStore,
   releaseLock,
-  readAll
+  readAll,
+  runDoctor,
+  runMigration,
+  registerMigration,
+  clearMigrationRegistry
 } from "./lib/doc-store/index.mjs";
 import { writeArtifact } from "./lib/doc-store/artifacts.mjs";
 import { readIndex, writeIndexAtomic } from "./lib/doc-store/index-file.mjs";
@@ -484,6 +488,61 @@ test("startup recovery rolls back pending updates when INDEX stayed on the old r
   assert.equal(journal.at(-1)?.status, "aborted");
 });
 
+test("startup recovery rolls back target artifacts touched by refs mirror mid-update crash", async () => {
+  const root = createRoot();
+  const store = await openManagedDocStore(root);
+  const source = await store.createDesign({ title: "Source" });
+  const target = await store.createDesign({ title: "Target" });
+  await store.close();
+
+  // Simulate: updateDocument changed source refs to point to target,
+  // wrote source and target artifacts with updated inboundRefs,
+  // but crashed before INDEX update.
+  const journalPath = path.join(root, ".journal", "current.jsonl");
+  const nextSource = {
+    ...source,
+    revision: 2,
+    refs: [{ to: target.id, relation: "depends", strength: "weak" }],
+    frontmatter: { ...source.frontmatter, updatedAt: new Date().toISOString() }
+  };
+  const nextTarget = {
+    ...target,
+    revision: 2,
+    inboundRefs: [{ to: source.id, relation: "depends", strength: "weak" }],
+    frontmatter: { ...target.frontmatter, updatedAt: new Date().toISOString() }
+  };
+
+  await writeArtifact(root, nextSource);
+  await writeArtifact(root, nextTarget);
+  await appendEntry(journalPath, {
+    txId: "tx-update-mirror-crash",
+    timestamp: new Date().toISOString(),
+    op: "update",
+    payload: {
+      ref: source.id,
+      path: source.path,
+      revision: 2,
+      mirroredTargetRefs: [target.id]
+    },
+    status: "pending"
+  });
+
+  const reopened = await openManagedDocStore(root);
+  const recoveredSource = await reopened.resolveDocumentRef(source.id);
+  const recoveredTarget = await reopened.resolveDocumentRef(target.id);
+  const journal = await readAll(journalPath);
+
+  assert.equal(recoveredSource?.revision, 1);
+  assert.equal(recoveredSource?.refs.length, 0);
+  assert.equal(readArtifact(root, source.path).revision, 1);
+
+  assert.equal(recoveredTarget?.revision, 1);
+  assert.equal(recoveredTarget?.inboundRefs?.length, 0);
+  assert.equal(readArtifact(root, target.path).revision, 1);
+
+  assert.equal(journal.at(-1)?.status, "aborted");
+});
+
 test("startup recovery finishes pending archives when the archived copy is the only surviving artifact", async () => {
   const root = createRoot();
   const store = await openManagedDocStore(root);
@@ -791,4 +850,177 @@ test("linkDocuments rejects archived sources too", async () => {
   await assert.rejects(async () => {
     await store.linkDocuments(designA.id, designB.id, "depends");
   }, (error) => error instanceof ArchiveImmutableError && error.code === "ARCHIVE_IMMUTABLE");
+});
+
+test("migrate reports already up to date when versions match", async () => {
+  const { root } = await openStore();
+  const result = await runMigration(root);
+  assert.equal(result.ok, true);
+  assert.ok(result.warnings.some((w) => w.includes("already at target version")));
+});
+
+test("migrate --plan-only returns plan without making changes", async () => {
+  const { root } = await openStore();
+  clearMigrationRegistry();
+  registerMigration("1.0.0", "2.0.0", async () => [{ status: "applied", details: "noop" }]);
+  const result = await runMigration(root, { planOnly: true, to: "2.0.0" });
+  assert.equal(result.ok, true);
+  assert.ok(result.warnings.some((w) => w.includes("Plan:")));
+  const index = JSON.parse(fs.readFileSync(path.join(root, "INDEX.json"), "utf8"));
+  assert.equal(index.storeFormatVersion, "1.0.0");
+});
+
+test("migrate fails with no migration path for unknown target", async () => {
+  const { root } = await openStore();
+  clearMigrationRegistry();
+  const result = await runMigration(root, { to: "9.9.9" });
+  assert.equal(result.ok, false);
+  assert.ok(result.preflight.findings.some((f) => f.code === "NO_MIGRATION_PATH"));
+});
+
+test("migrate applies registered migration and writes journal", async () => {
+  const { root, store } = await openStore();
+  const design = await store.createDesign({ title: "Migrate me" });
+  await store.close();
+
+  clearMigrationRegistry();
+  registerMigration("1.0.0", "2.0.0", async (ctx) => {
+    ctx.index.storeFormatVersion = "2.0.0";
+    ctx.index.extensions = { ...(ctx.index.extensions ?? {}), migrated: true };
+    return [{ status: "applied", details: "bumped version" }];
+  });
+
+  const result = await runMigration(root, { to: "2.0.0" });
+  assert.equal(result.ok, true);
+  assert.equal(result.applied.length, 1);
+  assert.equal(result.applied[0].step, "1.0.0→2.0.0");
+
+  const index = JSON.parse(fs.readFileSync(path.join(root, "INDEX.json"), "utf8"));
+  assert.equal(index.storeFormatVersion, "2.0.0");
+  assert.equal(index.extensions.migrated, true);
+  assert.equal(index.entries[design.id].frontmatter.title, "Migrate me");
+
+  const journal = await readAll(path.join(root, ".journal", "current.jsonl"));
+  const migrateEntries = journal.filter((e) => e.op === "migrate" && e.status === "committed");
+  assert.equal(migrateEntries.length, 1);
+  assert.equal(migrateEntries[0].payload.toStoreFormatVersion, "2.0.0");
+});
+
+test("migrate rolls back on apply failure", async () => {
+  const { root } = await openStore();
+  clearMigrationRegistry();
+  registerMigration("1.0.0", "2.0.0", async () => {
+    throw new Error("intentional apply failure");
+  });
+
+  const beforeIndex = JSON.parse(fs.readFileSync(path.join(root, "INDEX.json"), "utf8"));
+  const result = await runMigration(root, { to: "2.0.0" });
+  assert.equal(result.ok, false);
+  assert.ok(result.rollback.ok);
+  assert.ok(result.rollback.reason.includes("apply failure"));
+
+  const afterIndex = JSON.parse(fs.readFileSync(path.join(root, "INDEX.json"), "utf8"));
+  assert.deepEqual(afterIndex.storeFormatVersion, beforeIndex.storeFormatVersion);
+});
+
+test("migrate rolls back on verify failure", async () => {
+  const { root } = await openStore();
+
+  clearMigrationRegistry();
+  registerMigration("1.0.0", "2.0.0", async (ctx) => {
+    ctx.index.storeFormatVersion = "2.0.0";
+    return [{ status: "applied", details: "bumped version" }];
+  });
+
+  const beforeIndex = JSON.parse(fs.readFileSync(path.join(root, "INDEX.json"), "utf8"));
+  const result = await runMigration(root, {
+    to: "2.0.0",
+    __testHooks: {
+      afterWriteIndex: async ({ indexPath }) => {
+        const corrupt = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+        corrupt.storeFormatVersion = "1.0.0";
+        fs.writeFileSync(indexPath, JSON.stringify(corrupt, null, 2), "utf8");
+      }
+    }
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.verify.findings.some((f) => f.code === "VERIFY_ERROR" || f.code === "CHECKSUM_MISMATCH" || f.code === "VERSION_MISMATCH"));
+  assert.ok(result.rollback.ok);
+
+  const afterIndex = JSON.parse(fs.readFileSync(path.join(root, "INDEX.json"), "utf8"));
+  assert.deepEqual(afterIndex.storeFormatVersion, beforeIndex.storeFormatVersion);
+});
+
+test("migrate via ManagedDocStore.migrate delegates to engine", async () => {
+  const { root, store } = await openStore();
+  clearMigrationRegistry();
+  registerMigration("1.0.0", "2.0.0", async (ctx) => {
+    ctx.index.storeFormatVersion = "2.0.0";
+    return [{ status: "applied", details: "via store" }];
+  });
+  const result = await store.migrate({ to: "2.0.0" });
+  assert.equal(result.ok, true);
+  const rawIndex = JSON.parse(fs.readFileSync(path.join(root, "INDEX.json"), "utf8"));
+  assert.equal(rawIndex.storeFormatVersion, "2.0.0");
+  await store.close();
+});
+
+test("migrate updates .schema-version", async () => {
+  const { root, store } = await openStore();
+  await store.close();
+
+  clearMigrationRegistry();
+  registerMigration("1.0.0", "2.0.0", async (ctx) => {
+    ctx.index.storeFormatVersion = "2.0.0";
+    return [{ status: "applied", details: "bumped" }];
+  });
+
+  const result = await runMigration(root, { to: "2.0.0" });
+  assert.equal(result.ok, true);
+
+  const schemaVersion = fs.readFileSync(path.join(root, ".schema-version"), "utf8").trim();
+  assert.equal(schemaVersion, "2.0.0");
+});
+
+test("migrate rollback restores .schema-version", async () => {
+  const { root, store } = await openStore();
+  await store.close();
+
+  // Ensure .schema-version exists so we can verify rollback restores it
+  const schemaPath = path.join(root, ".schema-version");
+  if (!fs.existsSync(schemaPath)) {
+    fs.writeFileSync(schemaPath, "1.0.0\n", "utf8");
+  }
+
+  clearMigrationRegistry();
+  registerMigration("1.0.0", "2.0.0", async () => {
+    throw new Error("intentional apply failure");
+  });
+
+  const beforeSchema = fs.readFileSync(schemaPath, "utf8").trim();
+  const result = await runMigration(root, { to: "2.0.0" });
+  assert.equal(result.ok, false);
+  assert.ok(result.rollback.ok);
+
+  const afterSchema = fs.readFileSync(schemaPath, "utf8").trim();
+  assert.equal(afterSchema, beforeSchema);
+});
+
+test("migrate journal entry includes entryId", async () => {
+  const { root, store } = await openStore();
+  await store.close();
+
+  clearMigrationRegistry();
+  registerMigration("1.0.0", "2.0.0", async (ctx) => {
+    ctx.index.storeFormatVersion = "2.0.0";
+    return [{ status: "applied", details: "bumped" }];
+  });
+
+  const result = await runMigration(root, { to: "2.0.0" });
+  assert.equal(result.ok, true);
+
+  const journal = await readAll(path.join(root, ".journal", "current.jsonl"));
+  const migrateEntries = journal.filter((e) => e.op === "migrate" && e.status === "committed");
+  assert.equal(migrateEntries.length, 1);
+  assert.ok(typeof migrateEntries[0].entryId === "string" && migrateEntries[0].entryId.length > 0, "migrate journal entry must have entryId");
 });

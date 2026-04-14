@@ -19,6 +19,7 @@ import { canonicalizeManagedRoots, findNonCanonicalManagedRoots } from "./lib/do
 import { DocStoreError, InvalidStagedConfigError, NonCanonicalStagedConfigError } from "./lib/doc-store/errors.mjs";
 import { validateIndexContent } from "./lib/doc-store/index-file.mjs";
 import { openManagedDocStore } from "./lib/doc-store/managed-doc-store.mjs";
+import { runMigration } from "./lib/doc-store/migration-engine.mjs";
 
 function printHuman(report) {
   if (report.ok) {
@@ -104,11 +105,11 @@ function parseStagedConfigText(content) {
 }
 
 async function run() {
-  const parsed = parseArgv(process.argv.slice(2), new Set(["force", "help"]));
+  const parsed = parseArgv(process.argv.slice(2), new Set(["force", "help", "plan-only"]));
   const format = parsed.options.format === "human" ? "human" : "json";
 
   if (!parsed.command || parsed.flags.has("help")) {
-    console.log("Usage: node ./scripts/doc-store-cli.mjs <init|doctor|enforce-staged|import|adopt> [--force] [--format=json|human] [--kind=<kind>] [--title=<title>]");
+    console.log("Usage: node ./scripts/doc-store-cli.mjs <init|doctor|enforce-staged|import|adopt|migrate> [--force] [--format=json|human] [--kind=<kind>] [--title=<title>] [--plan-only] [--from=<version>] [--to=<version>]");
     process.exit(0);
   }
 
@@ -166,6 +167,52 @@ async function run() {
     if (!report.ok) {
       for (const finding of report.findings) {
         console.error(`[${finding.code}] ${finding.message}`);
+      }
+    }
+    process.exit(report.ok ? 0 : 1);
+  }
+
+  if (parsed.command === "migrate") {
+    const report = await runMigration(resolveStorePaths(process.cwd()).storeRoot, {
+      planOnly: parsed.flags.has("plan-only"),
+      from: parsed.options.from,
+      to: parsed.options.to
+    });
+    if (format === "json") {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      if (report.ok) {
+        console.log(`Migration ${report.migrationId}: ok`);
+        if (report.warnings?.length) {
+          for (const warning of report.warnings) {
+            console.log(`  warning: ${warning}`);
+          }
+        }
+        if (report.applied?.length) {
+          for (const step of report.applied) {
+            console.log(`  applied: ${step.step} (${step.status})`);
+          }
+        }
+      } else {
+        console.error(`Migration ${report.migrationId}: failed`);
+        if (report.preflight?.findings?.length) {
+          for (const finding of report.preflight.findings) {
+            console.error(`  [preflight:${finding.code}] ${finding.message}`);
+          }
+        }
+        if (report.applied?.length) {
+          for (const step of report.applied) {
+            console.error(`  applied: ${step.step} (${step.status})`);
+          }
+        }
+        if (report.verify?.findings?.length) {
+          for (const finding of report.verify.findings) {
+            console.error(`  [verify:${finding.code}] ${finding.message}`);
+          }
+        }
+        if (report.rollback) {
+          console.error(`  rollback: ${report.rollback.ok ? "ok" : "failed"} (${report.rollback.reason})`);
+        }
       }
     }
     process.exit(report.ok ? 0 : 1);

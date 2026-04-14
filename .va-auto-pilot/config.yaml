@@ -20,6 +20,72 @@ qualityGate:
       required: true
       description: "Suggested from pitfall PF-001: tests broken"
       triggeredBy: PF-001
+    - name: dispatch-failed
+      command: 'echo "TODO: implement gate for PF-004"'
+      required: true
+      description: "Suggested from pitfall PF-004: Dispatch failed: exitCode=1"
+      triggeredBy: PF-004
+    - name: dispatch-failed
+      command: 'echo "TODO: implement gate for PF-005"'
+      required: true
+      description: "Suggested from pitfall PF-005: Dispatch failed: exitCode=1"
+      triggeredBy: PF-005
+    - name: dispatch-failed
+      command: 'echo "TODO: implement gate for PF-006"'
+      required: true
+      description: "Suggested from pitfall PF-006: Dispatch failed: exitCode=1"
+      triggeredBy: PF-006
+    - name: dispatch-failed
+      command: 'echo "TODO: implement gate for PF-007"'
+      required: true
+      description: "Suggested from pitfall PF-007: Dispatch failed: exitCode=1"
+      triggeredBy: PF-007
+    - name: dispatch-failed
+      command: 'echo "TODO: implement gate for PF-008"'
+      required: true
+      description: "Suggested from pitfall PF-008: Dispatch failed: exitCode=1"
+      triggeredBy: PF-008
+    - name: review-gate
+      command: codex review --uncommitted
+      required: false
+      description: "Suggested from pitfall PF-009: review gate failed: empty output"
+      triggeredBy: PF-009
+    - name: dispatch-failed
+      command: 'echo "TODO: implement gate for PF-010"'
+      required: true
+      description: "Suggested from pitfall PF-010: Dispatch failed: exitCode=1"
+      triggeredBy: PF-010
+    - name: dispatch-failed
+      command: 'echo "TODO: implement gate for PF-011"'
+      required: true
+      description: "Suggested from pitfall PF-011: Dispatch failed: exitCode=1"
+      triggeredBy: PF-011
+    - name: fix-dispatch
+      command: 'echo "TODO: implement gate for PF-012"'
+      required: true
+      description: "Suggested from pitfall PF-012: Fix dispatch failed: exitCode=1"
+      triggeredBy: PF-012
+    - name: auto-pilot
+      command: 'echo "TODO: implement gate for PF-013"'
+      required: true
+      description: "Suggested from pitfall PF-013: va-auto-pilot | Usage: |
+        va-auto-pilot init [target-dir] [options]"
+      triggeredBy: PF-013
+    - name: dispatch-failed
+      command: 'echo "TODO: implement gate for PF-014"'
+      required: true
+      description: "Suggested from pitfall PF-014: Dispatch failed: exitCode=1"
+      triggeredBy: PF-014
+    - name: dispatch-failed
+      command: 'echo "TODO: implement gate for PF-015"'
+      required: true
+      description: "Suggested from pitfall PF-015: Dispatch failed: exitCode=1"
+      triggeredBy: PF-015
+    - name: dispatch-failed
+      command: 'echo "TODO: implement gate for PF-016"'
+      required: true
+      description: "Suggested from pitfall PF-016: Dispatch failed: exitCode=1"
+      triggeredBy: PF-016
 review:
   domainRoleName: Domain Expert
   domainPrompt: You are the domain expert for this product. Review behavioral

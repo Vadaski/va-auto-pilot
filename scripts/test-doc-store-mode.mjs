@@ -624,3 +624,27 @@ test("enforce-staged rejects staged deletion of store.config.json (B16)", async 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /CONFIG_MISSING/);
 });
+
+test("migrate CLI reports already up to date", async () => {
+  const cwd = repo();
+  runCli(cwd, "init");
+  const result = runCli(cwd, "migrate");
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /already at target version|ok/i);
+});
+
+test("migrate CLI --plan-only reports plan failure when no migration path exists", async () => {
+  const cwd = repo();
+  runCli(cwd, "init");
+  const result = runCli(cwd, "migrate", "--plan-only", "--to=2.0.0");
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /NO_MIGRATION_PATH/);
+});
+
+test("migrate CLI fails with no migration path for unknown target", async () => {
+  const cwd = repo();
+  runCli(cwd, "init");
+  const result = runCli(cwd, "migrate", "--to=9.9.9");
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /NO_MIGRATION_PATH/);
+});

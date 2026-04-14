@@ -21,6 +21,7 @@
  *   validate: () => Promise<{ ok: boolean, violations: Array<{ type: string, ref: string, message: string }> }>,
  *   registerExtensionType: (spec: Record<string, unknown>) => Promise<void>,
  *   unregisterExtensionType: (name: string) => Promise<void>,
+ *   migrate: (options?: Record<string, unknown>) => Promise<{ ok: boolean, migrationId?: string, preflight?: any, applied?: any[], verify?: any, rollback?: any, warnings: string[], error?: string }>,
  *   createDesign: (input: Record<string, unknown>) => Promise<DocumentRecord>,
  *   createDecision: (input: Record<string, unknown>) => Promise<DocumentRecord>,
  *   createProcessEntry: (input: Record<string, unknown>) => Promise<DocumentRecord>,
@@ -37,4 +38,5 @@ export * from "./mode-enforcement.mjs";
 export * from "./schema.mjs";
 export * from "./index-file.mjs";
 export * from "./managed-doc-store.mjs";
+export * from "./migration-engine.mjs";
 export * from "./store-config.mjs";

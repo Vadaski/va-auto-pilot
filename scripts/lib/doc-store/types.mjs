@@ -31,7 +31,9 @@
  *   managedRoots: string[],
  *   entries: Record<string, DocumentRecord>,
  *   lastUpdated?: string,
- *   extensions: Record<string, unknown>
+ *   relations?: Array<{ from: string, to: string, relation: string, strength?: 'weak' | 'strong' }>,
+ *   extensions: Record<string, unknown>,
+ *   extra?: Record<string, unknown>
  * }} StoreIndex
  *
  * @typedef {{

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-04-04T19:29:41.069Z",
+  "updatedAt": "2026-04-14T20:02:58.060Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -1135,6 +1135,322 @@
         "shouldPassRate": ""
       },
       "dependsOn": []
+    },
+    {
+      "id": "AP-040",
+      "title": "Sprint 2-bis: refactor enforce-staged = runDoctorOnSnapshot(stagedConfig, stagedIndex) + checkStagedDiff, resolving B14/B15/B16",
+      "priority": "P0",
+      "state": "Done",
+      "owner": "",
+      "source": "Sprint 2 post-review, design doc §24 item 7",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T17:57:37.902Z",
+      "completedAt": "2026-04-14T18:54:54.481Z",
+      "lastFailedAt": "2026-04-14T18:43:28.174Z",
+      "failCount": 0,
+      "reason": "Reset after parser fix + timeout bump",
+      "verification": "Sprint 2-bis refactor: enforce-staged=runDoctorOnSnapshot+checkStagedDiff; 43/43 mode tests including B14/B15/B16 regression cases; committed 98fe458 (loop misclassified as review-fail due to codex review unstructured output)",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot dispatch",
+        "hypothesis": "Fix dispatch failed: exitCode=1",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-041",
+      "title": "Sprint 1-bis B11: decide archive-with-live-inboundRefs policy (strict reject vs permissive retarget), implement + tests",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "Sprint 1 round-6 review, design doc §24 item 6",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T17:57:37.662Z",
+      "completedAt": "2026-04-14T18:54:54.564Z",
+      "lastFailedAt": "2026-04-14T18:23:29.335Z",
+      "failCount": 0,
+      "reason": "Reset after parser fix + timeout bump",
+      "verification": "B11 archiveDocument rejects targets with live inboundRefs; Sprint 1 tests 38/38 green; committed 98fe458 (loop misclassified as dispatch-fail)",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot dispatch",
+        "hypothesis": "Dispatch failed: exitCode=1",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-042",
+      "title": "Sprint 1-bis B12: linkDocuments strength-aware dedup; weak→strong upgrade replaces outbound, inbound stays consistent",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "Sprint 1 round-6 review, design doc §24 item 6",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T17:57:37.740Z",
+      "completedAt": "2026-04-14T18:54:54.645Z",
+      "lastFailedAt": "2026-04-14T18:31:15.648Z",
+      "failCount": 0,
+      "reason": "Reset after parser fix + timeout bump",
+      "verification": "B12 linkDocuments strength-aware upsert (weak->strong replaces outbound); Sprint 1 tests 38/38 green; committed 98fe458",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot dispatch",
+        "hypothesis": "Dispatch failed: exitCode=1",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-043",
+      "title": "Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash",
+      "priority": "P2",
+      "state": "Done",
+      "owner": "",
+      "source": "Sprint 1 round-6 review, design doc §24 item 6",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T19:28:56.558Z",
+      "completedAt": "2026-04-14T19:58:27.739Z",
+      "lastFailedAt": "2026-04-14T19:36:42.779Z",
+      "failCount": 1,
+      "reason": "",
+      "verification": "typecheck clean, lint clean (1 pre-existing warning), check:units 222/222 pass, check:doc-store 53/53 pass, check:doc-store-mode 47/47 pass, check:cli-flows PASS, validate:distribution PASS",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot build",
+        "hypothesis": "\n> va-auto-pilot@0.1.1 check:all\n> npm run check && npm run check:sprint && npm run check:units && npm run check:doc-store && npm run check:doc-store-mode && npm run check:cli-flows && npm run validate:distribution\n\n\n> va-auto-pilot@0.1.1 check\n> node ./bin/va-auto-pilot.mjs --help\n\nva-auto-pilot\n\nUsage:\n  va-auto-pilot init [target-dir] [options]\n  va-auto-pilot upgrade [target-dir] [options]\n  va-auto-pilot run [target-dir] [options]\n  va-auto-pilot --help\n\nCommands:\n  init      Scaffold a new",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-044",
+      "title": "Sprint 3: implement adoptDocument() / importLegacyDocument() SDK + CLI for bringing bare files into the managed store",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "design doc §13 Legacy Adoption",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T17:57:37.822Z",
+      "completedAt": "2026-04-14T19:28:25.604Z",
+      "lastFailedAt": "2026-04-14T18:59:37.107Z",
+      "failCount": 0,
+      "reason": "adopt implementation exists but test in non-git tmpdir fails at git mv; needs tmpdir git init or fs.rename fallback",
+      "verification": "Done in dogfood round 3, committed 2c9d086. See commit body for details.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot build",
+        "hypothesis": "\n> va-auto-pilot@0.1.1 check:all\n> npm run check && npm run check:sprint && npm run check:units && npm run check:doc-store && npm run check:doc-store-mode && npm run check:cli-flows && npm run validate:distribution\n\n\n> va-auto-pilot@0.1.1 check\n> node ./bin/va-auto-pilot.mjs --help\n\nva-auto-pilot\n\nUsage:\n  va-auto-pilot init [target-dir] [options]\n  va-auto-pilot upgrade [target-dir] [options]\n  va-auto-pilot run [target-dir] [options]\n  va-auto-pilot --help\n\nCommands:\n  init      Scaffold a new",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-045",
+      "title": "Sprint 3: migrate subcommand for store-level schema migrations (§14.3 + §11 four-phase preflight/apply/verify/rollback)",
+      "priority": "P2",
+      "state": "Done",
+      "owner": "",
+      "source": "design doc §14.3 + §11",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T19:28:56.638Z",
+      "completedAt": "2026-04-14T20:02:58.059Z",
+      "lastFailedAt": "2026-04-14T19:49:01.436Z",
+      "failCount": 1,
+      "reason": "Code complete and all gates pass. Previous failure was dispatch timeout, not code issue.",
+      "verification": "All gates pass: 50/50 doc-store tests, 47/47 doc-store-mode tests, 222/222 unit tests, CLI flows PASS, lint clean, distribution valid. Implemented four-phase migration engine (preflight/apply/verify/rollback) with backup/rollback, CLI --plan-only/--from/--to support, and journal integration.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot dispatch",
+        "hypothesis": "Dispatch failed: exitCode=1 | Kimi execution exceeded 600000ms | Task too complex or kimi hung. | objective: Sprint 3: migrate subcommand for store-level schema migrations (§14.3 + §11 four-phase preflight/apply/verify/rollback)",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-046",
+      "title": "auto-pilot infra: review gate must tolerate unstructured codex output (retry/log/pass when tests+build pass) — current fail-closed causes true-positive tasks to be misclassified",
+      "priority": "P0",
+      "state": "Done",
+      "owner": "",
+      "source": "dogfood Sprint 1-bis/2-bis run",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T18:56:13.338Z",
+      "completedAt": "2026-04-14T19:28:25.692Z",
+      "lastFailedAt": "2026-04-14T19:15:54.183Z",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Done in dogfood round 3, committed 2c9d086. See commit body for details.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot dispatch",
+        "hypothesis": "Dispatch failed: exitCode=1",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-047",
+      "title": "auto-pilot infra: dispatch fail detection — when sub-agent exits !=0 but tests+build pass and code landed, treat as partial-success and run review gate only (not re-dispatch)",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "dogfood Sprint 1-bis/2-bis run",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T18:56:13.491Z",
+      "completedAt": "2026-04-14T19:28:25.785Z",
+      "lastFailedAt": "2026-04-14T19:25:10.740Z",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Done in dogfood round 3, committed 2c9d086. See commit body for details.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot dispatch",
+        "hypothesis": "Dispatch failed: exitCode=1",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-048",
+      "title": "adopt test isolation: tests must create git-init'd tmpdir or adopt should fallback fs.rename when git unavailable; also must clean up .journal/ and test-adopt-tmp/ (test leak to repo root observed)",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "AP-044 post-mortem",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T18:56:13.414Z",
+      "completedAt": "2026-04-14T19:28:25.873Z",
+      "lastFailedAt": "2026-04-14T19:23:19.158Z",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Done in dogfood round 3, committed 2c9d086. See commit body for details.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot dispatch",
+        "hypothesis": "Dispatch failed: exitCode=1",
+        "missingContext": ""
+      }
     }
-  ]
+  ],
+  "sprintStartCommit": "05306ecac0be8f24461b1832797612976ec70b86"
 }

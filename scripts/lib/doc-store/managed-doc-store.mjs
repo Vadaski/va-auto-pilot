@@ -1,10 +1,6 @@
 /**
  * Sprint 1 implementation of ManagedDocStore.
  *
- * Known limitations tracked for Sprint 1-bis (see design doc §24):
- *   B13 [P2]: crash after mirror target rewrites but before INDEX update
- *     leaves target artifacts ahead of INDEX revision after recovery.
- *
  * Single-handle-per-root invariant holds per design §10 contract.
  */
 
@@ -18,6 +14,7 @@ import { readIndex, writeIndexAtomic } from "./index-file.mjs";
 import { appendEntry } from "./journal.mjs";
 import { acquireLock, releaseLock } from "./locking.mjs";
 import { buildDefaultIndex, createRecord, createRegistry, patchRecord, syncRegistry, validateStoreVersion } from "./store-models.mjs";
+import { runMigration } from "./migration-engine.mjs";
 import { recoverPendingTransactions } from "./store-recovery.mjs";
 import { validateStore } from "./store-validation.mjs";
 import { JOURNAL_FILE, buildArtifactPath, cloneValue, ensureStoreLayout, nowIso, pathExists } from "./shared.mjs";
@@ -288,7 +285,16 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
           previousIndex = cloneValue(index);
           // Build inside the serialized mutation so subtype validation sees the latest INDEX-backed registry state.
           record = createRecord(kind, input, registry);
-          return record;
+          const stagedRecords = new Map([[record.id, record]]);
+          const mirroredTargets = syncInboundRefMirrors(
+            previousIndex,
+            stagedRecords,
+            record.id,
+            [],
+            record.refs,
+            "createDocument target is archived"
+          );
+          return { ...record, ref: record.id, mirroredTargetRefs: [...mirroredTargets] };
         },
         async () => {
           if (!record || !previousIndex) throw new DocStoreError("Create mutation missing state.", { code: "MUTATION_STATE_MISSING" });
@@ -340,7 +346,16 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
         async () => {
           previousIndex = cloneValue(index);
           ({ record } = await buildLegacyImportState(filePath, options, registry));
-          return record;
+          const stagedRecords = new Map([[record.id, record]]);
+          const mirroredTargets = syncInboundRefMirrors(
+            previousIndex,
+            stagedRecords,
+            record.id,
+            [],
+            record.refs,
+            "importLegacyDocument target is archived"
+          );
+          return { ...record, ref: record.id, mirroredTargetRefs: [...mirroredTargets] };
         },
         async () => {
           if (!record || !previousIndex) throw new DocStoreError("Import mutation missing state.", { code: "MUTATION_STATE_MISSING" });
@@ -396,7 +411,16 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
           const state = await buildLegacyImportState(filePath, options, registry);
           sourceContent = state.content;
           record = state.record;
-          return record;
+          const stagedRecords = new Map([[record.id, record]]);
+          const mirroredTargets = syncInboundRefMirrors(
+            previousIndex,
+            stagedRecords,
+            record.id,
+            [],
+            record.refs,
+            "adoptDocument target is archived"
+          );
+          return { ...record, ref: record.id, mirroredTargetRefs: [...mirroredTargets] };
         },
         async () => {
           if (!record || !previousIndex) throw new DocStoreError("Adopt mutation missing state.", { code: "MUTATION_STATE_MISSING" });
@@ -465,7 +489,16 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
           const current = previousIndex.entries[ref];
           if (!current) throw new DanglingReferenceError(ref, ref);
           next = patchRecord(current, patch, registry);
-          return { ref, path: next.path, revision: next.revision };
+          const stagedRecords = new Map([[ref, next]]);
+          const mirroredTargets = syncInboundRefMirrors(
+            previousIndex,
+            stagedRecords,
+            ref,
+            current.refs,
+            next.refs,
+            "updateDocument target is archived"
+          );
+          return { ref, path: next.path, revision: next.revision, mirroredTargetRefs: [...mirroredTargets] };
         },
         async () => {
           if (!next || !previousIndex) throw new DocStoreError("Update mutation missing state.", { code: "MUTATION_STATE_MISSING" });
@@ -579,6 +612,22 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
           if (to.archived) {
             throw new ArchiveImmutableError(toRef, "linkDocuments target is archived");
           }
+          const outbound = { to: toRef, relation, strength: "strong" };
+          const previousRefs = from.refs;
+          const nextRefs = upsertStrongRelation(previousRefs, outbound);
+          const stagedRecords = new Map([[fromRef, from]]);
+          const mirroredTargets = nextRefs !== previousRefs
+            ? [
+                ...syncInboundRefMirrors(
+                  previousIndex,
+                  stagedRecords,
+                  fromRef,
+                  previousRefs,
+                  nextRefs,
+                  "linkDocuments target is archived"
+                )
+              ]
+            : [];
           return {
             ref: fromRef,
             toRef,
@@ -586,7 +635,8 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
             path: from.path,
             toPath: to.path,
             revision: from.revision + 1,
-            toRevision: to.revision + 1
+            toRevision: to.revision + 1,
+            mirroredTargetRefs: [...mirroredTargets]
           };
         },
         async () => {
@@ -659,6 +709,10 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
       await reloadIndex();
       return validateStore(rootPath, index);
     }
+    async function migrate(options = {}) {
+      if (closed) throw new DocStoreError("ManagedDocStore is closed.", { code: "STORE_CLOSED" });
+      return runMigration(rootPath, options);
+    }
 
     /** @param {{ name: string, kind?: string, artifactSchemaVersion?: string }} spec */
     async function registerExtensionType(spec) {
@@ -716,6 +770,7 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
       getIndex,
       query,
       validate,
+      migrate,
       registerExtensionType,
       unregisterExtensionType,
       createDesign: (input) => createDocument("design", input),

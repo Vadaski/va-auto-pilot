@@ -24,6 +24,16 @@ async function restoreRecordArtifact(rootPath, record, fallbackPath = "") {
   await removeArtifactAt(rootPath, fallbackPath);
 }
 
+async function restoreMirroredTargets(rootPath, index, mirroredTargetRefs) {
+  if (!Array.isArray(mirroredTargetRefs)) {
+    return;
+  }
+  for (const targetRef of mirroredTargetRefs) {
+    const targetRecord = index.entries[targetRef] ?? null;
+    await restoreRecordArtifact(rootPath, targetRecord, targetRecord?.path ?? "");
+  }
+}
+
 function hydrateRecoveredRecord(record, artifactBody, artifactPath) {
   return {
     ...(record ?? { managed: true }),
@@ -57,10 +67,12 @@ export async function recoverPendingTransactions(journalPath, indexPath, rootPat
       const committed = Boolean(record && pendingRevision !== null && record.revision >= pendingRevision);
       if (committed) {
         await restoreRecordArtifact(rootPath, record, expectedPath);
+        await restoreMirroredTargets(rootPath, index, entry.payload.mirroredTargetRefs);
         status = "committed";
       } else {
         // Recovery prefers rolling artifacts back to the last durable INDEX snapshot for in-place mutations.
         await restoreRecordArtifact(rootPath, record, expectedPath);
+        await restoreMirroredTargets(rootPath, index, entry.payload.mirroredTargetRefs);
       }
     } else if (entry.op === "link" && ref && typeof entry.payload.toRef === "string") {
       const toRef = entry.payload.toRef;
@@ -71,10 +83,12 @@ export async function recoverPendingTransactions(journalPath, indexPath, rootPat
       if (fromCommitted && toCommitted) {
         await restoreRecordArtifact(rootPath, fromRecord, expectedPath);
         await restoreRecordArtifact(rootPath, toRecord, typeof entry.payload.toPath === "string" ? entry.payload.toPath : "");
+        await restoreMirroredTargets(rootPath, index, entry.payload.mirroredTargetRefs);
         status = "committed";
       } else {
         await restoreRecordArtifact(rootPath, fromRecord, expectedPath);
         await restoreRecordArtifact(rootPath, toRecord, typeof entry.payload.toPath === "string" ? entry.payload.toPath : "");
+        await restoreMirroredTargets(rootPath, index, entry.payload.mirroredTargetRefs);
       }
     } else if (entry.op === "archive" && ref) {
       const pendingRevision = revisionOf(entry.payload.revision);
@@ -104,12 +118,15 @@ export async function recoverPendingTransactions(journalPath, indexPath, rootPat
       }
     } else if (ref) {
       if (indexMatches && artifactExists) {
+        await restoreMirroredTargets(rootPath, index, entry.payload.mirroredTargetRefs);
         status = "committed";
       } else if (!indexMatches && artifactExists) {
         await removeArtifactAt(rootPath, artifactPath);
+        await restoreMirroredTargets(rootPath, index, entry.payload.mirroredTargetRefs);
       } else if (indexMatches && !artifactExists) {
         delete index.entries[ref];
         await writeIndexAtomic(indexPath, index);
+        await restoreMirroredTargets(rootPath, index, entry.payload.mirroredTargetRefs);
       }
     } else if (
       entry.op === "register-extension-type" &&

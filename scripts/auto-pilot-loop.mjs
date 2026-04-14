@@ -728,7 +728,7 @@ async function runPitfallAwareReviewGate(gate, opts) {
   /** @type {{ output: string, hardFailure: boolean, failureReason: string, stderr: string }} */
   let reviewRun = { output: "", hardFailure: false, failureReason: "", stderr: "" };
   /** @type {{ findings: ReturnType<typeof parseReviewFindings>, status: string | null, hasStructuredFindings: boolean, hasBlockingEvidence: boolean }} */
-  let assessment = assessReviewGateOutput("");
+  let assessment;
 
   for (let attempt = 0; attempt < prompts.length; attempt += 1) {
     reviewRun = await executeReviewAttempt(prompts[attempt]);

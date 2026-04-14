@@ -40,7 +40,7 @@ function latestJournalEntries(entries) {
   return [...new Map(entries.map((entry) => [entry.txId, entry])).values()];
 }
 
-async function readSchemaVersion(schemaPath) {
+export async function readSchemaVersion(schemaPath) {
   try {
     return (await fs.readFile(schemaPath, "utf8")).trim();
   } catch (error) {
@@ -51,7 +51,7 @@ async function readSchemaVersion(schemaPath) {
   }
 }
 
-async function writeSchemaVersion(schemaPath, version) {
+export async function writeSchemaVersion(schemaPath, version) {
   await fs.writeFile(schemaPath, `${version}\n`, "utf8");
 }
 

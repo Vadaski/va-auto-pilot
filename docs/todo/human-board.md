@@ -8,6 +8,17 @@
 
 ## Instructions (highest priority)
 
+- [ ] DocStore 打磨至生产级：AP-040..AP-045 是 Sprint 1-bis / 2-bis / 3 的落地任务。
+  每轮 codex review 发现的深层 bug 必须：①转化为 pitfall 记录（sprint-board pitfall add）
+  ②若是一类问题则补 adaptive gate（suggest-gate 出 YAML 建议）③重大设计裂缝写回
+  `docs/designs/doc-store-api-draft.md` §24。目标：跑到 backlog 空或 max-cycles 达到，
+  而不仅是单个任务完成。Sprint 3 的 genesis phase 2/3（用 adopt/import 把设计稿自身
+  迁进 .docstore/）完成后才算这轮收官。
+  
+  关键预置 acceptance（写进每个 delegation prompt）：API 防御（幂等 + garbage input）、
+  崩溃恢复完整性（磁盘/INDEX/journal 三态一致）、并发边界（single-handle 契约）、
+  对称镜像（双向结构双入口测）。见 ~/.claude/CLAUDE.md "Review 循环收敛判据"。
+
 - [x] 要设计更新机制，对未来本协议升级的兼容性要考虑到
 > Processed 2026-02-23: AP-015 complete. Added `va-auto-pilot upgrade` command with version tracking (version.json with schemaVersion), file classification (always-overwrite scripts, never-overwrite user state, merge-aware templates), token resolution from existing config.yaml, and upgrade-in-progress sentinel for crash detection. Two-perspective review (operator + security auditor): 4 CRITICALs found and fixed. 10 upgrade CLI flow tests. All gates pass.
 

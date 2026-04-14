@@ -33,6 +33,171 @@
       "resolution": "blender_backend.py 已调用 blender --background --python 真实后端，无任何 Python 重实现。PF 条件在 HUB-16 Task C 中已作为硬约束落地。",
       "resolvedAt": "2026-03-25T16:21:36.024Z",
       "createdAt": "2026-03-12T04:44:07.797Z"
+    },
+    {
+      "id": "PF-004",
+      "taskId": "AP-041",
+      "failureType": "gate",
+      "attempted": "Dispatch failed: exitCode=1",
+      "hypothesis": "Dispatch failed: exitCode=1",
+      "missingContext": "Dispatch failed: exitCode=1",
+      "resolution": "Root cause: human-board parser counted all non-checkbox bullets as active instructions (31 injected), plus 10min dispatch timeout too short for Sprint-level tasks. Parser fixed (require [ ]/[x] checkbox), dispatch timeout raised to 45min.",
+      "resolvedAt": "2026-04-14T18:17:10.944Z",
+      "createdAt": "2026-04-14T18:07:42.947Z"
+    },
+    {
+      "id": "PF-005",
+      "taskId": "AP-042",
+      "failureType": "gate",
+      "attempted": "Dispatch failed: exitCode=1",
+      "hypothesis": "Dispatch failed: exitCode=1",
+      "missingContext": "Dispatch failed: exitCode=1",
+      "resolution": "Root cause: human-board parser counted all non-checkbox bullets as active instructions (31 injected), plus 10min dispatch timeout too short for Sprint-level tasks. Parser fixed (require [ ]/[x] checkbox), dispatch timeout raised to 45min.",
+      "resolvedAt": "2026-04-14T18:17:11.024Z",
+      "createdAt": "2026-04-14T18:07:43.098Z"
+    },
+    {
+      "id": "PF-006",
+      "taskId": "AP-044",
+      "failureType": "gate",
+      "attempted": "Dispatch failed: exitCode=1",
+      "hypothesis": "Dispatch failed: exitCode=1",
+      "missingContext": "Dispatch failed: exitCode=1",
+      "resolution": "Root cause: human-board parser counted all non-checkbox bullets as active instructions (31 injected), plus 10min dispatch timeout too short for Sprint-level tasks. Parser fixed (require [ ]/[x] checkbox), dispatch timeout raised to 45min.",
+      "resolvedAt": "2026-04-14T18:17:11.102Z",
+      "createdAt": "2026-04-14T18:07:43.317Z"
+    },
+    {
+      "id": "PF-007",
+      "taskId": "AP-040",
+      "failureType": "gate",
+      "attempted": "Dispatch failed: exitCode=1",
+      "hypothesis": "Dispatch failed: exitCode=1",
+      "missingContext": "Dispatch failed: exitCode=1",
+      "resolution": "Root cause: human-board parser counted all non-checkbox bullets as active instructions (31 injected), plus 10min dispatch timeout too short for Sprint-level tasks. Parser fixed (require [ ]/[x] checkbox), dispatch timeout raised to 45min.",
+      "resolvedAt": "2026-04-14T18:17:11.178Z",
+      "createdAt": "2026-04-14T18:07:43.456Z"
+    },
+    {
+      "id": "PF-008",
+      "taskId": "AP-041",
+      "failureType": "gate",
+      "attempted": "Dispatch failed: exitCode=1",
+      "hypothesis": "Dispatch failed: exitCode=1",
+      "missingContext": "Dispatch failed: exitCode=1",
+      "resolution": "Sprint 1-bis/2-bis run: sub-agents completed code+tests, but loop misclassified due to (a) codex review returning unstructured output → review gate fail-closed, and (b) sub-agent exit 1 for unrelated reasons (adopt test git mv in non-git tmpdir). Actual code landed; manually committed as 98fe458. Seeded AP-046/047/048 to self-heal these infra gaps.",
+      "resolvedAt": "2026-04-14T18:56:10.962Z",
+      "createdAt": "2026-04-14T18:23:29.414Z"
+    },
+    {
+      "id": "PF-009",
+      "taskId": "AP-040",
+      "failureType": "review",
+      "attempted": "review gate failed: empty output",
+      "hypothesis": "review gate failed: empty output",
+      "missingContext": "review gate failed: empty output",
+      "resolution": "Sprint 1-bis/2-bis run: sub-agents completed code+tests, but loop misclassified due to (a) codex review returning unstructured output → review gate fail-closed, and (b) sub-agent exit 1 for unrelated reasons (adopt test git mv in non-git tmpdir). Actual code landed; manually committed as 98fe458. Seeded AP-046/047/048 to self-heal these infra gaps.",
+      "resolvedAt": "2026-04-14T18:56:11.039Z",
+      "createdAt": "2026-04-14T18:28:53.320Z"
+    },
+    {
+      "id": "PF-010",
+      "taskId": "AP-042",
+      "failureType": "gate",
+      "attempted": "Dispatch failed: exitCode=1",
+      "hypothesis": "Dispatch failed: exitCode=1",
+      "missingContext": "Dispatch failed: exitCode=1",
+      "resolution": "Sprint 1-bis/2-bis run: sub-agents completed code+tests, but loop misclassified due to (a) codex review returning unstructured output → review gate fail-closed, and (b) sub-agent exit 1 for unrelated reasons (adopt test git mv in non-git tmpdir). Actual code landed; manually committed as 98fe458. Seeded AP-046/047/048 to self-heal these infra gaps.",
+      "resolvedAt": "2026-04-14T18:56:11.115Z",
+      "createdAt": "2026-04-14T18:31:15.741Z"
+    },
+    {
+      "id": "PF-011",
+      "taskId": "AP-044",
+      "failureType": "gate",
+      "attempted": "Dispatch failed: exitCode=1",
+      "hypothesis": "Dispatch failed: exitCode=1",
+      "missingContext": "Dispatch failed: exitCode=1",
+      "resolution": "Sprint 1-bis/2-bis run: sub-agents completed code+tests, but loop misclassified due to (a) codex review returning unstructured output → review gate fail-closed, and (b) sub-agent exit 1 for unrelated reasons (adopt test git mv in non-git tmpdir). Actual code landed; manually committed as 98fe458. Seeded AP-046/047/048 to self-heal these infra gaps.",
+      "resolvedAt": "2026-04-14T18:56:11.192Z",
+      "createdAt": "2026-04-14T18:37:27.998Z"
+    },
+    {
+      "id": "PF-012",
+      "taskId": "AP-040",
+      "failureType": "gate",
+      "attempted": "Fix dispatch failed: exitCode=1",
+      "hypothesis": "Fix dispatch failed: exitCode=1",
+      "missingContext": "Fix dispatch failed: exitCode=1",
+      "resolution": "Sprint 1-bis/2-bis run: sub-agents completed code+tests, but loop misclassified due to (a) codex review returning unstructured output → review gate fail-closed, and (b) sub-agent exit 1 for unrelated reasons (adopt test git mv in non-git tmpdir). Actual code landed; manually committed as 98fe458. Seeded AP-046/047/048 to self-heal these infra gaps.",
+      "resolvedAt": "2026-04-14T18:56:11.266Z",
+      "createdAt": "2026-04-14T18:43:28.249Z"
+    },
+    {
+      "id": "PF-013",
+      "taskId": "AP-044",
+      "failureType": "gate",
+      "attempted": "va-auto-pilot | Usage: | va-auto-pilot init [target-dir] [options]",
+      "hypothesis": "va-auto-pilot | Usage: | va-auto-pilot init [target-dir] [options]",
+      "missingContext": "",
+      "resolution": "Dogfood round 3: tasks AP-044/046/047/048 actually completed code+tests, but pre-AP-046 review gate misclassified them. Manually committed as 2c9d086. Self-healed by AP-046 going forward.",
+      "resolvedAt": "2026-04-14T19:28:54.359Z",
+      "createdAt": "2026-04-14T18:59:37.194Z"
+    },
+    {
+      "id": "PF-014",
+      "taskId": "AP-046",
+      "failureType": "gate",
+      "attempted": "Dispatch failed: exitCode=1",
+      "hypothesis": "Dispatch failed: exitCode=1",
+      "missingContext": "Dispatch failed: exitCode=1",
+      "resolution": "Dogfood round 3: tasks AP-044/046/047/048 actually completed code+tests, but pre-AP-046 review gate misclassified them. Manually committed as 2c9d086. Self-healed by AP-046 going forward.",
+      "resolvedAt": "2026-04-14T19:28:54.441Z",
+      "createdAt": "2026-04-14T19:15:54.281Z"
+    },
+    {
+      "id": "PF-015",
+      "taskId": "AP-048",
+      "failureType": "gate",
+      "attempted": "Dispatch failed: exitCode=1",
+      "hypothesis": "Dispatch failed: exitCode=1",
+      "missingContext": "Dispatch failed: exitCode=1",
+      "resolution": "Dogfood round 3: tasks AP-044/046/047/048 actually completed code+tests, but pre-AP-046 review gate misclassified them. Manually committed as 2c9d086. Self-healed by AP-046 going forward.",
+      "resolvedAt": "2026-04-14T19:28:54.522Z",
+      "createdAt": "2026-04-14T19:23:19.781Z"
+    },
+    {
+      "id": "PF-016",
+      "taskId": "AP-047",
+      "failureType": "gate",
+      "attempted": "Dispatch failed: exitCode=1",
+      "hypothesis": "Dispatch failed: exitCode=1",
+      "missingContext": "Dispatch failed: exitCode=1",
+      "resolution": "Dogfood round 3: tasks AP-044/046/047/048 actually completed code+tests, but pre-AP-046 review gate misclassified them. Manually committed as 2c9d086. Self-healed by AP-046 going forward.",
+      "resolvedAt": "2026-04-14T19:28:54.602Z",
+      "createdAt": "2026-04-14T19:25:10.852Z"
+    },
+    {
+      "id": "PF-017",
+      "taskId": "AP-043",
+      "failureType": "gate",
+      "attempted": "va-auto-pilot | Usage: | va-auto-pilot init [target-dir] [options]",
+      "hypothesis": "va-auto-pilot | Usage: | va-auto-pilot init [target-dir] [options]",
+      "missingContext": "",
+      "resolution": "",
+      "resolvedAt": null,
+      "createdAt": "2026-04-14T19:36:42.862Z"
+    },
+    {
+      "id": "PF-018",
+      "taskId": "AP-045",
+      "failureType": "gate",
+      "attempted": "Kimi execution exceeded 600000ms | Task too complex or kimi hung. | objective: Sprint 3: migrate subcommand for store-level schema migrations (§14.3 + §11 four-phase preflight/apply/verify/rollback)",
+      "hypothesis": "Dispatch failed: exitCode=1 | Kimi execution exceeded 600000ms | Task too complex or kimi hung. | objective: Sprint 3: migrate subcommand for store-level schema migrations (§14.3 + §11 four-phase preflight/apply/verify/rollback)",
+      "missingContext": "",
+      "resolution": "",
+      "resolvedAt": null,
+      "createdAt": "2026-04-14T19:49:02.692Z"
     }
   ]
 }

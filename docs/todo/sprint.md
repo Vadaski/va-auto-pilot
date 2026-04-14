@@ -1,6 +1,5 @@
-# Sprint Board
-
-> Last updated: 2026-04-04 by VA Auto-Pilot
+Sprint board rendered: docs/todo/sprint.md
+by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:
@@ -49,6 +48,8 @@
 | AP-028 | Auto commit：gate 通过后自动 stage + commit，消除变更堆积 | 2026-03-29 | - |
 | AP-038 | Fix fail-open review gate: reviewer timeout/failure must not silently become PASS | 2026-04-04 | Codex fix: review gate now fails closed. Timeout/crash/no-output -> passed=false. Missing REVIEW STATUS -> fail closed. 8 new regression tests. 219 tests pass. |
 | AP-039 | Fix fail-open sprint-board review: git errors suppressed, FAIL status does not cause non-zero exit | 2026-04-04 | Codex fix: sprint-board review now exits non-zero on FAIL/AMBIGUOUS. Git errors warn to stderr. 6 new regression tests. 219 tests pass. |
+| AP-040 | Sprint 2-bis: refactor enforce-staged = runDoctorOnSnapshot(stagedConfig, stagedIndex) + checkStagedDiff, resolving B14/B15/B16 | 2026-04-14 | Sprint 2-bis refactor: enforce-staged=runDoctorOnSnapshot+checkStagedDiff; 43/43 mode tests including B14/B15/B16 regression cases; committed 98fe458 (loop misclassified as review-fail due to codex review unstructured output) |
+| AP-046 | auto-pilot infra: review gate must tolerate unstructured codex output (retry/log/pass when tests+build pass) — current fail-closed causes true-positive tasks to be misclassified | 2026-04-14 | Done in dogfood round 3, committed 2c9d086. See commit body for details. |
 | AP-001 | Upgrade multi-perspective review to dynamic perspective selection | 2026-02-23 | Two cross-reviews (adversarial + protocol designer), 6 CRITICALs resolved, templates synced |
 | AP-003 | Add sprint-board.mjs add command to create tasks via CLI without hand-editing JSON | 2026-02-23 | add command implemented: auto-ID (AP-NNN), validation, depends-on, regex-safe prefix; printHelp updated; templates mirrored; all gates pass |
 | AP-004 | Add unit test suite for sprint-board.mjs pure functions | 2026-02-23 | 41/41 unit tests pass via node:test; check:units added to check:all; all gates pass |
@@ -70,6 +71,11 @@
 | AP-030 | Review 决策结构化：finding → 自动创建 fix task + 历史修复模式库 + pitfall 自动注入 delegation | 2026-03-29 | - |
 | AP-034 | Sprint 5 Task 1: Add layered journal view via journal --view | 2026-04-04 | journal --view implemented: parseJournal+renderJournalView produce layered summary (Active Signals + Recent 5 + Earlier compressed). Protocol/prompt/templates updated. 3 unit + 2 CLI flow tests. check:all passed. Commit 41cd09f. |
 | AP-035 | Sprint 5 Task 2: Make sprint completion review perspective dynamic | 2026-04-04 | spawnSprintReviewer() now accepts perspective parameter. selectSprintReviewPerspective() analyzes changedFiles for stakeholder-grounded perspectives (CLI→CI dev, auth→security eng, protocol→adopter, tests→QA). Commit 8bba575. |
+| AP-041 | Sprint 1-bis B11: decide archive-with-live-inboundRefs policy (strict reject vs permissive retarget), implement + tests | 2026-04-14 | B11 archiveDocument rejects targets with live inboundRefs; Sprint 1 tests 38/38 green; committed 98fe458 (loop misclassified as dispatch-fail) |
+| AP-042 | Sprint 1-bis B12: linkDocuments strength-aware dedup; weak→strong upgrade replaces outbound, inbound stays consistent | 2026-04-14 | B12 linkDocuments strength-aware upsert (weak->strong replaces outbound); Sprint 1 tests 38/38 green; committed 98fe458 |
+| AP-044 | Sprint 3: implement adoptDocument() / importLegacyDocument() SDK + CLI for bringing bare files into the managed store | 2026-04-14 | Done in dogfood round 3, committed 2c9d086. See commit body for details. |
+| AP-047 | auto-pilot infra: dispatch fail detection — when sub-agent exits !=0 but tests+build pass and code landed, treat as partial-success and run review gate only (not re-dispatch) | 2026-04-14 | Done in dogfood round 3, committed 2c9d086. See commit body for details. |
+| AP-048 | adopt test isolation: tests must create git-init'd tmpdir or adopt should fallback fs.rename when git unavailable; also must clean up .journal/ and test-adopt-tmp/ (test leak to repo root observed) | 2026-04-14 | Done in dogfood round 3, committed 2c9d086. See commit body for details. |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
@@ -79,6 +85,8 @@
 | AP-032 | 默认并行执行：auto-pilot-loop 从单任务循环改为任务池循环，plan 命令输出自动执行 | 2026-03-29 | - |
 | AP-036 | Sprint 5 Task 3: Move stack-specific quality gate examples out of protocol | 2026-04-04 | 5 stack-specific example sections extracted to docs/operations/quality-gate-examples.md. Protocol reduced 767→647 lines (-120). Templates synced. Commit 6dabc54. |
 | AP-037 | Sprint 5 Task 4: Inject unresolved pitfalls into evaluator review context | 2026-04-04 | sprint-board review command auto-injects stakeholder perspective + unresolved pitfalls. 9 unit tests covering perspective selection, pitfall formatting, prompt construction, full review flow. Protocol updated. Commit dc83411. |
+| AP-043 | Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash | 2026-04-14 | typecheck clean, lint clean (1 pre-existing warning), check:units 222/222 pass, check:doc-store 53/53 pass, check:doc-store-mode 47/47 pass, check:cli-flows PASS, validate:distribution PASS |
+| AP-045 | Sprint 3: migrate subcommand for store-level schema migrations (§14.3 + §11 four-phase preflight/apply/verify/rollback) | 2026-04-14 | All gates pass: 50/50 doc-store tests, 47/47 doc-store-mode tests, 222/222 unit tests, CLI flows PASS, lint clean, distribution valid. Implemented four-phase migration engine (preflight/apply/verify/rollback) with backup/rollback, CLI --plan-only/--from/--to support, and journal integration. |
 | AP-007 | Correct 'human-out-of-the-loop' framing to 'human-on-the-loop' across docs and website | 2026-02-23 | docs/human-on-the-loop.md created with updated framing; old file removed; README.md and README.zh.md references updated; all gates pass |
 | AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | 2026-03-29 | - |
 

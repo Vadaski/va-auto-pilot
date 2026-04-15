@@ -36,6 +36,7 @@ import {
   resolveDispatchFailureGate,
   detectStopCondition,
   autoCommitTask,
+  dispatchTask,
   finalizeDoneTaskCommit,
   runCycle,
   runGateSequence,
@@ -49,6 +50,7 @@ import {
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
 import { suggestGateFromPitfall, suggestGatesFromPitfalls } from "./lib/adaptive-gates.mjs";
+import { collectConstraints, formatConstraintsForPrompt } from "./lib/constraint-bridge.mjs";
 import { inferProjectGateCommands, selectProjectTestCommand } from "./lib/project-gates.mjs";
 import { withPilotFileLock } from "./lib/pilot-state.mjs";
 
@@ -106,6 +108,29 @@ function withTempFile(content, ext = ".yaml") {
   return { filePath, tmpDir };
 }
 
+async function withEnv(overrides, work) {
+  const previous = new Map();
+  for (const [key, value] of Object.entries(overrides)) {
+    previous.set(key, process.env[key]);
+    if (value === undefined || value === null) {
+      delete process.env[key];
+    } else {
+      process.env[key] = String(value);
+    }
+  }
+  try {
+    return await work();
+  } finally {
+    for (const [key, value] of previous.entries()) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
 test("readSprintPathsFromConfig returns {} for missing file", () => {
   const result = readSprintPathsFromConfig("/nonexistent/path/config.yaml");
   assert.deepEqual(result, {});
@@ -140,6 +165,174 @@ test("readSprintPathsFromConfig ignores sections other than sprint", () => {
   const result = readSprintPathsFromConfig(filePath);
   assert.equal(result.stateFile, "s.json");
   assert.equal(result.host, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// constraint bridge
+// ---------------------------------------------------------------------------
+test("collectConstraints returns engineAvailable false when flag is off without attempting engine IO", async () => {
+  await withEnv({ VA_AUTO_PILOT_CONSTRAINTS: "off" }, async () => {
+    const result = await collectConstraints("dispatch a sprint task", {
+      configEnabled: false,
+      sdkLoader: async () => {
+        throw new Error("sdk should not load when disabled");
+      },
+      cliInvoker: async () => {
+        throw new Error("cli should not run when disabled");
+      },
+    });
+    assert.equal(result.engineAvailable, false);
+    assert.deepEqual(result.constraints, []);
+    assert.deepEqual(result.blindSpots, []);
+    assert.equal(result.durationMs, 0);
+  });
+});
+
+test("collectConstraints returns graceful empty on engine error", async () => {
+  await withEnv({
+    VA_AUTO_PILOT_CONSTRAINTS: "on",
+    COLLISION_STORAGE_DIR: "/definitely/missing/collision-store",
+    VA_CONSTRAINT_GRAPH_ROOT: "/definitely/missing/constraint-graph",
+  }, async () => {
+    const result = await collectConstraints("dispatch a sprint task", {
+      configEnabled: false,
+      sdkLoader: async () => ({
+        CollisionEngineTool: class {
+          async execute() {
+            throw new Error(`storage missing: ${process.env.COLLISION_STORAGE_DIR}`);
+          }
+        }
+      }),
+      cliInvoker: async () => {
+        throw new Error(`graph root missing: ${process.env.VA_CONSTRAINT_GRAPH_ROOT}`);
+      },
+    });
+    assert.equal(result.engineAvailable, false);
+    assert.deepEqual(result.constraints, []);
+    assert.deepEqual(result.blindSpots, []);
+    assert.match(result.error, /storage missing/);
+  });
+});
+
+test("formatConstraintsForPrompt returns empty string when all sections are empty", () => {
+  assert.equal(formatConstraintsForPrompt({ constraints: [], blindSpots: [], synthesis: "" }), "");
+});
+
+test("formatConstraintsForPrompt renders a single constraint with synthesis", () => {
+  const prompt = formatConstraintsForPrompt({
+    synthesis: "Preserve API shape while landing the fix.",
+    constraints: [{
+      statement: "Do not change the public API signature.",
+      type: "boundary",
+      confidence: 0.94,
+      sourceFactorIds: ["factor-a"],
+    }],
+    blindSpots: [],
+  });
+  assert.match(prompt, /## Constraints \(hard rules first\)/);
+  assert.match(prompt, /Synthesis: Preserve API shape while landing the fix\./);
+  assert.match(prompt, /\[boundary\] Do not change the public API signature\./);
+  assert.match(prompt, /sources: factor-a/);
+});
+
+test("formatConstraintsForPrompt sorts multiple constraints and appends blind spots", () => {
+  const prompt = formatConstraintsForPrompt({
+    constraints: [
+      { statement: "Avoid hidden coupling.", type: "anti-pattern", confidence: 0.61 },
+      { statement: "Keep writes idempotent.", type: "invariant", confidence: 0.89 },
+      { statement: "Do not cross the process boundary.", type: "boundary", confidence: 0.97 },
+    ],
+    blindSpots: ["No concurrency guidance available."],
+  });
+  const boundaryIndex = prompt.indexOf("[boundary]");
+  const invariantIndex = prompt.indexOf("[invariant]");
+  const antiPatternIndex = prompt.indexOf("[anti-pattern]");
+  assert.ok(boundaryIndex >= 0 && invariantIndex >= 0 && antiPatternIndex >= 0, prompt);
+  assert.ok(boundaryIndex < invariantIndex, prompt);
+  assert.ok(invariantIndex < antiPatternIndex, prompt);
+  assert.match(prompt, /## Blind spots \(not covered — use judgment\)/);
+  assert.match(prompt, /No concurrency guidance available\./);
+});
+
+test("dispatchTask injects constraint prompt sections when bridge returns content", async () => {
+  const task = {
+    id: "AP-CI-1",
+    title: "Inject constraints into the delegate prompt",
+    notes: "Task note",
+    priority: "P1",
+    dependsOn: [],
+  };
+  const pitfallContext = "\n--- HARD CONSTRAINTS (pitfall guide) ---\n- Known pitfall: prior fix regressed tests -- retry failed\n---";
+  const humanBoardBlock = "Explicitly acknowledge the board before coding.";
+  let capturedTrack = null;
+  const bridge = {
+    async dispatch(track) {
+      capturedTrack = track;
+      return { taskId: track.taskId, success: true, durationMs: 12 };
+    }
+  };
+  await dispatchTask(task, bridge, pitfallContext, humanBoardBlock, {
+    agentTemplate: "echo {taskId}",
+    trackTimeout: 1_000,
+    constraintBridge: {
+      collectConstraints: async () => ({
+        engineAvailable: true,
+        constraints: [{
+          statement: "Do not expand the write surface.",
+          type: "boundary",
+          confidence: 0.93,
+        }],
+        blindSpots: ["No migration guidance found."],
+        synthesis: "Keep this change on the read path.",
+        durationMs: 42,
+      }),
+      formatConstraintsForPrompt,
+    },
+  });
+
+  assert.equal(capturedTrack.title, task.title);
+  assert.match(capturedTrack.notes, /## Constraints \(hard rules first\)/);
+  assert.match(capturedTrack.notes, /Keep this change on the read path\./);
+  assert.match(capturedTrack.notes, /## Blind spots \(not covered — use judgment\)/);
+  assert.match(capturedTrack.notes, /## Pitfalls/);
+  assert.match(capturedTrack.notes, /Known pitfall: prior fix regressed tests -- retry failed/);
+  assert.match(capturedTrack.notes, /## Human-board/);
+  assert.match(capturedTrack.notes, /Explicitly acknowledge the board before coding\./);
+});
+
+test("dispatchTask keeps the legacy prompt layout when constraint injection is empty", async () => {
+  const task = {
+    id: "AP-CI-2",
+    title: "Leave the prompt unchanged",
+    notes: "Task note",
+    priority: "P2",
+    dependsOn: [],
+  };
+  const pitfallContext = "\n--- HARD CONSTRAINTS (pitfall guide) ---\n- Known pitfall: unchanged baseline -- retry failed\n---";
+  const humanBoardBlock = "Board instruction";
+  let capturedTrack = null;
+  const bridge = {
+    async dispatch(track) {
+      capturedTrack = track;
+      return { taskId: track.taskId, success: true, durationMs: 10 };
+    }
+  };
+  await dispatchTask(task, bridge, pitfallContext, humanBoardBlock, {
+    agentTemplate: "echo {taskId}",
+    trackTimeout: 1_000,
+    constraintBridge: {
+      collectConstraints: async () => ({
+        engineAvailable: false,
+        constraints: [],
+        blindSpots: [],
+        durationMs: 0,
+      }),
+      formatConstraintsForPrompt: () => "",
+    },
+  });
+
+  assert.equal(capturedTrack.title, task.title + pitfallContext);
+  assert.equal(capturedTrack.notes, `${task.notes}\n\n${humanBoardBlock}`);
 });
 
 // ---------------------------------------------------------------------------

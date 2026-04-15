@@ -36,6 +36,10 @@ import {
   resolveHumanBoardPath
 } from "./lib/human-board.mjs";
 import { ColonyBridge } from "./lib/colony-bridge.mjs";
+import {
+  collectConstraints as defaultCollectConstraints,
+  formatConstraintsForPrompt as defaultFormatConstraintsForPrompt
+} from "./lib/constraint-bridge.mjs";
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./lib/pilot-state.mjs";
@@ -863,13 +867,38 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
   const template = opts.agentTemplate.replace("{taskId}", task.id);
   const logDir = path.resolve(".va-auto-pilot/parallel-runs");
   const logFile = path.join(logDir, `${task.id}-${Date.now()}.log`);
-  const notes = [task.notes, humanBoardBlock].filter(Boolean).join("\n\n");
+  const defaultNotes = [task.notes, humanBoardBlock].filter(Boolean).join("\n\n");
+  let title = task.title + (pitfallContext ? pitfallContext : "");
+  let notes = defaultNotes;
+
+  /** @internal test-only bridge override for deterministic prompt assertions. */
+  const constraintBridge = opts.constraintBridge ?? {};
+  const collectTaskConstraints = constraintBridge.collectConstraints ?? defaultCollectConstraints;
+  const formatTaskConstraints = constraintBridge.formatConstraintsForPrompt ?? defaultFormatConstraintsForPrompt;
+  const constraintResult = await collectTaskConstraints(`${task.title}\n${task.notes ?? ""}`, { maxFactors: 5 });
+  const constraintBlock = formatTaskConstraints(constraintResult);
+
+  if (constraintBlock) {
+    const pitfallBlock = pitfallContext
+      ? `## Pitfalls\n${pitfallContext
+        .replace(/^\s*--- HARD CONSTRAINTS \(pitfall guide\) ---\s*/, "")
+        .replace(/\s*---\s*$/, "")
+        .trim()}`
+      : "";
+    const humanBoardSection = humanBoardBlock ? `## Human-board\n${humanBoardBlock}` : "";
+    notes = [task.notes, constraintBlock, pitfallBlock, humanBoardSection].filter(Boolean).join("\n\n");
+    title = task.title;
+    log(
+      opts,
+      `  constraint injection: ${constraintResult.constraints.length} constraints + ${constraintResult.blindSpots.length} blind spots (${constraintResult.durationMs}ms)`
+    );
+  }
 
   const scope = await computeTaskScope(opts);
   const track = {
     taskId: task.id,
     command: template,
-    title: task.title + (pitfallContext ? pitfallContext : ""),
+    title,
     priority: task.priority,
     dependsOn: task.dependsOn,
     notes,
@@ -2480,6 +2509,7 @@ export {
   detectStopCondition,
   autoCommitTask,
   finalizeDoneTaskCommit,
+  dispatchTask,
   extractCreatedTaskId,
   createReviewFixTasks,
   executeSingleTask,

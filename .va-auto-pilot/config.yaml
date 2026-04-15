@@ -15,11 +15,6 @@ qualityGate:
     screenshotDir: .va-auto-pilot/screenshots
     criticalPaths: []
   adaptiveGates:
-    - name: npm-test
-      command: npm test
-      required: true
-      description: "Suggested from pitfall PF-001: tests broken"
-      triggeredBy: PF-001
     - name: dispatch-failed
       command: 'echo "TODO: implement gate for PF-004"'
       required: true
@@ -86,6 +81,77 @@ qualityGate:
       required: true
       description: "Suggested from pitfall PF-016: Dispatch failed: exitCode=1"
       triggeredBy: PF-016
+    - name: auto-pilot
+      command: 'echo "TODO: implement gate for PF-017"'
+      required: true
+      description: "Suggested from pitfall PF-017: va-auto-pilot | Usage: |
+        va-auto-pilot init [target-dir] [options]"
+      triggeredBy: PF-017
+    - name: kimi-execution
+      command: 'echo "TODO: implement gate for PF-018"'
+      required: true
+      description: "Suggested from pitfall PF-018: Dispatch failed: exitCode=1 | Kimi
+        execution exceeded 600000ms | Task too complex or kimi hung. |
+        objective: Sprint 3: migrate subcommand for store-level schema
+        migrations (§14.3 + §11 four-phase preflight/apply/verify/rollback)"
+      triggeredBy: PF-018
+    - name: npm-test
+      command: npm run validate:distribution
+      required: true
+      description: "Suggested from pitfall PF-001: tests broken"
+      triggeredBy: PF-001
+    - name: codex-completed
+      command: 'echo "TODO: implement gate for PF-022"'
+      required: true
+      description: 'Suggested from pitfall PF-022: Fix dispatch failed: exitCode=1 |
+        Codex completed but gate "undefined" failed | Gate check failed |
+        objective: Sprint 1-bis B13: recovery rolls back target artifacts
+        touched by refs mirror mid-update crash'
+      triggeredBy: PF-022
+    - name: auto-pilot
+      command: 'echo "TODO: implement gate for PF-023"'
+      required: true
+      description: "Suggested from pitfall PF-023: va-auto-pilot | Usage: |
+        va-auto-pilot init [target-dir] [options]"
+      triggeredBy: PF-023
+    - name: auto-pilot
+      command: 'echo "TODO: implement gate for PF-024"'
+      required: true
+      description: "Suggested from pitfall PF-024: va-auto-pilot | Usage: |
+        va-auto-pilot init [target-dir] [options]"
+      triggeredBy: PF-024
+    - name: codex-completed
+      command: npm run check:units
+      required: true
+      description: "Suggested from pitfall PF-025: Dispatch failed: exitCode=1 | Codex
+        completed but gate \"undefined\" failed | Gate check failed | objective:
+        auto-pilot infra: suggest-gate and sprint prompts must read project's
+        actual package.json test script (not hardcode 'npm test'); generalize
+        for any stack"
+      triggeredBy: PF-025
+    - name: codex-completed
+      command: codex review --uncommitted
+      required: true
+      description: "Suggested from pitfall PF-026: Dispatch failed: exitCode=1 | Codex
+        completed but gate \"undefined\" failed | Gate check failed | objective:
+        auto-pilot infra: gate name 'undefined' in fix-and-retest path — review
+        gate context propagation bug; emit real gate id to journal for
+        diagnosability"
+      triggeredBy: PF-026
+    - name: npm-error
+      command: npm run check:units
+      required: true
+      description: 'Suggested from pitfall PF-028: npm error Missing script: "test" |
+        npm error | npm error To see a list of scripts, run:'
+      triggeredBy: PF-028
+    - name: codex-completed
+      command: 'echo "TODO: implement gate for PF-030"'
+      required: true
+      description: 'Suggested from pitfall PF-030: Fix dispatch failed: exitCode=1 |
+        Codex completed but gate "undefined" failed | Gate check failed |
+        objective: Sprint 1-bis B13: recovery rolls back target artifacts
+        touched by refs mirror mid-update crash'
+      triggeredBy: PF-030
 review:
   domainRoleName: Domain Expert
   domainPrompt: You are the domain expert for this product. Review behavioral

@@ -7,8 +7,13 @@
  */
 
 import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const child = spawn(process.execPath, ["scripts/doc-store-cli.mjs", "enforce-staged"], {
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const cliPath = path.join(scriptDir, "doc-store-cli.mjs");
+
+const child = spawn(process.execPath, [cliPath, "enforce-staged"], {
   stdio: "inherit"
 });
 

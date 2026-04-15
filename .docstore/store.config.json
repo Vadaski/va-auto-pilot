@@ -1,0 +1,14 @@
+{
+  "adoptionPolicy": {
+    "leaveLegacyStubWhenMoved": true,
+    "preferGitMove": true
+  },
+  "legacyRoots": [],
+  "managedRoots": [
+    ".docstore/designs",
+    ".docstore/decisions",
+    ".docstore/process"
+  ],
+  "mode": "mixed",
+  "trackedExternalPaths": []
+}

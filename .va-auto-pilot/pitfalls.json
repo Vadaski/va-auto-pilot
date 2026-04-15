@@ -184,8 +184,8 @@
       "attempted": "va-auto-pilot | Usage: | va-auto-pilot init [target-dir] [options]",
       "hypothesis": "va-auto-pilot | Usage: | va-auto-pilot init [target-dir] [options]",
       "missingContext": "",
-      "resolution": "",
-      "resolvedAt": null,
+      "resolution": "Dogfood round 4 artifact. AP-043/AP-045 actually completed (committed d199904). Meta-bugs captured: npm test assumption (→AP-049), kimi routing for complex tasks (→AP-050), gate name propagation (→AP-051).",
+      "resolvedAt": "2026-04-14T20:26:01.717Z",
       "createdAt": "2026-04-14T19:36:42.862Z"
     },
     {
@@ -195,9 +195,185 @@
       "attempted": "Kimi execution exceeded 600000ms | Task too complex or kimi hung. | objective: Sprint 3: migrate subcommand for store-level schema migrations (§14.3 + §11 four-phase preflight/apply/verify/rollback)",
       "hypothesis": "Dispatch failed: exitCode=1 | Kimi execution exceeded 600000ms | Task too complex or kimi hung. | objective: Sprint 3: migrate subcommand for store-level schema migrations (§14.3 + §11 four-phase preflight/apply/verify/rollback)",
       "missingContext": "",
+      "resolution": "Dogfood round 4 artifact. AP-043/AP-045 actually completed (committed d199904). Meta-bugs captured: npm test assumption (→AP-049), kimi routing for complex tasks (→AP-050), gate name propagation (→AP-051).",
+      "resolvedAt": "2026-04-14T20:26:01.793Z",
+      "createdAt": "2026-04-14T19:49:02.692Z"
+    },
+    {
+      "id": "PF-019",
+      "taskId": "AP-043",
+      "failureType": "gate",
+      "attempted": "npm error Missing script: \"test\" | npm error | npm error To see a list of scripts, run:",
+      "hypothesis": "npm error Missing script: \"test\" | npm error | npm error To see a list of scripts, run:",
+      "missingContext": "npm error Missing script: \"test\"\nnpm error\nnpm error To see a list of scripts, run:\nnpm error   npm run\nnpm error A complete log of this run can be found in: /Users/vadaski/.npm/_logs/2026-04-14T20_14_11_477Z-debug-0.log\n",
+      "resolution": "Dogfood round 4 artifact. AP-043/AP-045 actually completed (committed d199904). Meta-bugs captured: npm test assumption (→AP-049), kimi routing for complex tasks (→AP-050), gate name propagation (→AP-051).",
+      "resolvedAt": "2026-04-14T20:26:01.871Z",
+      "createdAt": "2026-04-14T20:14:11.661Z"
+    },
+    {
+      "id": "PF-020",
+      "taskId": "AP-043",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash",
+      "hypothesis": "Fix dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash",
+      "missingContext": "",
+      "resolution": "Dogfood round 4 artifact. AP-043/AP-045 actually completed (committed d199904). Meta-bugs captured: npm test assumption (→AP-049), kimi routing for complex tasks (→AP-050), gate name propagation (→AP-051).",
+      "resolvedAt": "2026-04-14T20:26:01.947Z",
+      "createdAt": "2026-04-14T20:19:15.029Z"
+    },
+    {
+      "id": "PF-021",
+      "taskId": "AP-043",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash",
+      "hypothesis": "Fix dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash",
+      "missingContext": "",
+      "resolution": "Dogfood round 4 artifact. AP-043/AP-045 actually completed (committed d199904). Meta-bugs captured: npm test assumption (→AP-049), kimi routing for complex tasks (→AP-050), gate name propagation (→AP-051).",
+      "resolvedAt": "2026-04-14T20:26:02.024Z",
+      "createdAt": "2026-04-14T20:23:39.204Z"
+    },
+    {
+      "id": "PF-022",
+      "taskId": "AP-043",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash",
+      "hypothesis": "Fix dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash",
+      "missingContext": "",
+      "resolution": "AP-043 B13 implementation is complete (committed d199904). Gate 'undefined' issue was an infra bug in fix-and-retest path, fixed by AP-051. All doc-store tests pass including B13 recovery scenario.",
+      "resolvedAt": "2026-04-14T20:51:53.949Z",
+      "createdAt": "2026-04-14T20:28:17.348Z"
+    },
+    {
+      "id": "PF-023",
+      "taskId": "AP-043",
+      "failureType": "gate",
+      "attempted": "va-auto-pilot | Usage: | va-auto-pilot init [target-dir] [options]",
+      "hypothesis": "va-auto-pilot | Usage: | va-auto-pilot init [target-dir] [options]",
+      "missingContext": "",
+      "resolution": "AP-043 B13 implementation is complete. va-auto-pilot init usage error was a transient dispatch issue, not related to B13 logic. Task code committed and all gates pass.",
+      "resolvedAt": "2026-04-14T20:51:54.912Z",
+      "createdAt": "2026-04-14T20:35:29.837Z"
+    },
+    {
+      "id": "PF-024",
+      "taskId": "AP-050",
+      "failureType": "gate",
+      "attempted": "va-auto-pilot | Usage: | va-auto-pilot init [target-dir] [options]",
+      "hypothesis": "va-auto-pilot | Usage: | va-auto-pilot init [target-dir] [options]",
+      "missingContext": "",
+      "resolution": "Round 5 pitfalls recorded during fix-and-retest cycles before 57d0c57 landed. AP-049/050/051 fixes committed; residual 'gate undefined' and 'npm test' traces captured as AP-052 follow-up for comprehensive path audit.",
+      "resolvedAt": "2026-04-14T21:15:57.565Z",
+      "createdAt": "2026-04-14T20:44:08.488Z"
+    },
+    {
+      "id": "PF-025",
+      "taskId": "AP-049",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: suggest-gate and sprint prompts must read project's actual package.json test script (not hardcode 'npm test'); generalize for any stack",
+      "hypothesis": "Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: suggest-gate and sprint prompts must read project's actual package.json test script (not hardcode 'npm test'); generalize for any stack",
+      "missingContext": "",
+      "resolution": "Round 5 pitfalls recorded during fix-and-retest cycles before 57d0c57 landed. AP-049/050/051 fixes committed; residual 'gate undefined' and 'npm test' traces captured as AP-052 follow-up for comprehensive path audit.",
+      "resolvedAt": "2026-04-14T21:15:57.649Z",
+      "createdAt": "2026-04-14T20:46:23.300Z"
+    },
+    {
+      "id": "PF-026",
+      "taskId": "AP-051",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: gate name 'undefined' in fix-and-retest path — review gate context propagation bug; emit real gate id to journal for diagnosability",
+      "hypothesis": "Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: gate name 'undefined' in fix-and-retest path — review gate context propagation bug; emit real gate id to journal for diagnosability",
+      "missingContext": "",
+      "resolution": "Round 5 pitfalls recorded during fix-and-retest cycles before 57d0c57 landed. AP-049/050/051 fixes committed; residual 'gate undefined' and 'npm test' traces captured as AP-052 follow-up for comprehensive path audit.",
+      "resolvedAt": "2026-04-14T21:15:57.732Z",
+      "createdAt": "2026-04-14T20:49:33.082Z"
+    },
+    {
+      "id": "PF-027",
+      "taskId": "AP-049",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: suggest-gate and sprint prompts must read project's actual package.json test script (not hardcode 'npm test'); generalize for any stack",
+      "hypothesis": "Fix dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: suggest-gate and sprint prompts must read project's actual package.json test script (not hardcode 'npm test'); generalize for any stack",
+      "missingContext": "",
+      "resolution": "Round 5 pitfalls recorded during fix-and-retest cycles before 57d0c57 landed. AP-049/050/051 fixes committed; residual 'gate undefined' and 'npm test' traces captured as AP-052 follow-up for comprehensive path audit.",
+      "resolvedAt": "2026-04-14T21:15:57.816Z",
+      "createdAt": "2026-04-14T21:01:25.804Z"
+    },
+    {
+      "id": "PF-028",
+      "taskId": "AP-043",
+      "failureType": "gate",
+      "attempted": "npm error Missing script: \"test\" | npm error | npm error To see a list of scripts, run:",
+      "hypothesis": "npm error Missing script: \"test\" | npm error | npm error To see a list of scripts, run:",
+      "missingContext": "npm error Missing script: \"test\"\nnpm error\nnpm error To see a list of scripts, run:\nnpm error   npm run\nnpm error A complete log of this run can be found in: /Users/vadaski/.npm/_logs/2026-04-14T21_02_21_635Z-debug-0.log\n",
+      "resolution": "Round 5 pitfalls recorded during fix-and-retest cycles before 57d0c57 landed. AP-049/050/051 fixes committed; residual 'gate undefined' and 'npm test' traces captured as AP-052 follow-up for comprehensive path audit.",
+      "resolvedAt": "2026-04-14T21:15:57.897Z",
+      "createdAt": "2026-04-14T21:02:21.861Z"
+    },
+    {
+      "id": "PF-029",
+      "taskId": "AP-049",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: suggest-gate and sprint prompts must read project's actual package.json test script (not hardcode 'npm test'); generalize for any stack",
+      "hypothesis": "Fix dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: suggest-gate and sprint prompts must read project's actual package.json test script (not hardcode 'npm test'); generalize for any stack",
+      "missingContext": "",
+      "resolution": "Round 5 pitfalls recorded during fix-and-retest cycles before 57d0c57 landed. AP-049/050/051 fixes committed; residual 'gate undefined' and 'npm test' traces captured as AP-052 follow-up for comprehensive path audit.",
+      "resolvedAt": "2026-04-14T21:15:57.979Z",
+      "createdAt": "2026-04-14T21:09:47.444Z"
+    },
+    {
+      "id": "PF-030",
+      "taskId": "AP-043",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash",
+      "hypothesis": "Fix dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash",
+      "missingContext": "",
+      "resolution": "Round 5 pitfalls recorded during fix-and-retest cycles before 57d0c57 landed. AP-049/050/051 fixes committed; residual 'gate undefined' and 'npm test' traces captured as AP-052 follow-up for comprehensive path audit.",
+      "resolvedAt": "2026-04-14T21:15:58.057Z",
+      "createdAt": "2026-04-14T21:11:22.740Z"
+    },
+    {
+      "id": "PF-031",
+      "taskId": "AP-052",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: state-file concurrency race (manual sprint-board updates can be overwritten by running loop) + dispatch success-detection lag (sub-agent exit!=0 masks real code landing); also audit all 'npm test' and 'gate undefined' remaining call sites",
+      "hypothesis": "Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: state-file concurrency race (manual sprint-board updates can be overwritten by running loop) + dispatch success-detection lag (sub-agent exit!=0 masks real code landing); also audit all 'npm test' and 'gate undefined' remaining call sites",
+      "missingContext": "",
+      "resolution": "Round 6 (AP-052) captured residue; AP-052 landed 630-line fix for state race + success detection + path audit; committed 93b174c. Loop next restart will use self-healed detection.",
+      "resolvedAt": "2026-04-14T21:48:51.148Z",
+      "createdAt": "2026-04-14T21:34:04.936Z"
+    },
+    {
+      "id": "PF-032",
+      "taskId": "AP-052",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: state-file concurrency race (manual sprint-board updates can be overwritten by running loop) + dispatch success-detection lag (sub-agent exit!=0 masks real code landing); also audit all 'npm test' and 'gate undefined' remaining call sites",
+      "hypothesis": "Fix dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: state-file concurrency race (manual sprint-board updates can be overwritten by running loop) + dispatch success-detection lag (sub-agent exit!=0 masks real code landing); also audit all 'npm test' and 'gate undefined' remaining call sites",
+      "missingContext": "",
+      "resolution": "Round 6 (AP-052) captured residue; AP-052 landed 630-line fix for state race + success detection + path audit; committed 93b174c. Loop next restart will use self-healed detection.",
+      "resolvedAt": "2026-04-14T21:48:51.235Z",
+      "createdAt": "2026-04-14T21:41:33.408Z"
+    },
+    {
+      "id": "PF-033",
+      "taskId": "AP-052",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: state-file concurrency race (manual sprint-board updates can be overwritten by running loop) + dispatch success-detection lag (sub-agent exit!=0 masks real code landing); also audit all 'npm test' and 'gate undefined' remaining call sites",
+      "hypothesis": "Fix dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: state-file concurrency race (manual sprint-board updates can be overwritten by running loop) + dispatch success-detection lag (sub-agent exit!=0 masks real code landing); also audit all 'npm test' and 'gate undefined' remaining call sites",
+      "missingContext": "",
+      "resolution": "Round 6 (AP-052) captured residue; AP-052 landed 630-line fix for state race + success detection + path audit; committed 93b174c. Loop next restart will use self-healed detection.",
+      "resolvedAt": "2026-04-14T21:48:51.332Z",
+      "createdAt": "2026-04-14T21:47:21.770Z"
+    },
+    {
+      "id": "PF-034",
+      "taskId": "AP-054",
+      "failureType": "gate",
+      "attempted": "reason: 10 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
+      "hypothesis": "Dispatch failed: exitCode=1 | reason: 10 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
+      "missingContext": "",
       "resolution": "",
       "resolvedAt": null,
-      "createdAt": "2026-04-14T19:49:02.692Z"
+      "createdAt": "2026-04-15T02:01:50.686Z"
     }
   ]
 }

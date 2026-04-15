@@ -1,5 +1,6 @@
-Sprint board rendered: docs/todo/sprint.md
-by VA Auto-Pilot
+# Sprint Board
+
+> Last updated: 2026-04-15 by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:
@@ -21,17 +22,18 @@ by VA Auto-Pilot
 ## In Progress
 | ID | Task | Owner | Started | Notes |
 |----|------|-------|---------|-------|
-| - | - | - | - | - |
+| AP-053 | Sprint 4(a): install DocStore pre-commit hook via 'doc-store install-hook' subcommand (idempotent, cascade with existing hooks, uninstallable); writes .git/hooks/pre-commit invoking enforce-staged; tests cover fresh install / existing hook preservation / uninstall | - | 2026-04-15 | - |
+| AP-055 | Sprint 4(c): Genesis phase 2 — run 'doc-store adopt docs/designs/doc-store-api-draft.md' to nadopt the design doc itself into .docstore/designs/; use preferGitMove to preserve history; commit the adoption as a distinct step | - | 2026-04-15 | - |
 
 ## Failed
 | ID | Task | Fail Count | Reason | Last Failed |
 |----|------|------------|--------|-------------|
-| - | - | - | - | - |
+| AP-054 | Sprint 4(b): GitHub Actions CI step for DocStore — extend existing .github/workflows/ci.yml or add new doc-store.yml to run 'doc-store doctor' + 'doc-store enforce-staged --base main' on PRs; required for merge | 1 | - | 2026-04-15 |
 
 ## Review
 | ID | Task | Implementer | Security | QA | Domain | Architect |
 |----|------|-------------|----------|----|--------|-----------|
-| - | - | - | - | - | - | - |
+| AP-056 | Sprint 4(d): Flip store config mode legacy -> mixed; managedRoots includes .docstore/designs, .docstore/decisions, .docstore/process; doctor validates post-flip; no regressions in hook behavior | - | - | - | - | - |
 
 ## Testing
 | ID | Task | Test Flow | MUST Pass Rate | SHOULD Pass Rate |
@@ -76,6 +78,7 @@ by VA Auto-Pilot
 | AP-044 | Sprint 3: implement adoptDocument() / importLegacyDocument() SDK + CLI for bringing bare files into the managed store | 2026-04-14 | Done in dogfood round 3, committed 2c9d086. See commit body for details. |
 | AP-047 | auto-pilot infra: dispatch fail detection — when sub-agent exits !=0 but tests+build pass and code landed, treat as partial-success and run review gate only (not re-dispatch) | 2026-04-14 | Done in dogfood round 3, committed 2c9d086. See commit body for details. |
 | AP-048 | adopt test isolation: tests must create git-init'd tmpdir or adopt should fallback fs.rename when git unavailable; also must clean up .journal/ and test-adopt-tmp/ (test leak to repo root observed) | 2026-04-14 | Done in dogfood round 3, committed 2c9d086. See commit body for details. |
+| AP-049 | auto-pilot infra: suggest-gate and sprint prompts must read project's actual package.json test script (not hardcode 'npm test'); generalize for any stack | 2026-04-14 | Round 5 dogfood: code landed, check:all green; loop dispatch-detection still has lag but work is done. |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
@@ -85,12 +88,15 @@ by VA Auto-Pilot
 | AP-032 | 默认并行执行：auto-pilot-loop 从单任务循环改为任务池循环，plan 命令输出自动执行 | 2026-03-29 | - |
 | AP-036 | Sprint 5 Task 3: Move stack-specific quality gate examples out of protocol | 2026-04-04 | 5 stack-specific example sections extracted to docs/operations/quality-gate-examples.md. Protocol reduced 767→647 lines (-120). Templates synced. Commit 6dabc54. |
 | AP-037 | Sprint 5 Task 4: Inject unresolved pitfalls into evaluator review context | 2026-04-04 | sprint-board review command auto-injects stakeholder perspective + unresolved pitfalls. 9 unit tests covering perspective selection, pitfall formatting, prompt construction, full review flow. Protocol updated. Commit dc83411. |
-| AP-043 | Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash | 2026-04-14 | typecheck clean, lint clean (1 pre-existing warning), check:units 222/222 pass, check:doc-store 53/53 pass, check:doc-store-mode 47/47 pass, check:cli-flows PASS, validate:distribution PASS |
+| AP-043 | Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash | 2026-04-14 | Actually committed in d199904 (Sprint 1-bis B13 recovery); stale Failed state from loop state race with manual update, reconciled. |
 | AP-045 | Sprint 3: migrate subcommand for store-level schema migrations (§14.3 + §11 four-phase preflight/apply/verify/rollback) | 2026-04-14 | All gates pass: 50/50 doc-store tests, 47/47 doc-store-mode tests, 222/222 unit tests, CLI flows PASS, lint clean, distribution valid. Implemented four-phase migration engine (preflight/apply/verify/rollback) with backup/rollback, CLI --plan-only/--from/--to support, and journal integration. |
+| AP-050 | auto-pilot infra: colony routing must avoid kimi for Sprint-level multi-file tasks (>200 lines or >3 files); kimi timeout observed at 10min for complex objectives | 2026-04-14 | Round 5 dogfood: code landed, check:all green; loop dispatch-detection still has lag but work is done. |
+| AP-051 | auto-pilot infra: gate name 'undefined' in fix-and-retest path — review gate context propagation bug; emit real gate id to journal for diagnosability | 2026-04-14 | Round 5 dogfood: code landed, check:all green; loop dispatch-detection still has lag but work is done. |
+| AP-052 | auto-pilot infra: state-file concurrency race (manual sprint-board updates can be overwritten by running loop) + dispatch success-detection lag (sub-agent exit!=0 masks real code landing); also audit all 'npm test' and 'gate undefined' remaining call sites | 2026-04-14 | Round 6 capstone: state race + success detection + path audit + 28 new regression tests; committed manually after loop self-paradox hit 3-fail stop. |
 | AP-007 | Correct 'human-out-of-the-loop' framing to 'human-on-the-loop' across docs and website | 2026-02-23 | docs/human-on-the-loop.md created with updated framing; old file removed; README.md and README.zh.md references updated; all gates pass |
 | AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | 2026-03-29 | - |
 
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| - | - | - | - | - | - |
+| P2 | AP-057 | Sprint 4(e): README + start-va-auto-pilot-prompt updates — DocStore usage section (init / adopt / hook install / modes); cross-link from CLAUDE.md Quality Gate section | - | - | Sprint 4 plan |

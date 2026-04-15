@@ -20,6 +20,7 @@ import { DocStoreError, InvalidStagedConfigError, NonCanonicalStagedConfigError 
 import { validateIndexContent } from "./lib/doc-store/index-file.mjs";
 import { openManagedDocStore } from "./lib/doc-store/managed-doc-store.mjs";
 import { runMigration } from "./lib/doc-store/migration-engine.mjs";
+import { installPreCommitHook, uninstallPreCommitHook } from "./lib/doc-store/hook-installer.mjs";
 
 function printHuman(report) {
   if (report.ok) {
@@ -31,6 +32,15 @@ function printHuman(report) {
     if (finding.suggestion) {
       console.log(`  suggestion: ${finding.suggestion}`);
     }
+  }
+}
+
+function printHookReport(report, command) {
+  const subject = command === "uninstall-hook" ? "Doc-store pre-commit hook removed" : "Doc-store pre-commit hook ready";
+  console.log(`${subject}: ${report.hookPath}`);
+  console.log(`  action: ${report.action}`);
+  if (report.preservedExistingHook) {
+    console.log(`  preserved hook: ${report.backupHookPath}`);
   }
 }
 
@@ -109,7 +119,15 @@ async function run() {
   const format = parsed.options.format === "human" ? "human" : "json";
 
   if (!parsed.command || parsed.flags.has("help")) {
-    console.log("Usage: node ./scripts/doc-store-cli.mjs <init|doctor|enforce-staged|import|adopt|migrate> [--force] [--format=json|human] [--kind=<kind>] [--title=<title>] [--plan-only] [--from=<version>] [--to=<version>]");
+    console.log("Usage: node ./scripts/doc-store-cli.mjs <init|doctor|enforce-staged|import|adopt|migrate|install-hook|uninstall-hook> [--force] [--format=json|human] [--kind=<kind>] [--title=<title>] [--plan-only] [--from=<version>] [--to=<version>]");
+    process.exit(0);
+  }
+
+  if (parsed.command === "install-hook" || parsed.command === "uninstall-hook") {
+    const report = parsed.command === "install-hook"
+      ? await installPreCommitHook(process.cwd(), { nodePath: process.execPath })
+      : await uninstallPreCommitHook(process.cwd());
+    format === "human" ? printHookReport(report, parsed.command) : console.log(JSON.stringify(report, null, 2));
     process.exit(0);
   }
 

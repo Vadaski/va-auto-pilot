@@ -8,16 +8,27 @@
 
 ## Instructions (highest priority)
 
-- [ ] DocStore 打磨至生产级：AP-040..AP-045 是 Sprint 1-bis / 2-bis / 3 的落地任务。
-  每轮 codex review 发现的深层 bug 必须：①转化为 pitfall 记录（sprint-board pitfall add）
-  ②若是一类问题则补 adaptive gate（suggest-gate 出 YAML 建议）③重大设计裂缝写回
-  `docs/designs/doc-store-api-draft.md` §24。目标：跑到 backlog 空或 max-cycles 达到，
-  而不仅是单个任务完成。Sprint 3 的 genesis phase 2/3（用 adopt/import 把设计稿自身
-  迁进 .docstore/）完成后才算这轮收官。
+- [x] DocStore 打磨至生产级：AP-040..AP-045 是 Sprint 1-bis / 2-bis / 3 的落地任务。
+> Processed 2026-04-14: 6-round dogfood session complete. Done 39→52. Commits:
+> 2407884 / 98fe458 / 2c9d086 / d199904 / 5f49c0a / 57d0c57 / 93b174c. Auto-pilot
+> self-healed 3 layers (review gate tolerance / dispatch semantics / state race +
+> success detection). Sprint 1-bis (B11/B12/B13) + Sprint 2-bis (B14/B15/B16) +
+> Sprint 3 (adopt + migrate) all landed. Genesis phase 2/3 + hook install + CI
+> integration deferred to next sprint (see below).
+
+- [ ] Sprint 4 — DocStore 产品化：落地到 va-auto-pilot 仓库自身，
+  让设计稿和项目文档真正受 ManagedDocStore 管理。
+  (a) 安装 pre-commit hook（.git/hooks/pre-commit 调 doc-store enforce-staged）—
+      幂等、可卸载、不覆盖现有 hook 用 exec chain 或 cascade 脚本；
+  (b) GitHub Actions CI 集成（或扩展 .github/workflows/ci.yml）跑 doc-store doctor
+      + enforce-staged --base main 作为必过 check；
+  (c) Genesis phase 2：用 doc-store adopt 把 docs/designs/doc-store-api-draft.md
+      纳管进 .docstore/designs/，保留 git history；
+  (d) 切换 store config mode 从 legacy → mixed，managedRoots 加上 .docstore/designs；
+  (e) README + start-va-auto-pilot-prompt 更新 DocStore 使用章节。
   
-  关键预置 acceptance（写进每个 delegation prompt）：API 防御（幂等 + garbage input）、
-  崩溃恢复完整性（磁盘/INDEX/journal 三态一致）、并发边界（single-handle 契约）、
-  对称镜像（双向结构双入口测）。见 ~/.claude/CLAUDE.md "Review 循环收敛判据"。
+  验收每个任务独立闭环：check:all 绿 + review 过 + auto-commit；允许 loop
+  full autonomy 无手动 commit 作为 "self-healed infra works" 的终验证。
 
 - [x] 要设计更新机制，对未来本协议升级的兼容性要考虑到
 > Processed 2026-02-23: AP-015 complete. Added `va-auto-pilot upgrade` command with version tracking (version.json with schemaVersion), file classification (always-overwrite scripts, never-overwrite user state, merge-aware templates), token resolution from existing config.yaml, and upgrade-in-progress sentinel for crash detection. Two-perspective review (operator + security auditor): 4 CRITICALs found and fixed. 10 upgrade CLI flow tests. All gates pass.

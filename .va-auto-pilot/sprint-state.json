@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-04-14T20:02:58.060Z",
+  "updatedAt": "2026-04-15T02:06:35.978Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -1250,11 +1250,11 @@
       "source": "Sprint 1 round-6 review, design doc §24 item 6",
       "createdAt": "2026-04-14",
       "startedAt": "2026-04-14T19:28:56.558Z",
-      "completedAt": "2026-04-14T19:58:27.739Z",
-      "lastFailedAt": "2026-04-14T19:36:42.779Z",
-      "failCount": 1,
+      "completedAt": "2026-04-14T21:14:57.187Z",
+      "lastFailedAt": "2026-04-14T21:11:22.294Z",
+      "failCount": 0,
       "reason": "",
-      "verification": "typecheck clean, lint clean (1 pre-existing warning), check:units 222/222 pass, check:doc-store 53/53 pass, check:doc-store-mode 47/47 pass, check:cli-flows PASS, validate:distribution PASS",
+      "verification": "Actually committed in d199904 (Sprint 1-bis B13 recovery); stale Failed state from loop state race with manual update, reconciled.",
       "notes": "",
       "review": {
         "implementer": "",
@@ -1271,8 +1271,8 @@
       "dependsOn": [],
       "failureDetail": {
         "failureType": "gate",
-        "attempted": "auto-pilot build",
-        "hypothesis": "\n> va-auto-pilot@0.1.1 check:all\n> npm run check && npm run check:sprint && npm run check:units && npm run check:doc-store && npm run check:doc-store-mode && npm run check:cli-flows && npm run validate:distribution\n\n\n> va-auto-pilot@0.1.1 check\n> node ./bin/va-auto-pilot.mjs --help\n\nva-auto-pilot\n\nUsage:\n  va-auto-pilot init [target-dir] [options]\n  va-auto-pilot upgrade [target-dir] [options]\n  va-auto-pilot run [target-dir] [options]\n  va-auto-pilot --help\n\nCommands:\n  init      Scaffold a new",
+        "attempted": "auto-pilot dispatch",
+        "hypothesis": "Fix dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 1-bis B13: recovery rolls back target artifacts touched by refs mirror mid-update crash",
         "missingContext": ""
       }
     },
@@ -1450,6 +1450,297 @@
         "hypothesis": "Dispatch failed: exitCode=1",
         "missingContext": ""
       }
+    },
+    {
+      "id": "AP-049",
+      "title": "auto-pilot infra: suggest-gate and sprint prompts must read project's actual package.json test script (not hardcode 'npm test'); generalize for any stack",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "PF-019 dogfood round 4",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T20:26:03.809Z",
+      "completedAt": "2026-04-14T21:14:45.918Z",
+      "lastFailedAt": "2026-04-14T21:09:46.918Z",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Round 5 dogfood: code landed, check:all green; loop dispatch-detection still has lag but work is done.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot dispatch",
+        "hypothesis": "Fix dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: suggest-gate and sprint prompts must read project's actual package.json test script (not hardcode 'npm test'); generalize for any stack",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-050",
+      "title": "auto-pilot infra: colony routing must avoid kimi for Sprint-level multi-file tasks (>200 lines or >3 files); kimi timeout observed at 10min for complex objectives",
+      "priority": "P2",
+      "state": "Done",
+      "owner": "",
+      "source": "PF-018 dogfood round 4",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T20:26:03.730Z",
+      "completedAt": "2026-04-14T21:14:46.009Z",
+      "lastFailedAt": "2026-04-14T20:44:08.338Z",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Round 5 dogfood: code landed, check:all green; loop dispatch-detection still has lag but work is done.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot build",
+        "hypothesis": "\n> va-auto-pilot@0.1.1 check:all\n> npm run check && npm run check:sprint && npm run check:units && npm run check:doc-store && npm run check:doc-store-mode && npm run check:cli-flows && npm run validate:distribution\n\n\n> va-auto-pilot@0.1.1 check\n> node ./bin/va-auto-pilot.mjs --help\n\nva-auto-pilot\n\nUsage:\n  va-auto-pilot init [target-dir] [options]\n  va-auto-pilot upgrade [target-dir] [options]\n  va-auto-pilot run [target-dir] [options]\n  va-auto-pilot --help\n\nCommands:\n  init      Scaffold a new",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-051",
+      "title": "auto-pilot infra: gate name 'undefined' in fix-and-retest path — review gate context propagation bug; emit real gate id to journal for diagnosability",
+      "priority": "P2",
+      "state": "Done",
+      "owner": "",
+      "source": "PF-020 dogfood round 4",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T20:26:03.887Z",
+      "completedAt": "2026-04-14T21:14:46.097Z",
+      "lastFailedAt": "2026-04-14T20:49:32.996Z",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Round 5 dogfood: code landed, check:all green; loop dispatch-detection still has lag but work is done.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot dispatch",
+        "hypothesis": "Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: gate name 'undefined' in fix-and-retest path — review gate context propagation bug; emit real gate id to journal for diagnosability",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-052",
+      "title": "auto-pilot infra: state-file concurrency race (manual sprint-board updates can be overwritten by running loop) + dispatch success-detection lag (sub-agent exit!=0 masks real code landing); also audit all 'npm test' and 'gate undefined' remaining call sites",
+      "priority": "P2",
+      "state": "Done",
+      "owner": "",
+      "source": "Round 5 dogfood residue",
+      "createdAt": "2026-04-14",
+      "startedAt": "2026-04-14T21:15:59.767Z",
+      "completedAt": "2026-04-14T21:48:27.269Z",
+      "lastFailedAt": "2026-04-14T21:47:21.680Z",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Round 6 capstone: state race + success detection + path audit + 28 new regression tests; committed manually after loop self-paradox hit 3-fail stop.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot dispatch",
+        "hypothesis": "Fix dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: state-file concurrency race (manual sprint-board updates can be overwritten by running loop) + dispatch success-detection lag (sub-agent exit!=0 masks real code landing); also audit all 'npm test' and 'gate undefined' remaining call sites",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-053",
+      "title": "Sprint 4(a): install DocStore pre-commit hook via 'doc-store install-hook' subcommand (idempotent, cascade with existing hooks, uninstallable); writes .git/hooks/pre-commit invoking enforce-staged; tests cover fresh install / existing hook preservation / uninstall",
+      "priority": "P1",
+      "state": "In Progress",
+      "owner": "",
+      "source": "Sprint 4 plan — DocStore productionization",
+      "createdAt": "2026-04-15",
+      "startedAt": "2026-04-15T02:01:48.704Z",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-054",
+      "title": "Sprint 4(b): GitHub Actions CI step for DocStore — extend existing .github/workflows/ci.yml or add new doc-store.yml to run 'doc-store doctor' + 'doc-store enforce-staged --base main' on PRs; required for merge",
+      "priority": "P1",
+      "state": "Failed",
+      "owner": "",
+      "source": "Sprint 4 plan — DocStore productionization",
+      "createdAt": "2026-04-15",
+      "startedAt": "2026-04-15T02:01:48.614Z",
+      "completedAt": "",
+      "lastFailedAt": "2026-04-15T02:01:50.569Z",
+      "failCount": 1,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [],
+      "failureDetail": {
+        "failureType": "gate",
+        "attempted": "auto-pilot dispatch",
+        "hypothesis": "Dispatch failed: exitCode=1 | reason: 10 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
+        "missingContext": ""
+      }
+    },
+    {
+      "id": "AP-055",
+      "title": "Sprint 4(c): Genesis phase 2 — run 'doc-store adopt docs/designs/doc-store-api-draft.md' to nadopt the design doc itself into .docstore/designs/; use preferGitMove to preserve history; commit the adoption as a distinct step",
+      "priority": "P1",
+      "state": "In Progress",
+      "owner": "",
+      "source": "Sprint 4 plan, design doc §12 Genesis & Bootstrap phase 2",
+      "createdAt": "2026-04-15",
+      "startedAt": "2026-04-15T02:01:48.896Z",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-056",
+      "title": "Sprint 4(d): Flip store config mode legacy -> mixed; managedRoots includes .docstore/designs, .docstore/decisions, .docstore/process; doctor validates post-flip; no regressions in hook behavior",
+      "priority": "P1",
+      "state": "Review",
+      "owner": "",
+      "source": "Sprint 4 plan, design doc §5 Migration Modes",
+      "createdAt": "2026-04-15",
+      "startedAt": "2026-04-15T02:01:48.797Z",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-057",
+      "title": "Sprint 4(e): README + start-va-auto-pilot-prompt updates — DocStore usage section (init / adopt / hook install / modes); cross-link from CLAUDE.md Quality Gate section",
+      "priority": "P2",
+      "state": "Backlog",
+      "owner": "",
+      "source": "Sprint 4 plan",
+      "createdAt": "2026-04-15",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
     }
   ],
   "sprintStartCommit": "05306ecac0be8f24461b1832797612976ec70b86"

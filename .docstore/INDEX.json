@@ -1,0 +1,14 @@
+{
+  "__checksum": "1d1aac23b6d62ff9d36260b1f38018b4f4aa6211b25483faa4ed428228476667",
+  "entries": {},
+  "extensions": {
+    "registeredTypes": {}
+  },
+  "lastUpdated": "2026-04-15T02:04:17.658Z",
+  "managedRoots": [
+    ".docstore/designs",
+    ".docstore/decisions",
+    ".docstore/process"
+  ],
+  "storeFormatVersion": "1.0.0"
+}

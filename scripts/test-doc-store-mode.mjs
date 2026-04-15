@@ -59,6 +59,9 @@ const commitAll = (cwd, message) => git(cwd, "commit", "-qm", message);
 const indexPathFor = (cwd) => path.join(cwd, ".docstore", "INDEX.json");
 const configPathFor = (cwd) => path.join(cwd, ".docstore", "store.config.json");
 const journalPathFor = (cwd) => path.join(cwd, ".docstore", ".journal", "current.jsonl");
+const hooksDirFor = (cwd) => path.resolve(cwd, git(cwd, "rev-parse", "--git-path", "hooks").trim());
+const preCommitHookPathFor = (cwd) => path.join(hooksDirFor(cwd), "pre-commit");
+const preCommitBackupPathFor = (cwd) => path.join(hooksDirFor(cwd), "pre-commit.doc-store-prev");
 
 function repo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "doc-store-mode-"));
@@ -259,6 +262,59 @@ test("doctor remains read-only while the write lock is held", async () => {
   const result = runCli(cwd, "doctor");
   await releaseLock(lock);
   assert.equal(result.status, 0);
+});
+
+test("install-hook writes managed pre-commit hook and stays idempotent", () => {
+  const cwd = repo();
+  const hookPath = preCommitHookPathFor(cwd);
+  const backupPath = preCommitBackupPathFor(cwd);
+
+  const first = runCli(cwd, "install-hook");
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(fs.existsSync(hookPath), true);
+  assert.equal(fs.existsSync(backupPath), false);
+  const installed = fs.readFileSync(hookPath, "utf8");
+  assert.match(installed, /doc-store managed pre-commit hook/);
+  assert.match(installed, /doc-store-precommit\.mjs/);
+  assert.equal(fs.statSync(hookPath).mode & 0o111, 0o111);
+
+  const second = runCli(cwd, "install-hook");
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(fs.readFileSync(hookPath, "utf8"), installed);
+});
+
+test("install-hook preserves existing pre-commit hook via cascade backup", () => {
+  const cwd = repo();
+  const hookPath = preCommitHookPathFor(cwd);
+  const backupPath = preCommitBackupPathFor(cwd);
+  const existingHook = "#!/usr/bin/env bash\nprintf 'legacy hook\\n'\n";
+
+  fs.mkdirSync(path.dirname(hookPath), { recursive: true });
+  fs.writeFileSync(hookPath, existingHook, "utf8");
+  fs.chmodSync(hookPath, 0o755);
+
+  const result = runCli(cwd, "install-hook");
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(backupPath, "utf8"), existingHook);
+  assert.match(fs.readFileSync(hookPath, "utf8"), /pre-commit\.doc-store-prev/);
+});
+
+test("uninstall-hook removes managed hook and restores preserved pre-commit", () => {
+  const cwd = repo();
+  const hookPath = preCommitHookPathFor(cwd);
+  const backupPath = preCommitBackupPathFor(cwd);
+  const existingHook = "#!/usr/bin/env bash\nprintf 'legacy hook\\n'\n";
+
+  fs.mkdirSync(path.dirname(hookPath), { recursive: true });
+  fs.writeFileSync(hookPath, existingHook, "utf8");
+  fs.chmodSync(hookPath, 0o755);
+  assert.equal(runCli(cwd, "install-hook").status, 0);
+
+  const result = runCli(cwd, "uninstall-hook");
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(hookPath, "utf8"), existingHook);
+  assert.equal(fs.existsSync(backupPath), false);
+  assert.equal(runCli(cwd, "uninstall-hook").status, 0);
 });
 
 test("adopt CLI writes into .docstore without leaking repo-root journal state", async () => {

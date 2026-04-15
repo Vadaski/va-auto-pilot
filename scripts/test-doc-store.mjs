@@ -19,7 +19,6 @@ import {
   openManagedDocStore,
   releaseLock,
   readAll,
-  runDoctor,
   runMigration,
   registerMigration,
   clearMigrationRegistry

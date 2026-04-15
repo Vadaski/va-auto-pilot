@@ -104,7 +104,7 @@ function resolveMergeBase(projectRoot, baseRef) {
     return execFileSync("git", ["merge-base", baseRef, "HEAD"], { cwd: projectRoot, encoding: "utf8" }).trim();
   } catch (error) {
     const detail = String(error?.stderr ?? error?.message ?? error).trim();
-    throw new Error(`Unable to resolve merge base for --base=${baseRef}. Fetch the base ref before running enforcement. ${detail}`);
+    throw new Error(`Unable to resolve merge base for --base=${baseRef}. Fetch the base ref before running enforcement. ${detail}`, { cause: error });
   }
 }
 

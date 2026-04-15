@@ -371,8 +371,8 @@
       "attempted": "reason: 10 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
       "hypothesis": "Dispatch failed: exitCode=1 | reason: 10 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
       "missingContext": "",
-      "resolution": "",
-      "resolvedAt": null,
+      "resolution": "Stale dispatch artifact from auto-loop routing, not a product defect. AP-054 is validated directly: .github/workflows/ci.yml includes the PR-only doc-store job, and local verification passed for npm run doc-store:doctor, npm run doc-store:enforce-staged -- --base main, npm run typecheck, and npm run check:all.",
+      "resolvedAt": "2026-04-15T02:38:44.827Z",
       "createdAt": "2026-04-15T02:01:50.686Z"
     },
     {
@@ -382,9 +382,97 @@
       "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 4(a): install DocStore pre-commit hook via 'doc-store install-hook' subcommand (idempotent, cascade with existing hooks, uninstallable); writes .git/hooks/pre-commit invoking enforce-staged; tests cover fresh install / existing hook preservation / uninstall",
       "hypothesis": "Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 4(a): install DocStore pre-commit hook via 'doc-store install-hook' subcommand (idempotent, cascade with existing hooks, uninstallable); writes .git/hooks/pre-commit invoking enforce-staged; tests cover fresh install / existing hook preservation / uninstall",
       "missingContext": "",
+      "resolution": "Stale gate 'undefined' artifact, not a DocStore hook defect. AP-053 behavior is already validated locally by node scripts/test-doc-store-mode.mjs and npm run check:doc-store-mode; existing install-hook/uninstall-hook flow works.",
+      "resolvedAt": "2026-04-15T02:38:44.912Z",
+      "createdAt": "2026-04-15T02:13:40.513Z"
+    },
+    {
+      "id": "PF-036",
+      "taskId": "AP-054",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 4(b): GitHub Actions CI step for DocStore — extend existing .github/workflows/ci.yml or add new doc-store.yml to run 'doc-store doctor' + 'doc-store enforce-staged --base main' on PRs; required for merge",
+      "hypothesis": "Fix dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 4(b): GitHub Actions CI step for DocStore — extend existing .github/workflows/ci.yml or add new doc-store.yml to run 'doc-store doctor' + 'doc-store enforce-staged --base main' on PRs; required for merge",
+      "missingContext": "",
+      "resolution": "Stale gate 'undefined' artifact during AP-054 fix-and-retest, not a CI integration defect. The DocStore PR workflow step is present in .github/workflows/ci.yml and local validation passed for doctor, enforce-staged --base main, typecheck, and check:all.",
+      "resolvedAt": "2026-04-15T02:38:44.990Z",
+      "createdAt": "2026-04-15T02:36:17.797Z"
+    },
+    {
+      "id": "PF-037",
+      "taskId": "AP-057",
+      "failureType": "gate",
+      "attempted": "reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
+      "hypothesis": "Dispatch failed: exitCode=1 | reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
+      "missingContext": "",
+      "resolution": "Meta bug uncovered by AP-057: AP-050 kimi-routing guard correctly avoids kimi for 8-file task, but fallback agentTemplate spawn path has constructor bug (exit 1 immediate). Captured as follow-up task. AP-057 docs update is blocked until fallback path is fixed.",
+      "resolvedAt": "2026-04-15T02:47:10.717Z",
+      "createdAt": "2026-04-15T02:42:28.316Z"
+    },
+    {
+      "id": "PF-038",
+      "taskId": "AP-057",
+      "failureType": "gate",
+      "attempted": "reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
+      "hypothesis": "Fix dispatch failed: exitCode=1 | reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
+      "missingContext": "",
+      "resolution": "Meta bug uncovered by AP-057: AP-050 kimi-routing guard correctly avoids kimi for 8-file task, but fallback agentTemplate spawn path has constructor bug (exit 1 immediate). Captured as follow-up task. AP-057 docs update is blocked until fallback path is fixed.",
+      "resolvedAt": "2026-04-15T02:47:10.818Z",
+      "createdAt": "2026-04-15T02:42:30.534Z"
+    },
+    {
+      "id": "PF-039",
+      "taskId": "AP-057",
+      "failureType": "gate",
+      "attempted": "reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
+      "hypothesis": "Fix dispatch failed: exitCode=1 | reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
+      "missingContext": "",
+      "resolution": "Meta bug uncovered by AP-057: AP-050 kimi-routing guard correctly avoids kimi for 8-file task, but fallback agentTemplate spawn path has constructor bug (exit 1 immediate). Captured as follow-up task. AP-057 docs update is blocked until fallback path is fixed.",
+      "resolvedAt": "2026-04-15T02:47:10.904Z",
+      "createdAt": "2026-04-15T02:42:32.777Z"
+    },
+    {
+      "id": "PF-040",
+      "taskId": "AP-058",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: fix 'falling back to agentTemplate spawn' path — AP-050 kimi-routing guard correctly avoids kimi but fallback spawn returns exit 1 in 119-414ms (clearly broken construction); restore viable dispatch when kimi is skipped",
+      "hypothesis": "Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: fix 'falling back to agentTemplate spawn' path — AP-050 kimi-routing guard correctly avoids kimi but fallback spawn returns exit 1 in 119-414ms (clearly broken construction); restore viable dispatch when kimi is skipped",
+      "missingContext": "",
       "resolution": "",
       "resolvedAt": null,
-      "createdAt": "2026-04-15T02:13:40.513Z"
+      "createdAt": "2026-04-15T06:37:21.364Z"
+    },
+    {
+      "id": "PF-041",
+      "taskId": "AP-059",
+      "failureType": "gate",
+      "attempted": "Codex execution exceeded 600000ms | Task too complex or codex hung. | objective: Phase 2 — write path: 'sprint-board pitfall --resolve' auto-synthesizes a new constraint YAML under .va-auto-pilot/constraints/ from pitfall.hypothesis + resolution + task.title; commit with message scheme constraint: ... — no external engine call",
+      "hypothesis": "Dispatch failed: exitCode=1 | Codex execution exceeded 600000ms | Task too complex or codex hung. | objective: Phase 2 — write path: 'sprint-board pitfall --resolve' auto-synthesizes a new constraint YAML under .va-auto-pilot/constraints/ from pitfall.hypothesis + resolution + task.title; commit with message scheme constraint: ... — no external engine call",
+      "missingContext": "",
+      "resolution": "",
+      "resolvedAt": null,
+      "createdAt": "2026-04-15T06:47:21.831Z"
+    },
+    {
+      "id": "PF-042",
+      "taskId": "AP-060",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: Seed initial constraint library — port dogfood pitfalls (PF-004..PF-039 resolved with real root causes) into .va-auto-pilot/constraints/*.yaml; one file per domain (dispatch, review-gate, adopt, mode-enforcement, state-race)",
+      "hypothesis": "Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: Seed initial constraint library — port dogfood pitfalls (PF-004..PF-039 resolved with real root causes) into .va-auto-pilot/constraints/*.yaml; one file per domain (dispatch, review-gate, adopt, mode-enforcement, state-race)",
+      "missingContext": "",
+      "resolution": "",
+      "resolvedAt": null,
+      "createdAt": "2026-04-15T06:50:32.141Z"
+    },
+    {
+      "id": "PF-043",
+      "taskId": "AP-057",
+      "failureType": "gate",
+      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 4(e): README + start-va-auto-pilot-prompt updates — DocStore usage section (init / adopt / hook install / modes); cross-link from CLAUDE.md Quality Gate section",
+      "hypothesis": "Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 4(e): README + start-va-auto-pilot-prompt updates — DocStore usage section (init / adopt / hook install / modes); cross-link from CLAUDE.md Quality Gate section",
+      "missingContext": "",
+      "resolution": "",
+      "resolvedAt": null,
+      "createdAt": "2026-04-15T06:52:46.103Z"
     }
   ]
 }

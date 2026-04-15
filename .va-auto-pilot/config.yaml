@@ -152,6 +152,32 @@ qualityGate:
         objective: Sprint 1-bis B13: recovery rolls back target artifacts
         touched by refs mirror mid-update crash'
       triggeredBy: PF-030
+    - name: reason-changed
+      command: "reason: 10 changed files; would route to kimi:va-auto-pilot | falling
+        back to agentTemplate spawn | ---"
+      required: true
+      description: "Suggested from pitfall PF-034: Dispatch failed: exitCode=1 |
+        reason: 10 changed files; would route to kimi:va-auto-pilot | falling
+        back to agentTemplate spawn | ---"
+      triggeredBy: PF-034
+    - name: codex-completed
+      command: 'echo "TODO: implement gate for PF-036"'
+      required: true
+      description: "Suggested from pitfall PF-036: Fix dispatch failed: exitCode=1 |
+        Codex completed but gate \"undefined\" failed | Gate check failed |
+        objective: Sprint 4(b): GitHub Actions CI step for DocStore — extend
+        existing .github/workflows/ci.yml or add new doc-store.yml to run
+        'doc-store doctor' + 'doc-store enforce-staged --base main' on PRs;
+        required for merge"
+      triggeredBy: PF-036
+    - name: reason-changed
+      command: "reason: 8 changed files; would route to kimi:va-auto-pilot | falling
+        back to agentTemplate spawn | ---"
+      required: true
+      description: "Suggested from pitfall PF-037: Dispatch failed: exitCode=1 |
+        reason: 8 changed files; would route to kimi:va-auto-pilot | falling
+        back to agentTemplate spawn | ---"
+      triggeredBy: PF-037
 review:
   domainRoleName: Domain Expert
   domainPrompt: You are the domain expert for this product. Review behavioral

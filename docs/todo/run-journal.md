@@ -2001,3 +2001,380 @@
 ## 2026-04-15T02:24:31.680Z - AP-055
 - Summary: All gates passed → Done
 ---
+
+## 2026-04-15T02:24:32.156Z - cycle-boundary
+- Summary: cycle-boundary: Cycle 1 of 50 closed | action=parallel-cycle | pending=3 | AP-053:dispatch-failed | AP-054:dispatch-failed | AP-055:testing→done | AP-056:testing→done
+- Files: `.va-auto-pilot/pitfalls.json`, `.va-auto-pilot/sprint-state.json`, `docs/todo/run-journal.md`, `docs/todo/sprint.md`, `.va-auto-pilot/pitfalls.json`, `.va-auto-pilot/sprint-state.json`, `docs/todo/run-journal.md`, `docs/todo/sprint.md`, `scripts/lib/doc-store/hook-installer.mjs`, `scripts/test-doc-store-mode.mjs`
+---
+
+## 2026-04-15T02:27:49.311Z - AP-053
+- Summary: Validated DocStore pre-commit hook install/uninstall flow and closed stale dispatch failure
+- Files: `scripts/lib/doc-store/hook-installer.mjs`, `scripts/doc-store-cli.mjs`, `scripts/test-doc-store-mode.mjs`, `.va-auto-pilot/sprint-state.json`, `docs/todo/sprint.md`
+- Signals:
+  - doc-store-hook-validated
+  - stale-gate-failure-cleared
+---
+
+## 2026-04-15T02:29:07.367Z - cycle-boundary
+- Summary: cycle-boundary: Cycle 2 of 50 closed | action=state-conflict | pending=2 | AP-053:state-conflict
+---
+
+## 2026-04-15T02:36:17.944Z - AP-054
+- Summary: Pitfall PF-036 recorded. Suggested new gate: codex-completed -> echo "TODO: implement gate for PF-036"
+- Signals:
+  - pitfall:PF-036
+---
+
+## 2026-04-15T02:36:18.021Z - AP-054
+- Summary: Failure classified: type=dispatch | severity=transient | pattern=timeout | failCount=2 | strategy=escalate-model | reason=Repeated failures require a stronger model before another attempt. | nextModel=claude-opus-4-6 | fixPrompt=Fix the dispatch failure related to "timeout", then rerun the gate.
+- Signals:
+  - failure:dispatch
+  - strategy:escalate-model
+---
+
+## 2026-04-15T02:36:18.094Z - AP-054
+- Summary: Fix dispatch failed: exitCode=1
+---
+
+## 2026-04-15T02:36:18.168Z - cycle-boundary
+- Summary: cycle-boundary: Cycle 3 of 50 closed | action=fix-failed | pending=2 | AP-054:fix-failed
+---
+
+## 2026-04-15T02:37:23.078Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T02:38:44.825Z - AP-054
+- Summary: DocStore CI integration validated and closed. Existing .github/workflows/ci.yml now includes a required PR doc-store job running doctor plus enforce-staged --base main; local gates all green.
+- Files: `.github/workflows/ci.yml`, `.va-auto-pilot/sprint-state.json`, `docs/todo/sprint.md`, `docs/todo/run-journal.md`
+- Signals:
+  - doc-store-ci-integrated
+  - doc-store-ci-validated
+---
+
+## 2026-04-15T02:38:44.835Z - AP-054
+- Summary: Resolved pitfall PF-034. Suggested gate appended: reason-changed -> reason: 10 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---
+- Signals:
+  - pitfall-resolved:PF-034
+  - adaptive-gate:reason-changed
+  - adaptive-gate-trigger:PF-034
+---
+
+## 2026-04-15T02:38:44.916Z - AP-053
+- Summary: Resolved pitfall PF-035. Suggested gate already present: codex-completed -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-035
+  - adaptive-gate:codex-completed
+  - adaptive-gate-trigger:PF-035
+---
+
+## 2026-04-15T02:38:44.998Z - AP-054
+- Summary: Resolved pitfall PF-036. Suggested gate appended: codex-completed -> echo "TODO: implement gate for PF-036"
+- Signals:
+  - pitfall-resolved:PF-036
+  - adaptive-gate:codex-completed
+  - adaptive-gate-trigger:PF-036
+---
+
+## 2026-04-15T02:42:26.147Z - cycle-boundary
+- Summary: cycle-boundary: Cycle 4 of 50 closed | action=state-conflict | pending=1 | AP-054:state-conflict
+---
+
+## 2026-04-15T02:42:28.459Z - AP-057
+- Summary: Pitfall PF-037 recorded. Suggested new gate: reason-changed -> reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---
+- Signals:
+  - pitfall:PF-037
+---
+
+## 2026-04-15T02:42:28.532Z - AP-057
+- Summary: Failure classified: type=dispatch | severity=transient | pattern=timeout | failCount=1 | strategy=retry-immediately | reason=Failure looks transient and remains under the retry threshold.
+- Signals:
+  - failure:dispatch
+  - strategy:retry-immediately
+---
+
+## 2026-04-15T02:42:28.605Z - AP-057
+- Summary: Dispatch failed: exitCode=1
+---
+
+## 2026-04-15T02:42:28.677Z - cycle-boundary
+- Summary: cycle-boundary: Cycle 5 of 50 closed | action=dispatch-failed | pending=1 | AP-057:dispatch-failed
+---
+
+## 2026-04-15T02:42:30.679Z - AP-057
+- Summary: Pitfall PF-038 recorded. Suggested new gate: reason-changed -> reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---
+- Signals:
+  - pitfall:PF-038
+---
+
+## 2026-04-15T02:42:30.757Z - AP-057
+- Summary: Failure classified: type=dispatch | severity=transient | pattern=timeout | failCount=2 | strategy=escalate-model | reason=Repeated failures require a stronger model before another attempt. | nextModel=claude-opus-4-6 | fixPrompt=Fix the dispatch failure related to "timeout", then rerun the gate.
+- Signals:
+  - failure:dispatch
+  - strategy:escalate-model
+---
+
+## 2026-04-15T02:42:30.838Z - AP-057
+- Summary: Fix dispatch failed: exitCode=1
+---
+
+## 2026-04-15T02:42:30.914Z - cycle-boundary
+- Summary: cycle-boundary: Cycle 6 of 50 closed | action=fix-failed | pending=1 | AP-057:fix-failed
+---
+
+## 2026-04-15T02:42:32.920Z - AP-057
+- Summary: Pitfall PF-039 recorded. Suggested new gate: reason-changed -> reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---
+- Signals:
+  - pitfall:PF-039
+---
+
+## 2026-04-15T02:42:32.993Z - AP-057
+- Summary: Failure classified: type=dispatch | severity=transient | pattern=timeout | failCount=3 | strategy=stop | reason=Failure count 3 reached the hard stop threshold.
+- Signals:
+  - failure:dispatch
+  - strategy:stop
+---
+
+## 2026-04-15T02:42:33.066Z - AP-057
+- Summary: Fix dispatch failed: exitCode=1
+---
+
+## 2026-04-15T02:42:33.143Z - cycle-boundary
+- Summary: cycle-boundary: Cycle 7 of 50 closed | action=stop-condition | pending=1 | Stop condition: AP-057 has failed 3 times.
+---
+
+## 2026-04-15T02:45:21.311Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T02:47:10.726Z - AP-057
+- Summary: Resolved pitfall PF-037. Suggested gate appended: reason-changed -> reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---
+- Signals:
+  - pitfall-resolved:PF-037
+  - adaptive-gate:reason-changed
+  - adaptive-gate-trigger:PF-037
+---
+
+## 2026-04-15T02:47:10.822Z - AP-057
+- Summary: Resolved pitfall PF-038. Suggested gate already present: reason-changed -> reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---
+- Signals:
+  - pitfall-resolved:PF-038
+  - adaptive-gate:reason-changed
+  - adaptive-gate-trigger:PF-038
+---
+
+## 2026-04-15T02:47:10.909Z - AP-057
+- Summary: Resolved pitfall PF-039. Suggested gate already present: reason-changed -> reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---
+- Signals:
+  - pitfall-resolved:PF-039
+  - adaptive-gate:reason-changed
+  - adaptive-gate-trigger:PF-039
+---
+
+## 2026-04-15T05:15:05.936Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T05:16:16.370Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T05:17:53.052Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T05:17:53.650Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T05:20:14.149Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T05:21:13.964Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T06:01:41.517Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T06:03:00.408Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T06:03:34.870Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T06:04:30.946Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T06:05:43.650Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T06:07:01.728Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T06:07:43.108Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T06:13:46.740Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T06:14:23.193Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T06:16:45.329Z - UT-001
+- Summary: Resolved pitfall PF-001. Suggested gate already present: npm-test -> npm run check:units
+- Signals:
+  - pitfall-resolved:PF-001
+  - adaptive-gate:npm-test
+  - adaptive-gate-trigger:PF-001
+---
+
+## 2026-04-15T06:37:21.520Z - AP-058
+- Summary: Pitfall PF-040 recorded. Suggested new gate: codex-completed -> echo "TODO: implement gate for PF-040"
+- Signals:
+  - pitfall:PF-040
+---
+
+## 2026-04-15T06:37:21.599Z - AP-058
+- Summary: Failure classified: type=dispatch | severity=transient | pattern=timeout | failCount=1 | strategy=retry-immediately | reason=Failure looks transient and remains under the retry threshold.
+- Signals:
+  - failure:dispatch
+  - strategy:retry-immediately
+---
+
+## 2026-04-15T06:37:21.677Z - AP-058
+- Summary: Dispatch failed: exitCode=1
+---
+
+## 2026-04-15T06:47:21.986Z - AP-059
+- Summary: Pitfall PF-041 recorded. Suggested new gate: codex-execution -> echo "TODO: implement gate for PF-041"
+- Signals:
+  - pitfall:PF-041
+---
+
+## 2026-04-15T06:47:22.063Z - AP-059
+- Summary: Failure classified: type=dispatch | severity=transient | pattern=timeout | failCount=1 | strategy=retry-immediately | reason=Failure looks transient and remains under the retry threshold.
+- Signals:
+  - failure:dispatch
+  - strategy:retry-immediately
+---
+
+## 2026-04-15T06:47:22.139Z - AP-059
+- Summary: Dispatch failed: exitCode=1
+---
+
+## 2026-04-15T06:50:32.317Z - AP-060
+- Summary: Pitfall PF-042 recorded. Suggested new gate: codex-completed -> codex review --uncommitted
+- Signals:
+  - pitfall:PF-042
+---
+
+## 2026-04-15T06:50:32.406Z - AP-060
+- Summary: Failure classified: type=dispatch | severity=transient | pattern=timeout | failCount=1 | strategy=retry-immediately | reason=Failure looks transient and remains under the retry threshold.
+- Signals:
+  - failure:dispatch
+  - strategy:retry-immediately
+---
+
+## 2026-04-15T06:50:32.492Z - AP-060
+- Summary: Dispatch failed: exitCode=1
+---
+
+## 2026-04-15T06:52:46.269Z - AP-057
+- Summary: Pitfall PF-043 recorded. Suggested new gate: codex-completed -> echo "TODO: implement gate for PF-043"
+- Signals:
+  - pitfall:PF-043
+---
+
+## 2026-04-15T06:52:46.351Z - AP-057
+- Summary: Failure classified: type=dispatch | severity=transient | pattern=timeout | failCount=4 | strategy=stop | reason=Failure count 4 reached the hard stop threshold.
+- Signals:
+  - failure:dispatch
+  - strategy:stop
+---
+
+## 2026-04-15T06:52:46.433Z - AP-057
+- Summary: Dispatch failed: exitCode=1
+---
+
+## 2026-04-15T06:52:46.514Z - cycle-boundary
+- Summary: cycle-boundary: Cycle 1 of 50 closed | action=stop-condition | pending=5 | Stop condition: AP-057 has failed 4 times.
+---

@@ -22,18 +22,17 @@
 ## In Progress
 | ID | Task | Owner | Started | Notes |
 |----|------|-------|---------|-------|
-| AP-053 | Sprint 4(a): install DocStore pre-commit hook via 'doc-store install-hook' subcommand (idempotent, cascade with existing hooks, uninstallable); writes .git/hooks/pre-commit invoking enforce-staged; tests cover fresh install / existing hook preservation / uninstall | - | 2026-04-15 | - |
-| AP-055 | Sprint 4(c): Genesis phase 2 — run 'doc-store adopt docs/designs/doc-store-api-draft.md' to nadopt the design doc itself into .docstore/designs/; use preferGitMove to preserve history; commit the adoption as a distinct step | - | 2026-04-15 | - |
+| - | - | - | - | - |
 
 ## Failed
 | ID | Task | Fail Count | Reason | Last Failed |
 |----|------|------------|--------|-------------|
-| AP-054 | Sprint 4(b): GitHub Actions CI step for DocStore — extend existing .github/workflows/ci.yml or add new doc-store.yml to run 'doc-store doctor' + 'doc-store enforce-staged --base main' on PRs; required for merge | 1 | - | 2026-04-15 |
+| - | - | - | - | - |
 
 ## Review
 | ID | Task | Implementer | Security | QA | Domain | Architect |
 |----|------|-------------|----------|----|--------|-----------|
-| AP-056 | Sprint 4(d): Flip store config mode legacy -> mixed; managedRoots includes .docstore/designs, .docstore/decisions, .docstore/process; doctor validates post-flip; no regressions in hook behavior | - | - | - | - | - |
+| - | - | - | - | - | - | - |
 
 ## Testing
 | ID | Task | Test Flow | MUST Pass Rate | SHOULD Pass Rate |
@@ -99,4 +98,8 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
+| P1 | AP-053 | Sprint 4(a): install DocStore pre-commit hook via 'doc-store install-hook' subcommand (idempotent, cascade with existing hooks, uninstallable); writes .git/hooks/pre-commit invoking enforce-staged; tests cover fresh install / existing hook preservation / uninstall | - | - | Sprint 4 plan — DocStore productionization |
+| P1 | AP-054 | Sprint 4(b): GitHub Actions CI step for DocStore — extend existing .github/workflows/ci.yml or add new doc-store.yml to run 'doc-store doctor' + 'doc-store enforce-staged --base main' on PRs; required for merge | - | - | Sprint 4 plan — DocStore productionization |
+| P1 | AP-055 | Sprint 4(c): Genesis phase 2 — run 'doc-store adopt docs/designs/doc-store-api-draft.md' to nadopt the design doc itself into .docstore/designs/; use preferGitMove to preserve history; commit the adoption as a distinct step | - | - | Sprint 4 plan, design doc §12 Genesis & Bootstrap phase 2 |
+| P1 | AP-056 | Sprint 4(d): Flip store config mode legacy -> mixed; managedRoots includes .docstore/designs, .docstore/decisions, .docstore/process; doctor validates post-flip; no regressions in hook behavior | - | - | Sprint 4 plan, design doc §5 Migration Modes |
 | P2 | AP-057 | Sprint 4(e): README + start-va-auto-pilot-prompt updates — DocStore usage section (init / adopt / hook install / modes); cross-link from CLAUDE.md Quality Gate section | - | - | Sprint 4 plan |

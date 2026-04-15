@@ -363,17 +363,6 @@
       "resolution": "Round 6 (AP-052) captured residue; AP-052 landed 630-line fix for state race + success detection + path audit; committed 93b174c. Loop next restart will use self-healed detection.",
       "resolvedAt": "2026-04-14T21:48:51.332Z",
       "createdAt": "2026-04-14T21:47:21.770Z"
-    },
-    {
-      "id": "PF-034",
-      "taskId": "AP-054",
-      "failureType": "gate",
-      "attempted": "reason: 10 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
-      "hypothesis": "Dispatch failed: exitCode=1 | reason: 10 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
-      "missingContext": "",
-      "resolution": "",
-      "resolvedAt": null,
-      "createdAt": "2026-04-15T02:01:50.686Z"
     }
   ]
 }

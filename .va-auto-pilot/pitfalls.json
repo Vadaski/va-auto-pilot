@@ -363,28 +363,6 @@
       "resolution": "Round 6 (AP-052) captured residue; AP-052 landed 630-line fix for state race + success detection + path audit; committed 93b174c. Loop next restart will use self-healed detection.",
       "resolvedAt": "2026-04-14T21:48:51.332Z",
       "createdAt": "2026-04-14T21:47:21.770Z"
-    },
-    {
-      "id": "PF-034",
-      "taskId": "AP-054",
-      "failureType": "gate",
-      "attempted": "reason: 10 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
-      "hypothesis": "Dispatch failed: exitCode=1 | reason: 10 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---",
-      "missingContext": "",
-      "resolution": "",
-      "resolvedAt": null,
-      "createdAt": "2026-04-15T02:01:50.686Z"
-    },
-    {
-      "id": "PF-035",
-      "taskId": "AP-053",
-      "failureType": "gate",
-      "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 4(a): install DocStore pre-commit hook via 'doc-store install-hook' subcommand (idempotent, cascade with existing hooks, uninstallable); writes .git/hooks/pre-commit invoking enforce-staged; tests cover fresh install / existing hook preservation / uninstall",
-      "hypothesis": "Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 4(a): install DocStore pre-commit hook via 'doc-store install-hook' subcommand (idempotent, cascade with existing hooks, uninstallable); writes .git/hooks/pre-commit invoking enforce-staged; tests cover fresh install / existing hook preservation / uninstall",
-      "missingContext": "",
-      "resolution": "",
-      "resolvedAt": null,
-      "createdAt": "2026-04-15T02:13:40.513Z"
     }
   ]
 }

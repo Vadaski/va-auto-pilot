@@ -27,8 +27,7 @@
 ## Failed
 | ID | Task | Fail Count | Reason | Last Failed |
 |----|------|------------|--------|-------------|
-| AP-053 | Sprint 4(a): install DocStore pre-commit hook via 'doc-store install-hook' subcommand (idempotent, cascade with existing hooks, uninstallable); writes .git/hooks/pre-commit invoking enforce-staged; tests cover fresh install / existing hook preservation / uninstall | 1 | - | 2026-04-15 |
-| AP-054 | Sprint 4(b): GitHub Actions CI step for DocStore — extend existing .github/workflows/ci.yml or add new doc-store.yml to run 'doc-store doctor' + 'doc-store enforce-staged --base main' on PRs; required for merge | 1 | - | 2026-04-15 |
+| - | - | - | - | - |
 
 ## Review
 | ID | Task | Implementer | Security | QA | Domain | Architect |
@@ -38,7 +37,7 @@
 ## Testing
 | ID | Task | Test Flow | MUST Pass Rate | SHOULD Pass Rate |
 |----|------|-----------|----------------|------------------|
-| AP-055 | Sprint 4(c): Genesis phase 2 — run 'doc-store adopt docs/designs/doc-store-api-draft.md' to nadopt the design doc itself into .docstore/designs/; use preferGitMove to preserve history; commit the adoption as a distinct step | - | - | - |
+| - | - | - | - | - |
 
 ## Done
 | ID | Task | Completed | Verification |
@@ -79,7 +78,6 @@
 | AP-047 | auto-pilot infra: dispatch fail detection — when sub-agent exits !=0 but tests+build pass and code landed, treat as partial-success and run review gate only (not re-dispatch) | 2026-04-14 | Done in dogfood round 3, committed 2c9d086. See commit body for details. |
 | AP-048 | adopt test isolation: tests must create git-init'd tmpdir or adopt should fallback fs.rename when git unavailable; also must clean up .journal/ and test-adopt-tmp/ (test leak to repo root observed) | 2026-04-14 | Done in dogfood round 3, committed 2c9d086. See commit body for details. |
 | AP-049 | auto-pilot infra: suggest-gate and sprint prompts must read project's actual package.json test script (not hardcode 'npm test'); generalize for any stack | 2026-04-14 | Round 5 dogfood: code landed, check:all green; loop dispatch-detection still has lag but work is done. |
-| AP-056 | Sprint 4(d): Flip store config mode legacy -> mixed; managedRoots includes .docstore/designs, .docstore/decisions, .docstore/process; doctor validates post-flip; no regressions in hook behavior | 2026-04-15 | Auto-pilot loop: all gates passed at 2026-04-15T02:22:51.368Z |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
@@ -100,4 +98,8 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
+| P1 | AP-053 | Sprint 4(a): install DocStore pre-commit hook via 'doc-store install-hook' subcommand (idempotent, cascade with existing hooks, uninstallable); writes .git/hooks/pre-commit invoking enforce-staged; tests cover fresh install / existing hook preservation / uninstall | - | - | Sprint 4 plan — DocStore productionization |
+| P1 | AP-054 | Sprint 4(b): GitHub Actions CI step for DocStore — extend existing .github/workflows/ci.yml or add new doc-store.yml to run 'doc-store doctor' + 'doc-store enforce-staged --base main' on PRs; required for merge | - | - | Sprint 4 plan — DocStore productionization |
+| P1 | AP-055 | Sprint 4(c): Genesis phase 2 — run 'doc-store adopt docs/designs/doc-store-api-draft.md' to nadopt the design doc itself into .docstore/designs/; use preferGitMove to preserve history; commit the adoption as a distinct step | - | - | Sprint 4 plan, design doc §12 Genesis & Bootstrap phase 2 |
+| P1 | AP-056 | Sprint 4(d): Flip store config mode legacy -> mixed; managedRoots includes .docstore/designs, .docstore/decisions, .docstore/process; doctor validates post-flip; no regressions in hook behavior | - | - | Sprint 4 plan, design doc §5 Migration Modes |
 | P2 | AP-057 | Sprint 4(e): README + start-va-auto-pilot-prompt updates — DocStore usage section (init / adopt / hook install / modes); cross-link from CLAUDE.md Quality Gate section | - | - | Sprint 4 plan |

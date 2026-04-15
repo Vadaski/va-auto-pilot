@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 export const DOC_STORE_PRE_COMMIT_MARKER = "# doc-store managed pre-commit hook";
 export const DOC_STORE_PRE_COMMIT_BACKUP = "pre-commit.doc-store-prev";
@@ -54,6 +55,7 @@ export function isManagedPreCommitHook(content) {
 }
 
 function buildManagedPreCommitHook({ nodePath }) {
+  const cliPath = fileURLToPath(new URL("../../doc-store-cli.mjs", import.meta.url));
   return `#!/usr/bin/env bash
 set -euo pipefail
 ${DOC_STORE_PRE_COMMIT_MARKER}
@@ -67,7 +69,7 @@ if [ -x "$PREV_HOOK" ]; then
 fi
 
 cd "$REPO_ROOT"
-exec ${shellQuote(nodePath)} "$REPO_ROOT/scripts/doc-store-precommit.mjs" "$@"
+exec ${shellQuote(nodePath)} ${shellQuote(cliPath)} enforce-staged "$@"
 `;
 }
 

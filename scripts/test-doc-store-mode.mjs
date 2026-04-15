@@ -275,8 +275,10 @@ test("install-hook writes managed pre-commit hook and stays idempotent", () => {
   assert.equal(fs.existsSync(backupPath), false);
   const installed = fs.readFileSync(hookPath, "utf8");
   assert.match(installed, /doc-store managed pre-commit hook/);
-  assert.match(installed, /doc-store-precommit\.mjs/);
+  assert.match(installed, /doc-store-cli\.mjs' enforce-staged/);
   assert.equal(fs.statSync(hookPath).mode & 0o111, 0o111);
+  const hookRun = spawnSync(hookPath, [], { cwd, encoding: "utf8" });
+  assert.equal(hookRun.status, 0, hookRun.stderr);
 
   const second = runCli(cwd, "install-hook");
   assert.equal(second.status, 0, second.stderr);
@@ -287,7 +289,8 @@ test("install-hook preserves existing pre-commit hook via cascade backup", () =>
   const cwd = repo();
   const hookPath = preCommitHookPathFor(cwd);
   const backupPath = preCommitBackupPathFor(cwd);
-  const existingHook = "#!/usr/bin/env bash\nprintf 'legacy hook\\n'\n";
+  const sentinelPath = path.join(cwd, "legacy-hook-ran.txt");
+  const existingHook = `#!/usr/bin/env bash\nprintf 'legacy hook\\n' > '${sentinelPath}'\n`;
 
   fs.mkdirSync(path.dirname(hookPath), { recursive: true });
   fs.writeFileSync(hookPath, existingHook, "utf8");
@@ -297,6 +300,9 @@ test("install-hook preserves existing pre-commit hook via cascade backup", () =>
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(backupPath, "utf8"), existingHook);
   assert.match(fs.readFileSync(hookPath, "utf8"), /pre-commit\.doc-store-prev/);
+  const hookRun = spawnSync(hookPath, [], { cwd, encoding: "utf8" });
+  assert.equal(hookRun.status, 0, hookRun.stderr);
+  assert.equal(fs.readFileSync(sentinelPath, "utf8"), "legacy hook\n");
 });
 
 test("uninstall-hook removes managed hook and restores preserved pre-commit", () => {

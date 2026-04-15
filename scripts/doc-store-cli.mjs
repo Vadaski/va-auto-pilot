@@ -44,8 +44,7 @@ function printHookReport(report, command) {
   }
 }
 
-function parseStagedFiles(projectRoot) {
-  const changed = execFileSync("git", ["diff", "--cached", "--name-status"], { cwd: projectRoot, encoding: "utf8" });
+function parseNameStatusOutput(changed) {
   return changed
     .split(/\r?\n/)
     .filter(Boolean)
@@ -68,6 +67,16 @@ function parseStagedFiles(projectRoot) {
     });
 }
 
+function parseStagedFiles(projectRoot) {
+  const changed = execFileSync("git", ["diff", "--cached", "--name-status"], { cwd: projectRoot, encoding: "utf8" });
+  return parseNameStatusOutput(changed);
+}
+
+function parseDiffFiles(projectRoot, fromRef, toRef) {
+  const changed = execFileSync("git", ["diff", "--name-status", fromRef, toRef], { cwd: projectRoot, encoding: "utf8" });
+  return parseNameStatusOutput(changed);
+}
+
 function isMissingGitObject(error) {
   const stderr = String(error?.stderr ?? "");
   return error?.status === 128 && (
@@ -87,6 +96,15 @@ function readGitText(projectRoot, objectSpec) {
       return null;
     }
     throw error;
+  }
+}
+
+function resolveMergeBase(projectRoot, baseRef) {
+  try {
+    return execFileSync("git", ["merge-base", baseRef, "HEAD"], { cwd: projectRoot, encoding: "utf8" }).trim();
+  } catch (error) {
+    const detail = String(error?.stderr ?? error?.message ?? error).trim();
+    throw new Error(`Unable to resolve merge base for --base=${baseRef}. Fetch the base ref before running enforcement. ${detail}`);
   }
 }
 
@@ -119,7 +137,7 @@ async function run() {
   const format = parsed.options.format === "human" ? "human" : "json";
 
   if (!parsed.command || parsed.flags.has("help")) {
-    console.log("Usage: node ./scripts/doc-store-cli.mjs <init|doctor|enforce-staged|import|adopt|migrate|install-hook|uninstall-hook> [--force] [--format=json|human] [--kind=<kind>] [--title=<title>] [--plan-only] [--from=<version>] [--to=<version>]");
+    console.log("Usage: node ./scripts/doc-store-cli.mjs <init|doctor|enforce-staged|import|adopt|migrate|install-hook|uninstall-hook> [--force] [--format=json|human] [--kind=<kind>] [--title=<title>] [--plan-only] [--from=<version>] [--to=<version>] [--base=<git-ref>]");
     process.exit(0);
   }
 
@@ -238,13 +256,20 @@ async function run() {
 
   if (parsed.command === "enforce-staged") {
     const paths = resolveStorePaths(process.cwd());
+    const baseRef = parsed.options.base?.trim();
+    const isBaseMode = Boolean(baseRef);
+    const mergeBase = isBaseMode ? resolveMergeBase(paths.projectRoot, baseRef) : null;
 
-    const stagedConfigText = readGitText(paths.projectRoot, ":.docstore/store.config.json");
-    const headConfigText = readGitText(paths.projectRoot, "HEAD:.docstore/store.config.json");
+    const currentConfigSpec = isBaseMode ? "HEAD:.docstore/store.config.json" : ":.docstore/store.config.json";
+    const previousConfigSpec = isBaseMode
+      ? `${mergeBase}:.docstore/store.config.json`
+      : "HEAD:.docstore/store.config.json";
+    const currentConfigText = readGitText(paths.projectRoot, currentConfigSpec);
+    const previousConfigText = readGitText(paths.projectRoot, previousConfigSpec);
     let config = null;
-    if (stagedConfigText !== null) {
+    if (currentConfigText !== null) {
       try {
-        config = parseStagedConfigText(stagedConfigText);
+        config = parseStagedConfigText(currentConfigText);
       } catch (error) {
         if (error instanceof InvalidStagedConfigError || error instanceof NonCanonicalStagedConfigError) {
           console.error(`[${error.code}] ${error.message}`);
@@ -257,11 +282,15 @@ async function run() {
       }
     }
 
-    const stagedIndexText = readGitText(paths.projectRoot, ":.docstore/INDEX.json");
+    const currentIndexSpec = isBaseMode ? "HEAD:.docstore/INDEX.json" : ":.docstore/INDEX.json";
+    const previousIndexSpec = isBaseMode
+      ? `${mergeBase}:.docstore/INDEX.json`
+      : "HEAD:.docstore/INDEX.json";
+    const currentIndexText = readGitText(paths.projectRoot, currentIndexSpec);
     let index = null;
-    if (stagedIndexText !== null) {
+    if (currentIndexText !== null) {
       try {
-        index = validateIndexContent(stagedIndexText, ":.docstore/INDEX.json");
+        index = validateIndexContent(currentIndexText, currentIndexSpec);
       } catch (error) {
         if (error instanceof DocStoreError) {
           console.error(`[${error.code}] ${error.message}`);
@@ -274,8 +303,8 @@ async function run() {
       }
     }
 
-    const headIndexText = readGitText(paths.projectRoot, "HEAD:.docstore/INDEX.json");
-    const hasStoreMetadata = stagedConfigText !== null || headConfigText !== null || stagedIndexText !== null || headIndexText !== null;
+    const previousIndexText = readGitText(paths.projectRoot, previousIndexSpec);
+    const hasStoreMetadata = currentConfigText !== null || previousConfigText !== null || currentIndexText !== null || previousIndexText !== null;
 
     if (hasStoreMetadata) {
       const doctorReport = runDoctorOnSnapshot(config, index);
@@ -291,10 +320,12 @@ async function run() {
     }
 
     const result = checkStagedDiff({
-      stagedFiles: parseStagedFiles(paths.projectRoot),
+      stagedFiles: isBaseMode
+        ? parseDiffFiles(paths.projectRoot, mergeBase, "HEAD")
+        : parseStagedFiles(paths.projectRoot),
       config: config ?? { ...buildDefaultConfig(), mode: "legacy", managedRoots: [] },
       index: index ?? { entries: {} },
-      previousIndex: headIndexText === null ? { entries: {} } : JSON.parse(headIndexText)
+      previousIndex: previousIndexText === null ? { entries: {} } : JSON.parse(previousIndexText)
     });
     if (!result.ok) {
       for (const violation of result.violations) {

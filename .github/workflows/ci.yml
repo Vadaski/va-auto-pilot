@@ -16,3 +16,22 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run check:all
+
+  doc-store:
+    name: doc-store
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: git fetch --no-tags --prune origin +refs/heads/main:refs/heads/main
+      - run: npm run doc-store:doctor
+      - run: npm run doc-store:enforce-staged -- --base main

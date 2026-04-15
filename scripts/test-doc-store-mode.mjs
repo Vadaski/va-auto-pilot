@@ -544,6 +544,42 @@ test("enforce-staged accepts valid managed write with bumped revision", async ()
   assert.equal(result.status, 0, result.stderr);
 });
 
+test("enforce-staged --base rejects committed bare managed modify in PR diff", async () => {
+  const cwd = repo();
+  await initManagedRepo(cwd);
+  git(cwd, "branch", "-M", "main");
+  const record = await createCommittedDesign(cwd, "PR Baseline");
+  git(cwd, "checkout", "-qb", "feature/docstore");
+
+  const artifactPath = path.join(cwd, ".docstore", record.path);
+  const artifact = json(artifactPath);
+  artifact.frontmatter.body = "manual edit outside managed store";
+  writeJson(artifactPath, artifact);
+  await bumpIndexTimestamp(cwd);
+  stage(cwd, ".docstore/INDEX.json", `.docstore/${record.path}`);
+  commitAll(cwd, "manual artifact edit");
+
+  const result = runCli(cwd, "enforce-staged", "--base", "main");
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /BARE_MANAGED_MODIFY/);
+});
+
+test("enforce-staged --base accepts committed managed write in PR diff", async () => {
+  const cwd = repo();
+  await initManagedRepo(cwd);
+  git(cwd, "branch", "-M", "main");
+  git(cwd, "checkout", "-qb", "feature/docstore");
+
+  const store = await openManagedDocStore(path.join(cwd, ".docstore"));
+  await store.createDesign({ title: "CI Safe Change" });
+  await store.close();
+  stage(cwd, ".docstore");
+  commitAll(cwd, "managed docstore update");
+
+  const result = runCli(cwd, "enforce-staged", "--base", "main");
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test("enforce-staged rejects staged config with bare managedRoots before diff enforcement", async () => {
   const cwd = repo();
   await initManagedRepo(cwd);

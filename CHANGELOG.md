@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-04-15
+
+### Added
+
+- ManagedDocStore SDK + WAL + single-handle contract (Sprint 1–3)
+- Mode-aware enforcement (`legacy | mixed | strict`) + init/doctor lifecycle
+- Human-board parser strictness: only checkbox bullets count as instructions
+- Layered journal view (`sprint-board journal --view`)
+- Adaptive gates, parallel execution, sprint completion review
+- Error recovery classification + structured review pipeline
+- Loop auto-restart, auto-commit, commit failure rollback
+- Pluggable quality gates — project-specific build/test/acceptance
+- LLM quality observation: judge + trend tracking
+- E2E test harness with 10 deterministic scenarios
+- Feedback → learn loop: failures auto-pitfall, resolutions auto-gate
+- Standalone `va-review` skill — contextual review with perspective + pitfalls
+- Dynamic perspective selection for sprint completion review
+- Recovery rolls back mirrored targets (DocStore Sprint 1-bis B13)
+- Meta rounds 5–8: test-script discovery, colony routing, gate naming, prompts, state race + success detection + loop self-refit (AP-052), state artifacts cleanup
+- Constraint-library seeding (Phase 1 PoC) + YAML-loader bridge (Phase 1.1)
+- DocStore Sprint 4: install-hook + CI workflow + design-doc self-adoption
+- SKILL 5.0.0 with DocStore + constraint library
+- Skill source-install mode: bootstrap from local checkout via symlink
+
+### Fixed
+
+- Review gate self-heal (fail-closed semantics for unstructured output)
+- Human-board parser only treats checkbox bullets as instructions
+- Pitfall re-resolve guard
+
+### Changed
+
+- Review gate output normalized to REVIEW STATUS + structured findings
+- Sprint board add/update commands surface full audit trail
+
 ## [0.1.0] - 2026-02-24
 
 ### Added

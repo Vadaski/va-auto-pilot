@@ -23,6 +23,7 @@ CLI agents (codex, claude, gemini, kimi, glm) → bottom-layer execution
 ## Quality Gate
 
 Quality gates are **pluggable per project** — see `docs/operations/va-auto-pilot-protocol.md` Quality Gates section.
+If the repo manages docs through ManagedDocStore, also follow [`README.md` → Managed DocStore](README.md#managed-docstore) for `init`, `adopt`, hook install, and mode handling.
 
 For va-auto-pilot itself (TypeScript):
 ```bash

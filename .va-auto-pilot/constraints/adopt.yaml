@@ -1,0 +1,30 @@
+id: adopt
+type: auto-pilot-constraint-set
+payload:
+  domain: adopt
+  tags: [adopt, import, legacy, doc-store, git-mv, rename, tmpdir, isolation]
+  synthesis: Keep document adoption portable across git and non-git environments, and keep adopt-path validation isolated from repo-root state.
+  constraints:
+    - type: boundary
+      statement: Adoption paths must preserve git history when available, but fall back to filesystem move semantics when the target is outside a git worktree
+      confidence: 0.97
+      sourceFactorIds: [PF-008, PF-010, PF-011, PF-013]
+    - type: invariant
+      statement: Adopt harnesses must either initialize a git temp repo or explicitly assert the non-git path; never assume tempdirs are git-backed
+      confidence: 0.96
+      sourceFactorIds: [PF-008, PF-010, PF-011, PF-012]
+    - type: prerequisite
+      statement: Adopt harnesses must clean repo-root scratch directories such as `.journal` and the adopt temp dir on every run
+      confidence: 0.89
+      sourceFactorIds: [PF-011, PF-012]
+    - type: trade-off
+      statement: Prefer preserving history, but landing the adoption correctly in the managed store is more important than insisting on `git mv` everywhere
+      confidence: 0.83
+      sourceFactorIds: [PF-008, PF-010, PF-011, PF-012]
+    - type: anti-pattern
+      statement: Letting adopt-path isolation failures masquerade as unrelated task failures after the product code already landed
+      confidence: 0.88
+      sourceFactorIds: [PF-008, PF-010, PF-011, PF-012, PF-013]
+  blindSpots:
+    - cross-device moves with partial copy failure
+    - very large binary adoption cost

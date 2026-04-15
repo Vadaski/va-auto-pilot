@@ -1,5 +1,9 @@
 Constraint sets in this directory are opt-in prompt inputs for `va-auto-pilot`.
 
+This repository now seeds the library from resolved dogfood root causes across
+five domains: `dispatch`, `review-gate`, `adopt`, `mode-enforcement`, and
+`state-race`.
+
 Contract:
 - each file must be `*.yaml`
 - top-level envelope must include `id`, `type: auto-pilot-constraint-set`, and `payload`

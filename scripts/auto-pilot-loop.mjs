@@ -14,7 +14,7 @@
  *   --max-parallel <n>      Parallel track count (default: 3)
  *   --parallel              Enable multi-track execution (default)
  *   --no-parallel           Disable multi-track execution
- *   --agent-template <cmd>  Agent command template (default: "claude --task {taskId}")
+ *   --agent-template <cmd>  Agent command template (default: "claude -p --output-format text 'Implement task {taskId} in this project'")
  *   --single-cycle          Run exactly one task cycle, then exit
  *   --dry-run               Print plan without executing
  *   --no-commit             Skip git add/git commit after gates pass
@@ -29,7 +29,13 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
-import { parseArgv, nowIso, readQualityGateConfig, resolveDefaults } from "./lib/sprint-utils.mjs";
+import {
+  DEFAULT_AGENT_TEMPLATE,
+  parseArgv,
+  nowIso,
+  readQualityGateConfig,
+  resolveDefaults
+} from "./lib/sprint-utils.mjs";
 import { suggestGatesFromPitfalls } from "./lib/adaptive-gates.mjs";
 import {
   readHumanBoardInstructions,
@@ -2486,7 +2492,7 @@ Options:
   --max-parallel <n>      Parallel track count (default: 3)
   --parallel              Enable multi-track execution (default)
   --no-parallel           Disable multi-track execution
-  --agent-template <cmd>  Agent command template (default: "claude --task {taskId}")
+  --agent-template <cmd>  Agent command template (default: "claude -p --output-format text 'Implement task {taskId} in this project'")
   --single-cycle          Run exactly one task cycle, then exit
   --dry-run               Print plan without executing
   --no-commit             Skip git add/git commit after gates pass
@@ -2531,7 +2537,7 @@ async function main() {
     maxCycles: parseInt(parsed.options["max-cycles"] ?? "50", 10),
     maxParallel: parseInt(parsed.options["max-parallel"] ?? "3", 10),
     parallel: !parsed.flags.has("no-parallel"),
-    agentTemplate: parsed.options["agent-template"] ?? "claude --task {taskId}",
+    agentTemplate: parsed.options["agent-template"] ?? DEFAULT_AGENT_TEMPLATE,
     dryRun: parsed.flags.has("dry-run"),
     singleCycle: parsed.flags.has("single-cycle"),
     noCommit: parsed.flags.has("no-commit"),

@@ -153,6 +153,52 @@ node scripts/sprint-board.mjs render
 
 ---
 
+## Managed DocStore
+
+VA Auto-Pilot can manage design, decision, and process documents through `ManagedDocStore`. When a repo tracks `.docstore/*`, use the DocStore CLI for writes instead of editing managed artifacts by hand.
+
+### Init / repair
+
+```bash
+node ./scripts/doc-store-cli.mjs init
+node ./scripts/doc-store-cli.mjs init --force --mode=mixed --managed-roots=.docstore/designs,.docstore/decisions,.docstore/process
+```
+
+- `init` is safe to rerun. On a healthy store it falls through to `doctor`.
+- Use `--force` when you intentionally change `mode` or `managedRoots`. Existing journal state, archive artifacts, and registered extensions are retained.
+- If `doctor` reports pending journal recovery or config/index drift, repair through `init` or the ManagedDocStore APIs instead of hand-editing `.docstore/INDEX.json`.
+
+### Adopt legacy docs
+
+```bash
+node ./scripts/doc-store-cli.mjs adopt docs/designs/doc-store-api-draft.md --kind=design --title="DocStore API Draft"
+```
+
+- `adopt` moves an existing file into `.docstore/` and prefers `git mv` so history stays attached when the repo supports it.
+- Outside a git worktree it falls back to a normal move, so local sandboxes and tests still work.
+
+### Install hook
+
+```bash
+node ./scripts/doc-store-cli.mjs install-hook
+node ./scripts/doc-store-cli.mjs uninstall-hook
+```
+
+- `install-hook` is idempotent.
+- `uninstall-hook` is safe to rerun; if a preserved hook exists it is restored, otherwise the command exits cleanly.
+- If `.git/hooks/pre-commit` already exists, DocStore preserves it as `pre-commit.doc-store-prev` and chains to it before running `enforce-staged`.
+
+### Modes
+
+- `legacy` — permissive rollout mode; managed-path enforcement is off.
+- `mixed` — legacy paths stay editable, but configured `.docstore/*` roots must be written through DocStore.
+- `managed` — configured managed roots are strict; manual adds, edits, or deletes are rejected unless the staged `INDEX.json` change matches the artifact change.
+- Change `mode` or `managedRoots` through `doc-store-cli init --force ...` so config and index stay in sync.
+
+This repository currently uses `mixed` mode with `.docstore/designs`, `.docstore/decisions`, and `.docstore/process` as managed roots.
+
+---
+
 ## Goal-First Delegation
 
 The correct way to use this framework is to give it a goal, not a plan.

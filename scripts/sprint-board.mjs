@@ -82,7 +82,12 @@ const DEFAULT_MAX_PARALLEL = 2;
 const DEFAULTS = resolveDefaults();
 const DEFAULT_PITFALLS_FILE = ".va-auto-pilot/pitfalls.json";
 const DEFAULT_CONFIG_FILE = ".va-auto-pilot/config.yaml";
+const DEFAULT_CONSTRAINTS_DIR = ".va-auto-pilot/constraints";
 const VALID_FAILURE_TYPES = ["gate", "acceptance", "review"];
+const CONSTRAINT_STOPWORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "into",
+  "is", "it", "of", "on", "or", "that", "the", "this", "to", "via", "with"
+]);
 
 function printHelp() {
   console.log(`sprint-board
@@ -1171,6 +1176,379 @@ function appendSuggestedGate(configFile, suggestion) {
   return { added: true, gate: adaptiveGates.at(-1) ?? suggestion };
 }
 
+function splitLines(value) {
+  return String(value ?? "")
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function slugify(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function lowercaseFirst(value) {
+  const input = String(value ?? "").trim();
+  if (!input) return "";
+  return input[0].toLowerCase() + input.slice(1);
+}
+
+function capitalizeSentence(value) {
+  const input = String(value ?? "").trim();
+  if (!input) return "";
+  return input[0].toUpperCase() + input.slice(1);
+}
+
+function tokenizeConstraintKeywords(...values) {
+  return [...new Set(values
+    .flatMap((value) => String(value ?? "").toLowerCase().split(/[^a-z0-9]+/g))
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !CONSTRAINT_STOPWORDS.has(token))
+  )];
+}
+
+function inferConstraintDomain(taskTitle, hypothesis, resolution) {
+  const haystack = `${taskTitle} ${hypothesis} ${resolution}`.toLowerCase();
+  if (haystack.includes("sprint-board")) return "sprint-board";
+  if (haystack.includes("docstore") || haystack.includes("doc-store")) return "doc-store";
+  if (haystack.includes("review")) return "review";
+  if (haystack.includes("dispatch") || haystack.includes("agent")) return "dispatch";
+  if (haystack.includes("lock") || haystack.includes("state race")) return "state";
+  if (haystack.includes("write path") || haystack.includes("write-path") || haystack.includes("persist")) return "write-path";
+  const tokens = tokenizeConstraintKeywords(taskTitle, hypothesis, resolution);
+  return tokens[0] ?? "general";
+}
+
+function inferConstraintType(taskTitle, hypothesis, resolution) {
+  const haystack = `${taskTitle} ${hypothesis} ${resolution}`.toLowerCase();
+  if (/\b(idempotent|idempotency|retry|retries|repeat|repeated|duplicate|double)\b/.test(haystack)) return "invariant";
+  if (/\b(stale lock|stale locks|recover|recovery|before|require|required|prerequisite|must exist)\b/.test(haystack)) return "prerequisite";
+  if (/\b(trade-off|strictness|developer experience|ergonomic|ergonomics|balance|vs\.)\b/.test(haystack)) return "trade-off";
+  if (/\b(anti-pattern|hardcod|fallback|assumption|assumptions|silent degradation|silent fallback|npm test)\b/.test(haystack)) return "anti-pattern";
+  return "boundary";
+}
+
+function normalizeConstraintStatement(sourceText, type) {
+  let statement = String(sourceText ?? "").trim().replace(/\s+/g, " ").replace(/[.。]+$/g, "");
+  if (!statement) return "";
+  statement = statement
+    .replace(/\bshould become\b/ig, "must be")
+    .replace(/\bshould\b/ig, "must")
+    .replace(/^made\s+(.+?)\s+permanent$/i, "$1 must remain permanent")
+    .replace(/^added\s+(.+)$/i, "$1 must be added")
+    .replace(/^ensured?\s+/i, "")
+    .replace(/^fixed\s+/i, "");
+  if (!/\b(must|avoid|never|require|recover|validate|lean|prefer|keep)\b/i.test(statement)) {
+    switch (type) {
+      case "invariant":
+        statement = `Keep ${lowercaseFirst(statement)}`;
+        break;
+      case "prerequisite":
+        statement = `Require ${lowercaseFirst(statement)} before proceeding`;
+        break;
+      case "trade-off":
+        statement = `Treat ${lowercaseFirst(statement)} as an explicit trade-off`;
+        break;
+      case "anti-pattern":
+        statement = `Avoid ${lowercaseFirst(statement)}`;
+        break;
+      default:
+        statement = `Ensure ${lowercaseFirst(statement)}`;
+        break;
+    }
+  }
+  return capitalizeSentence(statement);
+}
+
+function chooseConstraintSource(entry, resolution) {
+  const resolutionText = String(resolution ?? "").trim();
+  const hypothesisText = String(entry?.hypothesis ?? "").trim();
+  const candidate = resolutionText || hypothesisText;
+  return candidate || `carry forward the lesson from ${String(entry?.id ?? "this pitfall").trim()}`;
+}
+
+function buildSynthesizedConstraintDocument(entry, task, resolution) {
+  const type = inferConstraintType(task.title, entry.hypothesis, resolution);
+  const domain = inferConstraintDomain(task.title, entry.hypothesis, resolution);
+  const statement = normalizeConstraintStatement(chooseConstraintSource(entry, resolution), type);
+  const tags = [
+    slugify(task.id),
+    slugify(entry.id),
+    slugify(domain),
+    ...tokenizeConstraintKeywords(task.title, entry.hypothesis, resolution).slice(0, 6)
+  ].filter(Boolean);
+  return {
+    id: [slugify(task.id), slugify(entry.id), slugify(domain)].filter(Boolean).join("-"),
+    type: "auto-pilot-constraint-set",
+    payload: {
+      domain,
+      tags: [...new Set(tags)],
+      synthesis: `Derived from ${task.id} (${task.title}): ${String(entry.hypothesis ?? "").trim()} Resolved via: ${String(resolution).trim()}`,
+      constraints: [
+        {
+          type,
+          statement,
+          confidence: 0.72,
+          sourceFactorIds: [String(entry.id)]
+        }
+      ],
+      blindSpots: ["auto-generated-from-pitfall"]
+    }
+  };
+}
+
+function validateSynthesizedConstraintDocument(document) {
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    throw new VAPilotError("CONFIG_ERROR", "Synthesized constraint must be an object");
+  }
+  if (String(document.id ?? "").trim() === "") {
+    throw new VAPilotError("CONFIG_ERROR", "Synthesized constraint is missing id");
+  }
+  if (String(document.type ?? "").trim() !== "auto-pilot-constraint-set") {
+    throw new VAPilotError("CONFIG_ERROR", "Synthesized constraint has unsupported type", { type: document.type });
+  }
+  const payload = document.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new VAPilotError("CONFIG_ERROR", "Synthesized constraint is missing payload");
+  }
+  if (String(payload.domain ?? "").trim() === "") {
+    throw new VAPilotError("CONFIG_ERROR", "Synthesized constraint is missing payload.domain");
+  }
+  if (!Array.isArray(payload.tags) || payload.tags.length === 0) {
+    throw new VAPilotError("CONFIG_ERROR", "Synthesized constraint is missing payload.tags");
+  }
+  if (String(payload.synthesis ?? "").trim() === "") {
+    throw new VAPilotError("CONFIG_ERROR", "Synthesized constraint is missing payload.synthesis");
+  }
+  if (!Array.isArray(payload.constraints) || payload.constraints.length === 0) {
+    throw new VAPilotError("CONFIG_ERROR", "Synthesized constraint is missing payload.constraints");
+  }
+  const constraint = payload.constraints[0];
+  if (!["boundary", "invariant", "prerequisite", "trade-off", "anti-pattern"].includes(String(constraint?.type ?? ""))) {
+    throw new VAPilotError("CONFIG_ERROR", "Synthesized constraint has invalid type", { type: constraint?.type });
+  }
+  if (String(constraint?.statement ?? "").trim() === "") {
+    throw new VAPilotError("CONFIG_ERROR", "Synthesized constraint is missing statement");
+  }
+  if (!Array.isArray(payload.blindSpots)) {
+    throw new VAPilotError("CONFIG_ERROR", "Synthesized constraint is missing payload.blindSpots");
+  }
+}
+
+function resolveConstraintsDir(pitfallsFile, runtime = {}) {
+  if (runtime.constraintsDir) {
+    return path.resolve(runtime.constraintsDir);
+  }
+  return path.join(resolveProjectDirFromPilotArtifact(pitfallsFile), DEFAULT_CONSTRAINTS_DIR);
+}
+
+function constraintFilePathForPitfall(constraintsDir, entry) {
+  return path.join(constraintsDir, `${slugify(entry.id) || "pitfall-constraint"}.yaml`);
+}
+
+function writeTextFileIfChanged(filePath, content) {
+  const resolved = path.resolve(filePath);
+  if (fs.existsSync(resolved) && fs.readFileSync(resolved, "utf8") === content) {
+    return false;
+  }
+  writeTextFileAtomicSync(resolved, content);
+  return true;
+}
+
+function journalHasSignal(filePath, signal) {
+  if (!fs.existsSync(filePath)) return false;
+  return fs.readFileSync(filePath, "utf8").includes(signal);
+}
+
+function appendJournalOnce(filePath, options, signal) {
+  if (journalHasSignal(filePath, signal)) {
+    return false;
+  }
+  appendJournal(filePath, options);
+  return true;
+}
+
+function normalizeConstraintYamlContent(document) {
+  return `${stringifyYaml(document).trimEnd()}\n`;
+}
+
+function buildConstraintCommitHeader(task) {
+  const description = String(task?.title ?? task?.id ?? "constraint memory")
+    .replace(/\s+/g, " ")
+    .trim();
+  return `constraint: ${description}`;
+}
+
+async function git(args, options = {}) {
+  return execFileAsync("git", args, {
+    encoding: "utf8",
+    cwd: options.cwd ?? process.cwd(),
+    timeout: options.timeout ?? 30_000,
+    env: options.env ?? process.env
+  });
+}
+
+function formatGitError(error) {
+  const stderr = String(error?.stderr ?? "").trim();
+  const stdout = String(error?.stdout ?? "").trim();
+  const message = String(error?.message ?? "").trim();
+  return stderr || stdout || message || "unknown git error";
+}
+
+async function resolveRepoFilesForCommit(files, workDir) {
+  const canonicalWorkDir = canonicalizePathForComparison(workDir);
+  const uniqueFiles = [...new Set(files
+    .map((filePath) => path.relative(canonicalWorkDir, canonicalizePathForComparison(filePath)))
+    .filter((relativePath) => relativePath && !relativePath.startsWith(".."))
+  )];
+  return uniqueFiles.sort((left, right) => left.localeCompare(right));
+}
+
+async function detectDirtyFilesForCommit(files, workDir) {
+  if (files.length === 0) {
+    return [];
+  }
+  const [tracked, untracked] = await Promise.all([
+    git(["diff", "--name-only", "--relative", "HEAD", "--", ...files], { cwd: workDir }),
+    git(["ls-files", "--others", "--exclude-standard", "--", ...files], { cwd: workDir })
+  ]);
+  return [...new Set([
+    ...splitLines(tracked.stdout),
+    ...splitLines(untracked.stdout)
+  ])].sort((left, right) => left.localeCompare(right));
+}
+
+async function captureConstraintCommitBaseline(files, workDir) {
+  try {
+    const inside = await git(["rev-parse", "--is-inside-work-tree"], { cwd: workDir });
+    if (inside.stdout.trim() !== "true") {
+      return { insideGit: false, repoFiles: [], dirtyFiles: [] };
+    }
+  } catch {
+    return { insideGit: false, repoFiles: [], dirtyFiles: [] };
+  }
+
+  const repoFiles = await resolveRepoFilesForCommit(files, workDir);
+  if (repoFiles.length === 0) {
+    return { insideGit: true, repoFiles, dirtyFiles: [] };
+  }
+
+  return {
+    insideGit: true,
+    repoFiles,
+    dirtyFiles: await detectDirtyFilesForCommit(repoFiles, workDir)
+  };
+}
+
+function validatePitfallForResolution(entry, pfId) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new VAPilotError("CONFIG_ERROR", `Pitfall ${pfId} has invalid shape`, { pitfallId: pfId });
+  }
+  if (String(entry.id ?? "").trim() !== String(pfId).trim()) {
+    throw new VAPilotError("CONFIG_ERROR", `Pitfall ${pfId} has inconsistent id`, {
+      pitfallId: pfId,
+      actualId: entry.id
+    });
+  }
+  if (String(entry.taskId ?? "").trim() === "") {
+    throw new VAPilotError("CONFIG_ERROR", `Pitfall ${pfId} is missing taskId`, { pitfallId: pfId });
+  }
+  if (!VALID_FAILURE_TYPES.includes(String(entry.failureType ?? "").trim())) {
+    throw new VAPilotError("CONFIG_ERROR", `Pitfall ${pfId} has invalid failureType`, {
+      pitfallId: pfId,
+      failureType: entry.failureType
+    });
+  }
+  if (String(entry.hypothesis ?? "").trim() === "") {
+    throw new VAPilotError("CONFIG_ERROR", `Pitfall ${pfId} is missing hypothesis`, { pitfallId: pfId });
+  }
+}
+
+function canonicalizePathForComparison(filePath) {
+  const resolved = path.resolve(filePath);
+  if (fs.existsSync(resolved)) {
+    return fs.realpathSync.native(resolved);
+  }
+  const parentDir = path.dirname(resolved);
+  const realParentDir = fs.existsSync(parentDir)
+    ? fs.realpathSync.native(parentDir)
+    : parentDir;
+  return path.join(realParentDir, path.basename(resolved));
+}
+
+async function commitConstraintArtifacts(files, task, options = {}) {
+  const workDir = options.workDir ?? process.cwd();
+  const header = buildConstraintCommitHeader(task);
+  const baseline = options.baseline ?? await captureConstraintCommitBaseline(files, workDir);
+  if (!baseline.insideGit) {
+    return { attempted: false, skipped: true, reason: "not a git repository", hash: "", header, files: [] };
+  }
+  const repoFiles = baseline.repoFiles ?? await resolveRepoFilesForCommit(files, workDir);
+  if (repoFiles.length === 0) {
+    return { attempted: false, skipped: true, reason: "no repository-local files", hash: "", header, files: [] };
+  }
+  if (Array.isArray(baseline.dirtyFiles) && baseline.dirtyFiles.length > 0) {
+    return {
+      attempted: false,
+      skipped: true,
+      reason: `pre-existing dirty files: ${baseline.dirtyFiles.join(", ")}`,
+      hash: "",
+      header,
+      files: [...baseline.dirtyFiles]
+    };
+  }
+
+  try {
+    await git(["add", "--all", "--", ...repoFiles], { cwd: workDir });
+    const staged = await git(["diff", "--cached", "--name-only", "--relative", "--", ...repoFiles], { cwd: workDir });
+    const stagedFiles = splitLines(staged.stdout);
+    if (stagedFiles.length === 0) {
+      return { attempted: true, skipped: true, reason: "no staged changes", hash: "", header, files: [] };
+    }
+
+    await git(["commit", "-m", header, "--only", "--", ...stagedFiles], { cwd: workDir });
+    const head = await git(["rev-parse", "HEAD"], { cwd: workDir });
+    return {
+      attempted: true,
+      skipped: false,
+      reason: "",
+      hash: head.stdout.trim(),
+      header,
+      files: stagedFiles
+    };
+  } catch (error) {
+    try {
+      await git(["reset", "--mixed", "HEAD", "--", ...repoFiles], { cwd: workDir });
+    } catch {
+      // Best effort only; preserve the original commit failure reason.
+    }
+    return {
+      attempted: true,
+      skipped: true,
+      reason: `git commit failed: ${formatGitError(error)}`,
+      hash: "",
+      header,
+      files: []
+    };
+  };
+}
+
+function findTaskForPitfall(stateFile, taskId) {
+  const state = readState(stateFile);
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) {
+    throw new VAPilotError("INVALID_TASK", `Task not found for pitfall: ${taskId}`, { taskId, stateFile });
+  }
+  if (!String(task.title ?? "").trim()) {
+    throw new VAPilotError("INVALID_TASK", `Task ${taskId} is missing title`, { taskId, stateFile });
+  }
+  return task;
+}
+
 /**
  * @param {PitfallRecord[]} entries
  * @returns {string}
@@ -1223,36 +1601,80 @@ function addPitfall(pitfallsFile, options) {
 /**
  * @param {string} pitfallsFile
  * @param {Record<string, string>} options
- * @param {{ journalFile?: string, configFile?: string }} [runtime]
- * @returns {PitfallRecord | { skipped: true, reason: string, id: string }}
+ * @param {{ journalFile?: string, configFile?: string, stateFile?: string, constraintsDir?: string, workDir?: string }} [runtime]
+ * @returns {Promise<{ id: string, entry: PitfallRecord, skipped: boolean, reason?: string, constraintFile: string, suggestionResult: { added: boolean, gate: { name: string, command: string, required: boolean, description: string, triggeredBy: string } }, journalAdded: boolean, constraintWritten: boolean, commitResult: { attempted: boolean, skipped: boolean, reason: string, hash: string, header: string, files: string[] } }>}
  */
-function resolvePitfall(pitfallsFile, options, runtime = {}) {
+async function resolvePitfall(pitfallsFile, options, runtime = {}) {
   const pfId = requireOption(options, "resolve");
   const resolution = requireOption(options, "resolution");
+  if (!/^PF-\d+$/i.test(pfId)) {
+    throw new VAPilotError("CONFIG_ERROR", `Invalid pitfall id '${pfId}'. Expected PF-<number>.`, { pitfallId: pfId });
+  }
+  if (String(resolution).trim() === "") {
+    throw new VAPilotError("CONFIG_ERROR", "Resolution must not be empty", { pitfallId: pfId });
+  }
 
   const data = readPitfalls(pitfallsFile);
   const entry = data.entries.find((e) => e.id === pfId);
   if (!entry) {
     throw new Error(`Pitfall not found: ${pfId}`);
   }
-  if (entry.resolvedAt && String(entry.resolvedAt).trim() !== "") {
-    return { skipped: true, reason: "already-resolved", id: pfId };
+  validatePitfallForResolution(entry, pfId);
+  const alreadyResolved = entry.resolvedAt && String(entry.resolvedAt).trim() !== "";
+  if (alreadyResolved && String(entry.resolution ?? "").trim() !== "" && String(entry.resolution).trim() !== String(resolution).trim()) {
+    throw new VAPilotError("CONFIG_ERROR", `Pitfall ${pfId} is already resolved with a different resolution`, {
+      pitfallId: pfId,
+      existingResolution: entry.resolution
+    });
   }
-  entry.resolution = resolution;
-  entry.resolvedAt = nowIso();
-  writePitfalls(pitfallsFile, data);
 
   const configFile = runtime.configFile
     ? path.resolve(runtime.configFile)
     : path.resolve(path.dirname(pitfallsFile), "..", DEFAULT_CONFIG_FILE);
-  const projectDir = resolveProjectDirFromPilotArtifact(configFile);
+  const stateFile = runtime.stateFile
+    ? path.resolve(runtime.stateFile)
+    : path.resolve(path.dirname(pitfallsFile), "sprint-state.json");
+  const task = findTaskForPitfall(stateFile, entry.taskId);
+  const nextResolvedAt = alreadyResolved ? entry.resolvedAt : nowIso();
+  const resolvedEntry = {
+    ...entry,
+    resolution,
+    resolvedAt: nextResolvedAt
+  };
+  const constraintDocument = buildSynthesizedConstraintDocument(resolvedEntry, task, resolvedEntry.resolution);
+  validateSynthesizedConstraintDocument(constraintDocument);
+  const constraintsDir = resolveConstraintsDir(pitfallsFile, runtime);
+  fs.mkdirSync(constraintsDir, { recursive: true });
+  const constraintFile = constraintFilePathForPitfall(constraintsDir, entry);
+  const projectDir = resolveProjectDirFromPilotArtifact(pitfallsFile);
+  const commitBaseline = await captureConstraintCommitBaseline(
+    [
+      pitfallsFile,
+      configFile,
+      constraintFile,
+      ...(runtime.journalFile ? [runtime.journalFile] : [])
+    ],
+    runtime.workDir ?? projectDir
+  );
+
+  if (!alreadyResolved || String(entry.resolution ?? "").trim() === "") {
+    entry.resolution = resolution;
+    entry.resolvedAt = nextResolvedAt;
+    writePitfalls(pitfallsFile, data);
+  }
+  const constraintWritten = writeTextFileIfChanged(
+    constraintFile,
+    normalizeConstraintYamlContent(constraintDocument)
+  );
+
   const suggestion = suggestGateFromPitfall(entry, { projectDir });
   const suggestionResult = appendSuggestedGate(configFile, suggestion);
+  let journalAdded = false;
   if (runtime.journalFile) {
     const summary = suggestionResult.added
       ? `Resolved pitfall ${entry.id}. Suggested gate appended: ${suggestion.name} -> ${suggestion.command}`
       : `Resolved pitfall ${entry.id}. Suggested gate already present: ${suggestion.name} -> ${suggestion.command}`;
-    appendJournal(runtime.journalFile, {
+    journalAdded = appendJournalOnce(runtime.journalFile, {
       task: entry.taskId,
       summary,
       signals: [
@@ -1260,9 +1682,34 @@ function resolvePitfall(pitfallsFile, options, runtime = {}) {
         `adaptive-gate:${suggestion.name}`,
         `adaptive-gate-trigger:${suggestion.triggeredBy}`
       ].join(",")
-    });
+    }, `pitfall-resolved:${entry.id}`);
   }
-  return entry;
+
+  const commitResult = await commitConstraintArtifacts(
+    [
+      pitfallsFile,
+      configFile,
+      constraintFile,
+      ...(runtime.journalFile ? [runtime.journalFile] : [])
+    ],
+    task,
+    {
+      workDir: runtime.workDir ?? projectDir,
+      baseline: commitBaseline
+    }
+  );
+
+  return {
+    id: entry.id,
+    entry,
+    skipped: Boolean(alreadyResolved && !constraintWritten && !journalAdded && !suggestionResult.added && commitResult.skipped),
+    ...(alreadyResolved ? { reason: "already-resolved" } : {}),
+    constraintFile,
+    suggestionResult,
+    journalAdded,
+    constraintWritten,
+    commitResult
+  };
 }
 
 /**
@@ -1681,15 +2128,32 @@ async function main() {
   if (parsed.command === "pitfall") {
     // --resolve: mark an existing entry resolved
     if (parsed.options.resolve) {
-      const entry = resolvePitfall(pitfallsFile, parsed.options, {
-        journalFile,
-        configFile: path.resolve(DEFAULT_CONFIG_FILE)
+      /** @type {Awaited<ReturnType<typeof resolvePitfall>> | null} */
+      let result = null;
+      await withPilotFileLock(pitfallsFile, async () => {
+        result = await resolvePitfall(pitfallsFile, parsed.options, {
+          journalFile,
+          configFile: path.resolve(DEFAULT_CONFIG_FILE),
+          stateFile,
+          workDir: resolveProjectDirFromPilotArtifact(pitfallsFile)
+        });
       });
-      if ("skipped" in entry && entry.skipped) {
-        console.log(`Pitfall already resolved: ${entry.id} (skipped)`);
+      if (!result) {
+        throw new Error("Pitfall resolve did not produce a result.");
+      }
+      if (result.skipped) {
+        console.log(`Pitfall already resolved: ${result.id} (skipped)`);
       } else {
-        console.log(`Pitfall resolved: ${entry.id}`);
+        console.log(`Pitfall resolved: ${result.id}`);
         console.log(`Pitfalls file: ${path.relative(process.cwd(), pitfallsFile)}`);
+        console.log(`Constraint file: ${path.relative(process.cwd(), result.constraintFile)}`);
+      }
+      if (!result.skipped) {
+        if (result.commitResult.skipped) {
+          console.log(`Commit skipped: ${result.commitResult.reason}`);
+        } else {
+          console.log(`Commit: ${result.commitResult.hash} (${result.commitResult.header})`);
+        }
       }
       return;
     }

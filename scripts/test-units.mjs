@@ -11,11 +11,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { parse as parseYaml } from "yaml";
 
 // ---------------------------------------------------------------------------
 // Import helpers from sprint-utils
 // ---------------------------------------------------------------------------
 import {
+  DEFAULT_AGENT_TEMPLATE,
   nowIso,
   stripYamlValue,
   readSprintPathsFromConfig,
@@ -286,6 +288,43 @@ test("collectConstraints returns graceful empty on malformed yaml", async () => 
     assert.equal(typeof result.error, "string");
     assert.ok(result.error.length > 0);
   });
+});
+
+test("seeded constraint library covers PF-004..PF-039 across the expected domains", () => {
+  const constraintsDir = path.resolve(".va-auto-pilot", "constraints");
+  const expectedFiles = [
+    "adopt.yaml",
+    "dispatch.yaml",
+    "mode-enforcement.yaml",
+    "review-gate.yaml",
+    "state-race.yaml",
+  ];
+  const actualFiles = fs.readdirSync(constraintsDir).filter((name) => /\.ya?ml$/i.test(name)).sort((a, b) => a.localeCompare(b));
+  assert.deepEqual(actualFiles, expectedFiles);
+
+  const documents = actualFiles.map((name) => parseYaml(fs.readFileSync(path.join(constraintsDir, name), "utf8")));
+  assert.deepEqual(
+    documents.map((document) => document.id).sort((left, right) => left.localeCompare(right)),
+    ["adopt", "dispatch", "mode-enforcement", "review-gate", "state-race"],
+  );
+
+  const coveredFactorIds = new Set();
+  for (const document of documents) {
+    assert.equal(document.type, "auto-pilot-constraint-set");
+    assert.equal(document.payload?.domain, document.id);
+    assert.ok(Array.isArray(document.payload?.constraints) && document.payload.constraints.length > 0, `${document.id} must contain constraints`);
+    assert.ok(Array.isArray(document.payload?.blindSpots), `${document.id} must contain blind spots`);
+    for (const constraint of document.payload.constraints) {
+      assert.ok(["boundary", "invariant", "prerequisite", "trade-off", "anti-pattern"].includes(constraint.type), `unexpected constraint type in ${document.id}: ${constraint.type}`);
+      for (const factorId of constraint.sourceFactorIds ?? []) coveredFactorIds.add(String(factorId));
+    }
+  }
+
+  const expectedFactorIds = Array.from({ length: 36 }, (_, index) => `PF-${String(index + 4).padStart(3, "0")}`);
+  const missingFactorIds = expectedFactorIds.filter((factorId) => !coveredFactorIds.has(factorId));
+  const unexpectedFactorIds = [...coveredFactorIds].filter((factorId) => !expectedFactorIds.includes(factorId)).sort((left, right) => left.localeCompare(right));
+  assert.deepEqual(missingFactorIds, []);
+  assert.deepEqual(unexpectedFactorIds, []);
 });
 
 test("formatConstraintsForPrompt returns empty string when all sections are empty", () => {
@@ -931,7 +970,7 @@ test("runCycle review failure creates fix tasks for blocking review findings", a
       {
         maxCycles: 1,
         maxParallel: 1,
-        agentTemplate: "claude --task {taskId}",
+        agentTemplate: DEFAULT_AGENT_TEMPLATE,
         dryRun: false,
         singleCycle: true,
         noCommit: true,
@@ -2212,36 +2251,48 @@ test("injectPitfallContext includes relevant unresolved pitfalls by keyword over
 });
 
 test("pitfall --resolve appends suggested adaptive gate and journals it", () => {
-  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-pitfall-resolve-"));
-  const pitfallsDir = path.join(repoDir, ".va-auto-pilot");
-  const pitfallsFile = path.join(pitfallsDir, "pitfalls.json");
-  const configFile = path.join(pitfallsDir, "config.yaml");
+  const repoDir = createTempGitRepo({
+    ".va-auto-pilot/pitfalls.json": JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          id: "PF-201",
+          taskId: "AP-201",
+          failureType: "gate",
+          attempted: "npm run build",
+          hypothesis: "build failed because a validation gate was missing",
+          missingContext: "",
+          resolution: "",
+          resolvedAt: null,
+          createdAt: "2026-03-31T00:00:00.000Z"
+        }
+      ]
+    }, null, 2) + "\n",
+    ".va-auto-pilot/config.yaml": [
+      "qualityGate:",
+      "  buildCommand: \"npm run build\"",
+      "  reviewCommand: \"codex review --uncommitted\""
+    ].join("\n") + "\n",
+    ".va-auto-pilot/sprint-state.json": JSON.stringify({
+      projectPrefix: "AP",
+      updatedAt: "2026-03-31T00:00:00.000Z",
+      tasks: [
+        {
+          id: "AP-201",
+          title: "Guard build validation with a persistent gate",
+          priority: "P1",
+          state: "In Progress",
+          failCount: 0,
+          dependsOn: []
+        }
+      ]
+    }, null, 2) + "\n",
+    "docs/todo/run-journal.md": "# Run Journal\n\n## Entries\n"
+  });
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+  const configFile = path.join(repoDir, ".va-auto-pilot", "config.yaml");
   const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
-
-  fs.mkdirSync(pitfallsDir, { recursive: true });
-  fs.mkdirSync(path.dirname(journalFile), { recursive: true });
-  fs.writeFileSync(pitfallsFile, JSON.stringify({
-    version: 1,
-    entries: [
-      {
-        id: "PF-201",
-        taskId: "AP-201",
-        failureType: "gate",
-        attempted: "npm run build",
-        hypothesis: "build failed because a validation gate was missing",
-        missingContext: "",
-        resolution: "",
-        resolvedAt: null,
-        createdAt: "2026-03-31T00:00:00.000Z"
-      }
-    ]
-  }, null, 2) + "\n", "utf8");
-  fs.writeFileSync(configFile, [
-    "qualityGate:",
-    "  buildCommand: \"npm run build\"",
-    "  reviewCommand: \"codex review --uncommitted\""
-  ].join("\n") + "\n", "utf8");
-  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+  const constraintFile = path.join(repoDir, ".va-auto-pilot", "constraints", "pf-201.yaml");
 
   const result = spawnSync("node", [
     BOARD_SCRIPT,
@@ -2259,11 +2310,195 @@ test("pitfall --resolve appends suggested adaptive gate and journals it", () => 
   assert.equal(result.status, 0, result.stderr);
   const updatedConfig = fs.readFileSync(configFile, "utf8");
   const updatedJournal = fs.readFileSync(journalFile, "utf8");
+  const updatedConstraint = fs.readFileSync(constraintFile, "utf8");
   assert.match(updatedConfig, /adaptiveGates:/);
   assert.match(updatedConfig, /triggeredBy: PF-201/);
   assert.match(updatedConfig, /command: npm run build/);
+  assert.match(updatedConstraint, /type: auto-pilot-constraint-set/);
+  assert.match(updatedConstraint, /sourceFactorIds:/);
+  assert.match(updatedConstraint, /- PF-201/);
   assert.match(updatedJournal, /Resolved pitfall PF-201\. Suggested gate appended:/);
   assert.match(updatedJournal, /adaptive-gate-trigger:PF-201/);
+  assert.match(result.stdout, /Constraint file: .*\.va-auto-pilot\/constraints\/pf-201\.yaml/);
+  assert.match(result.stdout, /Commit: [a-f0-9]{40} \(constraint: Guard build validation with a persistent gate\)/);
+  assert.equal(runGit(["log", "--pretty=%s", "-1"], repoDir), "constraint: Guard build validation with a persistent gate");
+});
+
+test("pitfall --resolve is idempotent on retry with the same resolution", () => {
+  const repoDir = createTempGitRepo({
+    ".va-auto-pilot/pitfalls.json": JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          id: "PF-301",
+          taskId: "AP-301",
+          failureType: "review",
+          attempted: "codex review --uncommitted",
+          hypothesis: "write-path retry handling was missing",
+          missingContext: "",
+          resolution: "",
+          resolvedAt: null,
+          createdAt: "2026-03-31T00:00:00.000Z"
+        }
+      ]
+    }, null, 2) + "\n",
+    ".va-auto-pilot/config.yaml": "qualityGate:\n  reviewCommand: \"codex review --uncommitted\"\n",
+    ".va-auto-pilot/sprint-state.json": JSON.stringify({
+      projectPrefix: "AP",
+      updatedAt: "2026-03-31T00:00:00.000Z",
+      tasks: [
+        {
+          id: "AP-301",
+          title: "Make pitfall resolution retry-safe",
+          priority: "P1",
+          state: "In Progress",
+          failCount: 0,
+          dependsOn: []
+        }
+      ]
+    }, null, 2) + "\n",
+    "docs/todo/run-journal.md": "# Run Journal\n\n## Entries\n"
+  });
+
+  const args = [
+    BOARD_SCRIPT,
+    "pitfall",
+    "--resolve", "PF-301",
+    "--resolution", "ensure retries converge without duplicate side effects",
+    "--pitfalls-file", path.join(repoDir, ".va-auto-pilot", "pitfalls.json"),
+    "--journal-file", path.join(repoDir, "docs", "todo", "run-journal.md")
+  ];
+
+  const first = spawnSync("node", args, {
+    cwd: repoDir,
+    encoding: "utf8",
+    timeout: 10_000
+  });
+  assert.equal(first.status, 0, first.stderr);
+
+  const second = spawnSync("node", args, {
+    cwd: repoDir,
+    encoding: "utf8",
+    timeout: 10_000
+  });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /Pitfall already resolved: PF-301 \(skipped\)/);
+  assert.equal(runGit(["rev-list", "--count", "HEAD"], repoDir), "2");
+
+  const journal = fs.readFileSync(path.join(repoDir, "docs", "todo", "run-journal.md"), "utf8");
+  assert.equal((journal.match(/pitfall-resolved:PF-301/g) ?? []).length, 1);
+});
+
+test("pitfall --resolve validates task context before persisting resolution", () => {
+  const repoDir = createTempGitRepo({
+    ".va-auto-pilot/pitfalls.json": JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          id: "PF-302",
+          taskId: "AP-302",
+          failureType: "gate",
+          attempted: "node scripts/sprint-board.mjs pitfall --resolve",
+          hypothesis: "task metadata lookup was stale",
+          missingContext: "",
+          resolution: "",
+          resolvedAt: null,
+          createdAt: "2026-03-31T00:00:00.000Z"
+        }
+      ]
+    }, null, 2) + "\n",
+    ".va-auto-pilot/config.yaml": "qualityGate:\n  buildCommand: \"npm run build\"\n",
+    ".va-auto-pilot/sprint-state.json": JSON.stringify({
+      projectPrefix: "AP",
+      updatedAt: "2026-03-31T00:00:00.000Z",
+      tasks: []
+    }, null, 2) + "\n",
+    "docs/todo/run-journal.md": "# Run Journal\n\n## Entries\n"
+  });
+
+  const result = spawnSync("node", [
+    BOARD_SCRIPT,
+    "pitfall",
+    "--resolve", "PF-302",
+    "--resolution", "validate the task before persisting anything",
+    "--pitfalls-file", path.join(repoDir, ".va-auto-pilot", "pitfalls.json"),
+    "--journal-file", path.join(repoDir, "docs", "todo", "run-journal.md")
+  ], {
+    cwd: repoDir,
+    encoding: "utf8",
+    timeout: 10_000
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Task not found for pitfall: AP-302/);
+
+  const pitfalls = JSON.parse(fs.readFileSync(path.join(repoDir, ".va-auto-pilot", "pitfalls.json"), "utf8"));
+  assert.equal(pitfalls.entries[0].resolution, "");
+  assert.equal(pitfalls.entries[0].resolvedAt, null);
+});
+
+test("pitfall --resolve skips auto-commit when target artifacts were already dirty", () => {
+  const repoDir = createTempGitRepo({
+    ".va-auto-pilot/pitfalls.json": JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          id: "PF-303",
+          taskId: "AP-303",
+          failureType: "gate",
+          attempted: "npm run build",
+          hypothesis: "build validation gate must remain explicit",
+          missingContext: "",
+          resolution: "",
+          resolvedAt: null,
+          createdAt: "2026-03-31T00:00:00.000Z"
+        }
+      ]
+    }, null, 2) + "\n",
+    ".va-auto-pilot/config.yaml": "qualityGate:\n  buildCommand: \"npm run build\"\n",
+    ".va-auto-pilot/sprint-state.json": JSON.stringify({
+      projectPrefix: "AP",
+      updatedAt: "2026-03-31T00:00:00.000Z",
+      tasks: [
+        {
+          id: "AP-303",
+          title: "Keep pitfall resolution commit scope isolated",
+          priority: "P1",
+          state: "In Progress",
+          failCount: 0,
+          dependsOn: []
+        }
+      ]
+    }, null, 2) + "\n",
+    "docs/todo/run-journal.md": "# Run Journal\n\n## Entries\n",
+    "notes.txt": "clean\n"
+  });
+
+  fs.appendFileSync(path.join(repoDir, ".va-auto-pilot", "config.yaml"), "# user edit\n", "utf8");
+  fs.writeFileSync(path.join(repoDir, "notes.txt"), "staged note\n", "utf8");
+  runGit(["add", "notes.txt"], repoDir);
+
+  const result = spawnSync("node", [
+    BOARD_SCRIPT,
+    "pitfall",
+    "--resolve", "PF-303",
+    "--resolution", "added validation before merge",
+    "--pitfalls-file", path.join(repoDir, ".va-auto-pilot", "pitfalls.json"),
+    "--journal-file", path.join(repoDir, "docs", "todo", "run-journal.md")
+  ], {
+    cwd: repoDir,
+    encoding: "utf8",
+    timeout: 10_000
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Commit skipped: pre-existing dirty files: \.va-auto-pilot\/config\.yaml/);
+  assert.equal(runGit(["rev-list", "--count", "HEAD"], repoDir), "1");
+  assert.equal(runGit(["diff", "--cached", "--name-only", "--relative"], repoDir), "notes.txt");
+
+  const status = runGit(["status", "--short"], repoDir);
+  assert.match(status, /M \.va-auto-pilot\/config\.yaml/);
+  assert.match(status, /\?\? \.va-auto-pilot\/constraints\/?/);
 });
 
 // ---------------------------------------------------------------------------
@@ -3235,7 +3470,9 @@ test("runSmokeTests: failed smoke test with detailed step reporting", async () =
 // ---------------------------------------------------------------------------
 import {
   ColonyBridge,
+  buildDefaultAgentCommand,
   isColonyAvailable,
+  resolveSpawnCommand,
   trackToTaskUnit,
   colonyResultToRunnerResult,
   isSprintLevelMultiFileTask,
@@ -3969,8 +4206,24 @@ test("--help prints usage and exits 0", () => {
 // ---------------------------------------------------------------------------
 test("pitfall add + resolve + list cycle works end-to-end", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-pitfall-test-"));
-  const pitfallsFile = path.join(tmpDir, "pitfalls.json");
-  const { stateFile } = writeTmpState([]);
+  const pilotDir = path.join(tmpDir, ".va-auto-pilot");
+  const pitfallsFile = path.join(pilotDir, "pitfalls.json");
+  const stateFile = path.join(pilotDir, "sprint-state.json");
+  fs.mkdirSync(pilotDir, { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "UT",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    tasks: [
+      {
+        id: "UT-001",
+        title: "Stabilize pitfall lifecycle",
+        priority: "P1",
+        state: "Backlog",
+        failCount: 0,
+        dependsOn: []
+      }
+    ]
+  }, null, 2), "utf8");
 
   // Add a pitfall
   let r = runBoard([
@@ -4220,11 +4473,94 @@ test("ColonyBridge: dispatch uses agentTemplate when track has no command", asyn
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-tmpl-"));
   const logFile = path.join(tmpDir, "tmpl.log");
   const track = { taskId: "CB-TMPL" };
-  const result = await bridge.dispatch(track, "echo template-used", logFile, 10_000);
+  const result = await bridge.dispatch(track, "echo template-used-{taskId}", logFile, 10_000);
   assert.equal(result.success, true);
-  assert.equal(result.command, "echo template-used");
+  assert.equal(result.command, "echo template-used-CB-TMPL");
   const logContent = fs.readFileSync(logFile, "utf8");
-  assert.ok(logContent.includes("template-used"), logContent);
+  assert.ok(logContent.includes("template-used-CB-TMPL"), logContent);
+});
+
+test("resolveSpawnCommand rewrites legacy claude --task template to a viable print command", () => {
+  const command = resolveSpawnCommand({ taskId: "AP-058" }, "claude --task {taskId}");
+  assert.equal(command, buildDefaultAgentCommand("AP-058"));
+});
+
+test("resolveSpawnCommand rewrites direct legacy claude --task commands from track.command", () => {
+  const command = resolveSpawnCommand(
+    { taskId: "AP-058", command: 'claude --task "Implement task AP-058 in this project"' },
+    ""
+  );
+  assert.equal(command, buildDefaultAgentCommand("AP-058"));
+});
+
+test("resolveSpawnCommand preserves custom legacy claude --task prompts as viable print commands", () => {
+  const command = resolveSpawnCommand(
+    { taskId: "AP-058", command: 'claude --task "Investigate AP-058 fallback spawn failure"' },
+    ""
+  );
+  assert.equal(
+    command,
+    "claude -p --output-format text 'Investigate AP-058 fallback spawn failure'"
+  );
+});
+
+test("resolveSpawnCommand normalizes the default agent template into a shell-safe command", () => {
+  const command = resolveSpawnCommand(
+    { taskId: "AP-058" },
+    DEFAULT_AGENT_TEMPLATE
+  );
+  assert.equal(command, buildDefaultAgentCommand("AP-058"));
+});
+
+test("ColonyBridge: kimi bypass rewrites legacy fallback commands into viable spawn commands", async () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  bridge.colony = {
+    routeTask: () => ({ agentId: "kimi:/tmp", score: 0.9, reason: "best match" }),
+  };
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-kimi-legacy-"));
+  const logFile = path.join(tmpDir, "kimi-legacy.log");
+  const track = {
+    taskId: "CB-KIMI-LEGACY",
+    command: "claude --task CB-KIMI-LEGACY",
+    metadata: { scope: { changedFileCount: 8, estimatedDiffLines: 10 } },
+  };
+
+  // Stub spawn to verify command rewriting without launching a real process
+  bridge.dispatchViaSpawn = async (t, tmpl, log, _timeout) => {
+    const cmd = resolveSpawnCommand(t, tmpl);
+    fs.mkdirSync(path.dirname(log), { recursive: true });
+    fs.appendFileSync(log, `command: ${cmd}\n`, "utf8");
+    return { taskId: t.taskId, command: cmd, success: true, exitCode: 0, signal: "", durationMs: 0, timedOut: false, logFile: log };
+  };
+
+  const result = await bridge.dispatch(track, "claude --task {taskId}", logFile, 10_000);
+
+  assert.equal(result.command, buildDefaultAgentCommand("CB-KIMI-LEGACY"));
+  const logContent = fs.readFileSync(logFile, "utf8");
+  assert.ok(logContent.includes("[colony-bypass]"), logContent);
+  assert.ok(logContent.includes(buildDefaultAgentCommand("CB-KIMI-LEGACY")), logContent);
+});
+
+test("ColonyBridge: dispatchViaSpawn runs child process in workDir", async () => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-cwd-"));
+  const bridge = new ColonyBridge({ workDir, useColony: false });
+  const logFile = path.join(workDir, "cwd-test.log");
+  const track = { taskId: "CB-CWD", command: "pwd" };
+  const result = await bridge.dispatchViaSpawn(track, "", logFile, 10_000);
+  assert.equal(result.success, true, `expected success but got exit ${result.exitCode}`);
+  const logContent = fs.readFileSync(logFile, "utf8");
+  assert.ok(logContent.includes(fs.realpathSync(workDir)), `cwd mismatch: log=${logContent}`);
+});
+
+test("ColonyBridge: dispatchViaSpawn fails fast for empty commands", async () => {
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-empty-"));
+  const logFile = path.join(tmpDir, "empty.log");
+  const result = await bridge.dispatchViaSpawn({ taskId: "CB-EMPTY" }, "", logFile, 10_000);
+  assert.equal(result.success, false);
+  assert.equal(result.exitCode, 1);
+  const logContent = fs.readFileSync(logFile, "utf8");
+  assert.match(logContent, /spawn skipped: empty command/);
 });
 
 test("runSmokeTests: successful smoke test returns passed", async () => {

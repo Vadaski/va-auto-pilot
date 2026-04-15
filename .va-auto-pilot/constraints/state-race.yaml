@@ -1,0 +1,30 @@
+id: state-race
+type: auto-pilot-constraint-set
+payload:
+  domain: state-race
+  tags: [state, state-race, sprint-state, concurrency, partial-success, stale-lock, recovery, success-detection]
+  synthesis: Keep loop state merge-safe under manual edits and stale process state, and treat landed code plus verification as stronger evidence than a bare subprocess exit code.
+  constraints:
+    - type: boundary
+      statement: Sprint-state writes must use atomic compare-and-merge semantics so a running loop cannot overwrite newer manual updates
+      confidence: 0.98
+      sourceFactorIds: [PF-031, PF-032, PF-033]
+    - type: invariant
+      statement: Success detection must consider landed code and passing verification before retrying work that already completed with a noisy non-zero exit
+      confidence: 0.97
+      sourceFactorIds: [PF-008, PF-010, PF-011, PF-012, PF-031, PF-032, PF-033]
+    - type: prerequisite
+      statement: Stale locks and in-flight markers must be recoverable on restart instead of blocking the loop forever
+      confidence: 0.90
+      sourceFactorIds: [PF-031, PF-032, PF-033]
+    - type: trade-off
+      statement: Prefer conservative reconciliation with an audit trail over blind last-write-wins state updates
+      confidence: 0.82
+      sourceFactorIds: [PF-031, PF-032, PF-033]
+    - type: anti-pattern
+      statement: Assuming sprint-board edits and loop-owned state are a single-writer system
+      confidence: 0.93
+      sourceFactorIds: [PF-031, PF-032, PF-033]
+  blindSpots:
+    - concurrent writers across processes
+    - crash recovery after partial fsync or disk-full conditions

@@ -12,6 +12,12 @@ Hard rules:
 - Do not prescribe implementation steps to sub-agents. Delegate objective + constraints + gates only.
 - Read operational memory through `node scripts/sprint-board.mjs journal --view`, not by dumping the full raw journal.
 
+If this repo uses ManagedDocStore:
+- Initialize or repair with `node ./scripts/doc-store-cli.mjs init`. Re-running it is safe; use `--force --mode=<legacy|mixed|managed>` only when intentionally changing store config.
+- Bring legacy docs under management with `node ./scripts/doc-store-cli.mjs adopt <path> --kind=design|decision|process --title="..."`, not by hand-moving tracked artifacts.
+- Install staged-write enforcement with `node ./scripts/doc-store-cli.mjs install-hook`; re-running it is safe, and existing pre-commit hooks are preserved and chained.
+- Respect `.docstore/store.config.json` mode: `legacy` is permissive, `mixed` enforces managed roots only, `managed` requires tracked `.docstore/*` writes to go through DocStore.
+
 Read the protocol. Execute the loop. Begin first cycle now.
 
 Current repo gates:

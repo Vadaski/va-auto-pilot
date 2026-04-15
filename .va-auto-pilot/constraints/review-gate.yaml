@@ -1,0 +1,30 @@
+id: review-gate
+type: auto-pilot-constraint-set
+payload:
+  domain: review-gate
+  tags: [review, review-gate, codex-review, gate-id, fix-and-retest, journal, parser]
+  synthesis: Keep review gates strict on real findings while making reviewer output and gate context explicit enough to avoid false task failures.
+  constraints:
+    - type: boundary
+      statement: Normalize reviewer output into a structured pass or fail verdict before the loop persists a review-gate failure
+      confidence: 0.97
+      sourceFactorIds: [PF-008, PF-009, PF-010, PF-011, PF-012, PF-013, PF-014, PF-015, PF-016]
+    - type: invariant
+      statement: Gate identifiers must propagate through fix-and-retest paths and journals; never emit or compare against an undefined gate name
+      confidence: 0.96
+      sourceFactorIds: [PF-020, PF-021, PF-022, PF-025, PF-026, PF-030, PF-035, PF-036]
+    - type: prerequisite
+      statement: When reviewer output is empty or unstructured, classify it as a review-infra defect first and retry or reparse before blaming the task code
+      confidence: 0.91
+      sourceFactorIds: [PF-008, PF-009, PF-013, PF-014, PF-015, PF-016]
+    - type: trade-off
+      statement: Fail closed on ambiguous review content, but include enough gate context to distinguish infra failure from a product regression
+      confidence: 0.82
+      sourceFactorIds: [PF-009, PF-020, PF-021, PF-025, PF-026]
+    - type: anti-pattern
+      statement: Collapsing review, verification, and dispatch errors into one generic gate failure record
+      confidence: 0.89
+      sourceFactorIds: [PF-008, PF-020, PF-021, PF-024, PF-025, PF-026, PF-030]
+  blindSpots:
+    - reviewer model quality drift
+    - semantic correctness beyond what the review protocol can observe

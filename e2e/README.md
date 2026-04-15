@@ -57,7 +57,7 @@ To test with a real LLM instead of stubs:
 
 ```yaml
 run:
-  agent_template: "claude --task {taskId}"
+  agent_template: 'claude -p --output-format text "Implement task {taskId} in this project"'
   flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "5", "--skip-sprint-review"]
   # Remove AGENT_BEHAVIOR env var
 ```

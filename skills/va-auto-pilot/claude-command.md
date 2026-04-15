@@ -27,7 +27,7 @@ Options:
 - `--dry-run` — print plan without executing
 - `--max-cycles <n>` — limit iterations (default: 20)
 - `--no-colony` — skip Colony, use raw spawn
-- `--agent-template <cmd>` — agent command (default: "claude --task {taskId}")
+- `--agent-template <cmd>` — agent command (default: `claude -p --output-format text "Implement task {taskId} in this project"`)
 - `--json` — machine-readable output
 
 3. **Manual fallback** (when you need fine-grained control):

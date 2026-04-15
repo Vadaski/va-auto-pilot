@@ -134,6 +134,9 @@ flows:
         set -euo pipefail
         tmpdir="$(mktemp -d)"
         mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        git -C "$tmpdir" init -q
+        git -C "$tmpdir" config user.name "VA Test"
+        git -C "$tmpdir" config user.email "va-test@example.com"
         cat > "$tmpdir/.va-auto-pilot/pitfalls.json" <<'EOF'
         {
           "version": 1,
@@ -156,26 +159,51 @@ flows:
         qualityGate:
           buildCommand: "npm run build"
         EOF
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {
+          "projectPrefix": "AP",
+          "updatedAt": "2026-03-31T00:00:00.000Z",
+          "tasks": [
+            {
+              "id": "AP-010",
+              "title": "Guard build validation with a persistent gate",
+              "priority": "P1",
+              "state": "In Progress",
+              "failCount": 0,
+              "dependsOn": []
+            }
+          ]
+        }
+        EOF
         cat > "$tmpdir/docs/todo/run-journal.md" <<'EOF'
         # Run Journal
 
         ## Entries
         EOF
+        git -C "$tmpdir" add .
+        git -C "$tmpdir" commit -m "chore(test): init" >/dev/null
         (
           cd "$tmpdir"
           node /Users/vadaski/vadaski/Code/va-auto-pilot/scripts/sprint-board.mjs pitfall --resolve PF-010 --resolution "made build gate permanent" --pitfalls-file "$tmpdir/.va-auto-pilot/pitfalls.json" --journal-file "$tmpdir/docs/todo/run-journal.md"
         )
         cat "$tmpdir/.va-auto-pilot/config.yaml"
         printf '\n---\n'
+        cat "$tmpdir/.va-auto-pilot/constraints/pf-010.yaml"
+        printf '\n---\n'
         cat "$tmpdir/docs/todo/run-journal.md"
+        printf '\n---\n'
+        git -C "$tmpdir" log -1 --pretty=%s
     assert:
       must:
         - exit_code: 0
         - stdout_contains:
             - "Pitfall resolved: PF-010"
+            - ".va-auto-pilot/constraints/pf-010.yaml"
             - "adaptiveGates:"
+            - "type: auto-pilot-constraint-set"
             - "triggeredBy: PF-010"
             - "Resolved pitfall PF-010. Suggested gate appended:"
+            - "constraint: Guard build validation with a persistent gate"
       should: []
 
   - name: "update --state Failed with failure-type: records failureDetail"

@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { nowIso } from "./sprint-utils.mjs";
+import { DEFAULT_AGENT_TEMPLATE, nowIso } from "./sprint-utils.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -138,6 +138,71 @@ export function isSprintLevelMultiFileTask(taskUnit) {
   }
 
   return { isLarge: false, reason: "" };
+}
+
+function quoteShellArg(value) {
+  return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
+}
+
+function buildClaudePromptCommand(promptText) {
+  return `claude -p --output-format text ${quoteShellArg(promptText)}`;
+}
+
+export function buildDefaultAgentCommand(taskId) {
+  return buildClaudePromptCommand(`Implement task ${taskId} in this project`);
+}
+
+function interpolateAgentTemplate(agentTemplate, taskId) {
+  if (!agentTemplate) {
+    return "";
+  }
+  return agentTemplate.includes("{taskId}")
+    ? agentTemplate.replaceAll("{taskId}", taskId)
+    : agentTemplate;
+}
+
+function stripWrappingQuotes(value) {
+  if (value.length >= 2) {
+    const quote = value[0];
+    if ((quote === "'" || quote === "\"") && value.at(-1) === quote) {
+      return value.slice(1, -1);
+    }
+  }
+  return value;
+}
+
+function normalizeLegacyClaudeTaskCommand(rawCommand, taskId) {
+  const match = rawCommand.match(/^claude\s+--task(?:=|\s+)(.+)$/);
+  if (!match) {
+    return "";
+  }
+
+  const rawPrompt = stripWrappingQuotes(match[1].trim());
+  if (!rawPrompt || rawPrompt === taskId) {
+    return buildDefaultAgentCommand(taskId);
+  }
+
+  return buildClaudePromptCommand(rawPrompt);
+}
+
+export function resolveSpawnCommand(track, agentTemplate) {
+  const rawCommand = String(track.command || interpolateAgentTemplate(agentTemplate, track.taskId) || "").trim();
+  if (!rawCommand) {
+    return "";
+  }
+
+  const normalizedLegacyClaudeCommand = normalizeLegacyClaudeTaskCommand(rawCommand, track.taskId);
+  if (normalizedLegacyClaudeCommand) {
+    return normalizedLegacyClaudeCommand;
+  }
+
+  const legacyDefaultCommand = interpolateAgentTemplate("claude --task {taskId}", track.taskId);
+  const modernDefaultCommand = interpolateAgentTemplate(DEFAULT_AGENT_TEMPLATE, track.taskId);
+  if (rawCommand === legacyDefaultCommand || rawCommand === modernDefaultCommand) {
+    return buildDefaultAgentCommand(track.taskId);
+  }
+
+  return rawCommand;
 }
 
 // CLI adapter config table (GLM is API-based, handled separately)
@@ -306,14 +371,29 @@ export class ColonyBridge {
   }
 
   async dispatchViaSpawn(track, agentTemplate, logFile, timeoutMs) {
-    const command = track.command || agentTemplate || "";
+    const command = resolveSpawnCommand(track, agentTemplate);
     const startedAt = Date.now();
     appendLog(logFile,
       `[${nowIso()}] task=${track.taskId}\ncommand: ${command}\ntimeout: ${timeoutMs > 0 ? `${timeoutMs}ms` : "none"}\n---\n`
     );
 
+    if (!command) {
+      appendLog(logFile, `\n[${nowIso()}] spawn skipped: empty command\n`);
+      return {
+        taskId: track.taskId,
+        command,
+        success: false,
+        exitCode: 1,
+        signal: "",
+        durationMs: Date.now() - startedAt,
+        timedOut: false,
+        logFile,
+      };
+    }
+
     return new Promise((resolve) => {
       const child = spawn("bash", ["-lc", command], {
+        cwd: this.workDir,
         env: {
           ...process.env,
           VA_TASK_ID: track.taskId,

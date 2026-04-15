@@ -1,0 +1,30 @@
+id: mode-enforcement
+type: auto-pilot-constraint-set
+payload:
+  domain: mode-enforcement
+  tags: [mode, mode-enforcement, package-json, npm-test, install-hook, enforce-staged, ci, doctor]
+  synthesis: Keep enforcement strict at hook and CI boundaries, but derive commands from the repository's real mode and declared tooling instead of stack assumptions.
+  constraints:
+    - type: boundary
+      statement: Enforcement prompts and checks must resolve the repository's declared validation commands from local config or manifest data, never hardcode `npm test`
+      confidence: 0.98
+      sourceFactorIds: [PF-017, PF-019, PF-024, PF-025, PF-027, PF-028, PF-029]
+    - type: invariant
+      statement: Hook install, uninstall, and CI enforcement must remain idempotent while preserving any existing hook chain and required `enforce-staged --base` behavior
+      confidence: 0.94
+      sourceFactorIds: [PF-035, PF-036]
+    - type: prerequisite
+      statement: Before enforcing a mode transition, run doctor or equivalent validation against the new managed roots and enforcement commands
+      confidence: 0.88
+      sourceFactorIds: [PF-035, PF-036]
+    - type: trade-off
+      statement: Lean strict on merge and pre-commit enforcement once commands are resolved from repo metadata, even if that exposes more local setup issues
+      confidence: 0.79
+      sourceFactorIds: [PF-017, PF-019, PF-035, PF-036]
+    - type: anti-pattern
+      statement: Encoding enforcement around one ecosystem's defaults instead of the target repository's actual toolchain
+      confidence: 0.96
+      sourceFactorIds: [PF-017, PF-019, PF-024, PF-025, PF-027, PF-028, PF-029]
+  blindSpots:
+    - non-manifest projects with only ad hoc shell scripts
+    - organization-wide policy inheritance across multiple repos

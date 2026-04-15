@@ -6,6 +6,8 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 
+export const DEFAULT_AGENT_TEMPLATE = 'claude -p --output-format text "Implement task {taskId} in this project"';
+
 // ---------------------------------------------------------------------------
 // Type definitions
 // ---------------------------------------------------------------------------

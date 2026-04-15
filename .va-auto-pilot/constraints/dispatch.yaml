@@ -1,0 +1,30 @@
+id: dispatch
+type: auto-pilot-constraint-set
+payload:
+  domain: dispatch
+  tags: [dispatch, human-board, timeout, routing, kimi, fallback, spawn, parser]
+  synthesis: Keep dispatch reliable by parsing only explicit operator intent, sizing budget to task scope, and guaranteeing a viable executor path.
+  constraints:
+    - type: boundary
+      statement: Parse human-board instructions only from explicit checkbox items (`[ ]` or `[x]`), never from every bullet
+      confidence: 0.98
+      sourceFactorIds: [PF-004, PF-005, PF-006, PF-007]
+    - type: invariant
+      statement: If the primary route is skipped, the fallback dispatch path must still construct a runnable agent and pass a basic health check before use
+      confidence: 0.95
+      sourceFactorIds: [PF-034, PF-037, PF-038, PF-039]
+    - type: prerequisite
+      statement: Sprint-level or multi-file work needs dispatch timeouts sized for the real task, not short interactive defaults
+      confidence: 0.93
+      sourceFactorIds: [PF-004, PF-005, PF-006, PF-007, PF-018]
+    - type: trade-off
+      statement: Prefer slower but correct routing over fast dispatch paths that predictably timeout or exit immediately
+      confidence: 0.84
+      sourceFactorIds: [PF-018, PF-034, PF-037, PF-038, PF-039]
+    - type: anti-pattern
+      statement: Treating CLI usage text or route-debug logs as evidence that the product task itself failed
+      confidence: 0.87
+      sourceFactorIds: [PF-017, PF-023, PF-024]
+  blindSpots:
+    - external-cli quota exhaustion
+    - concurrent dispatches competing for the same worker pool

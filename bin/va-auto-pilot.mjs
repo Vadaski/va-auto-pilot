@@ -8,6 +8,7 @@ import {
   selectAcceptanceGateCommand,
   selectProjectTestCommand
 } from "../scripts/lib/project-gates.mjs";
+import { DEFAULT_AGENT_TEMPLATE } from "../scripts/lib/sprint-utils.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -76,7 +77,7 @@ Commands:
 Options (run):
   --max-cycles <n>        Maximum task cycles (default: 50)
   --max-parallel <n>      Parallel track count (default: 3)
-  --agent-template <cmd>  Agent command template (default: "claude --task {taskId}")
+  --agent-template <cmd>  Agent command template (default: ${JSON.stringify(DEFAULT_AGENT_TEMPLATE)})
   --single-cycle          Run exactly one task cycle, then exit
   --dry-run               Print plan without executing
   --no-commit             Skip git add/git commit after gates pass

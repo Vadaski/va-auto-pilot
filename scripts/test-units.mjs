@@ -108,6 +108,22 @@ function withTempFile(content, ext = ".yaml") {
   return { filePath, tmpDir };
 }
 
+function withTempConstraintRepo(files = {}) {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-constraints-"));
+  const pilotDir = path.join(repoDir, ".va-auto-pilot");
+  const constraintsDir = path.join(pilotDir, "constraints");
+  fs.mkdirSync(constraintsDir, { recursive: true });
+  fs.writeFileSync(path.join(pilotDir, "config.yaml"), "constraintInjection:\n  enabled: true\n", "utf8");
+  for (const [name, content] of Object.entries(files)) {
+    fs.writeFileSync(path.join(constraintsDir, name), content, "utf8");
+  }
+  return {
+    repoDir,
+    configPath: path.join(pilotDir, "config.yaml"),
+    constraintsDir,
+  };
+}
+
 async function withEnv(overrides, work) {
   const previous = new Map();
   for (const [key, value] of Object.entries(overrides)) {
@@ -174,43 +190,101 @@ test("collectConstraints returns engineAvailable false when flag is off without 
   await withEnv({ VA_AUTO_PILOT_CONSTRAINTS: "off" }, async () => {
     const result = await collectConstraints("dispatch a sprint task", {
       configEnabled: false,
-      sdkLoader: async () => {
-        throw new Error("sdk should not load when disabled");
-      },
-      cliInvoker: async () => {
-        throw new Error("cli should not run when disabled");
-      },
     });
     assert.equal(result.engineAvailable, false);
     assert.deepEqual(result.constraints, []);
     assert.deepEqual(result.blindSpots, []);
     assert.equal(result.durationMs, 0);
+    assert.equal(result.source, "skipped");
   });
 });
 
-test("collectConstraints returns graceful empty on engine error", async () => {
-  await withEnv({
-    VA_AUTO_PILOT_CONSTRAINTS: "on",
-    COLLISION_STORAGE_DIR: "/definitely/missing/collision-store",
-    VA_CONSTRAINT_GRAPH_ROOT: "/definitely/missing/constraint-graph",
-  }, async () => {
-    const result = await collectConstraints("dispatch a sprint task", {
+test("collectConstraints loads YAML and filters matches on tag, domain, and id", async () => {
+  const { constraintsDir } = withTempConstraintRepo({
+    "api-defense.yaml": [
+      "id: api-defense",
+      "type: auto-pilot-constraint-set",
+      "payload:",
+      "  domain: api",
+      "  tags: [archive, write-path]",
+      "  synthesis: Keep API write paths safe under retries.",
+      "  constraints:",
+      "    - type: anti-pattern",
+      "      statement: Hardcoding environment assumptions like npm test",
+      "      confidence: 0.40",
+      "    - type: invariant",
+      "      statement: Idempotency for repeat archive/delete/close",
+      "      confidence: 0.95",
+      "    - type: boundary",
+      "      statement: Public mutation APIs must validate input shape before persisting",
+      "      confidence: 0.98",
+      "  blindSpots:",
+      "    - performance-under-load",
+    ].join("\n") + "\n",
+    "ui-constraints.yaml": [
+      "id: ui-polish",
+      "type: auto-pilot-constraint-set",
+      "payload:",
+      "  domain: frontend",
+      "  tags: [layout]",
+      "  synthesis: Keep the UI stable.",
+      "  constraints:",
+      "    - type: boundary",
+      "      statement: Do not hide navigation behind hover-only affordances",
+      "      confidence: 0.80",
+    ].join("\n") + "\n",
+  });
+
+  await withEnv({ VA_AUTO_PILOT_CONSTRAINTS: "on" }, async () => {
+    const result = await collectConstraints("archive api-defense api", {
       configEnabled: false,
-      sdkLoader: async () => ({
-        CollisionEngineTool: class {
-          async execute() {
-            throw new Error(`storage missing: ${process.env.COLLISION_STORAGE_DIR}`);
-          }
-        }
-      }),
-      cliInvoker: async () => {
-        throw new Error(`graph root missing: ${process.env.VA_CONSTRAINT_GRAPH_ROOT}`);
-      },
+      constraintsDir,
+      maxFactors: 2,
+    });
+    assert.equal(result.engineAvailable, true);
+    assert.equal(result.source, "yaml");
+    assert.equal(result.synthesis, "Keep API write paths safe under retries.");
+    assert.deepEqual(
+      result.constraints.map((item) => [item.type, item.statement]),
+      [
+        ["boundary", "Public mutation APIs must validate input shape before persisting"],
+        ["invariant", "Idempotency for repeat archive/delete/close"],
+      ],
+    );
+    assert.deepEqual(result.blindSpots, ["performance-under-load"]);
+  });
+});
+
+test("collectConstraints returns engineAvailable false for an empty constraints directory", async () => {
+  const { constraintsDir } = withTempConstraintRepo();
+  await withEnv({ VA_AUTO_PILOT_CONSTRAINTS: "on" }, async () => {
+    const result = await collectConstraints("archive", {
+      configEnabled: false,
+      constraintsDir,
     });
     assert.equal(result.engineAvailable, false);
+    assert.equal(result.source, "skipped");
     assert.deepEqual(result.constraints, []);
     assert.deepEqual(result.blindSpots, []);
-    assert.match(result.error, /storage missing/);
+    assert.equal(result.error, undefined);
+  });
+});
+
+test("collectConstraints returns graceful empty on malformed yaml", async () => {
+  const { constraintsDir } = withTempConstraintRepo({
+    "broken.yaml": "id: broken\ntype: auto-pilot-constraint-set\npayload: [\n",
+  });
+  await withEnv({ VA_AUTO_PILOT_CONSTRAINTS: "on" }, async () => {
+    const result = await collectConstraints("archive", {
+      configEnabled: false,
+      constraintsDir,
+    });
+    assert.equal(result.engineAvailable, false);
+    assert.equal(result.source, "skipped");
+    assert.deepEqual(result.constraints, []);
+    assert.deepEqual(result.blindSpots, []);
+    assert.equal(typeof result.error, "string");
+    assert.ok(result.error.length > 0);
   });
 });
 

@@ -1,0 +1,25 @@
+id: api-defense
+type: auto-pilot-constraint-set
+payload:
+  domain: api
+  tags: [archive, delete, idempotency, write-path]
+  synthesis: Keep write-path APIs safe under retries, stale state, and local tool variance.
+  constraints:
+    - type: boundary
+      statement: Public mutation APIs must validate input shape before persisting
+      confidence: 0.98
+    - type: invariant
+      statement: Idempotency for repeat archive/delete/close
+      confidence: 0.96
+    - type: prerequisite
+      statement: Stale locks must be recoverable, not block forever
+      confidence: 0.89
+    - type: anti-pattern
+      statement: Hardcoding environment assumptions like npm test
+      confidence: 0.82
+    - type: trade-off
+      statement: strictness vs. developer experience - lean strict at write path
+      confidence: 0.78
+  blindSpots:
+    - performance-under-load
+    - concurrent writers across processes

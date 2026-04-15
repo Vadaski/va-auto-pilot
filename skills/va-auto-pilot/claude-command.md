@@ -6,13 +6,11 @@ Operate in VA Auto-Pilot mode for this repository.
 
 Execution rules:
 
-1. If `.va-auto-pilot/config.yaml` is missing, run:
+1. If `.va-auto-pilot/config.yaml` is missing, run from the local va-auto-pilot source checkout (source-install mode — no remote clone):
 
 ```bash
-tmp="$(mktemp -d)"
-git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
-node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
-rm -rf "$tmp"
+: "${VA_AUTO_PILOT_ROOT:=$HOME/vadaski/Code/va-auto-pilot}"
+node "$VA_AUTO_PILOT_ROOT/bin/va-auto-pilot.mjs" init .
 ```
 
 2. **Preferred: use the autonomous loop.**

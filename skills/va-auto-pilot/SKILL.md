@@ -20,16 +20,17 @@ Use this skill when the user asks to:
 ## Workflow
 
 1. Confirm target repository root (default: current directory).
-2. Install scaffold:
+2. Install scaffold from your local va-auto-pilot source checkout (no remote clone — source-install mode):
 
 ```bash
-tmp="$(mktemp -d)"
-git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
-node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init <target-dir>
+# Assumes va-auto-pilot is checked out locally. Set VA_AUTO_PILOT_ROOT or edit the path.
+: "${VA_AUTO_PILOT_ROOT:=$HOME/vadaski/Code/va-auto-pilot}"
+node "$VA_AUTO_PILOT_ROOT/bin/va-auto-pilot.mjs" init <target-dir>
 cd <target-dir>
 npm install yaml
-rm -rf "$tmp"
 ```
+
+The Claude Code skill at `~/.claude/skills/auto-pilot` is a symlink to `$VA_AUTO_PILOT_ROOT/skills/va-auto-pilot/` — edits in the repo take effect immediately with no re-install.
 
 3. Read and align these files:
 

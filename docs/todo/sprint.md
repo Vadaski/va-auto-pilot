@@ -104,8 +104,11 @@
 | AP-061 | Optional: va-auto-pilot constraints CLI subcommand set — list / add / show; path-to-future 'import-from-collision-engine' subcommand stub with not-yet-implemented placeholder (Phase 3) | 2026-04-15 | Round 8 dogfood: code landed, check:all green; manually reconciled after loop track-timeout. |
 | AP-064 | orchestrate: halt-track cancels running worker | 2026-05-19 | Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass. |
 | AP-065 | docs: orchestrated mode in start prompt and agent-usage | 2026-05-19 | Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass. |
+| AP-066 | orchestration: add test-flows for orchestrate/observe/intervene CLI | 2026-05-19 | orchestration hardening: check:all + orchestrate-cli.yaml |
+| AP-067 | orchestration: PLAN_EMPTY and soft errors must exit non-zero | 2026-05-19 | orchestration hardening: check:all + orchestrate-cli.yaml |
 | AP-007 | Correct 'human-out-of-the-loop' framing to 'human-on-the-loop' across docs and website | 2026-02-23 | docs/human-on-the-loop.md created with updated framing; old file removed; README.md and README.zh.md references updated; all gates pass |
 | AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | 2026-03-29 | - |
+| AP-068 | orchestration: observe suggests replenish when backlog empty | 2026-05-19 | orchestration hardening: check:all + orchestrate-cli.yaml |
 
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |

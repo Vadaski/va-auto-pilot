@@ -4,6 +4,7 @@ import { readHumanBoardInstructions, resolveHumanBoardPath } from "./lib/human-b
 import { buildOrchestrationOpts, emitResult, sprintBoardExec, tryParseJson } from "./lib/orchestration-cli.mjs";
 import {
   hasHaltDirective,
+  isTerminalRunPhase,
   orchestrationPaths,
   readCheckpoint,
   readDirectives,
@@ -93,6 +94,9 @@ function buildAnomalies({ run, trackList, state, pendingTasks, stopCondition }) 
   const tasksById = new Map((state.tasks ?? []).map((t) => [t.id, t]));
 
   for (const track of trackList) {
+    if (track.state === "preview") {
+      continue;
+    }
     const sprintTask = tasksById.get(track.taskId);
     if (track.state === "running" && sprintTask && ["Done", "Failed"].includes(sprintTask.state)) {
       anomalies.push({
@@ -125,6 +129,18 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
   const actions = [];
   if (!run) {
     actions.push("orchestrate init");
+    if (pendingTasks === 0) {
+      actions.push("replenish backlog: sprint-board add or human-board Instructions");
+    }
+    return actions;
+  }
+  if (isTerminalRunPhase(run.phase)) {
+    actions.push("orchestrate init");
+    if (pendingTasks > 0) {
+      actions.push("orchestrate plan");
+    } else {
+      actions.push("replenish backlog: sprint-board add or human-board Instructions");
+    }
     return actions;
   }
   if (anomalies?.some((a) => a.code === "STALE_RUN_PHASE")) {
@@ -138,6 +154,9 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
   }
   if (stopCondition.stop) {
     actions.push("intervene replan or update human-board before continue");
+  }
+  if (pendingTasks === 0 && ["initialized", "cycle-closed"].includes(run.phase)) {
+    actions.push("replenish backlog: sprint-board add or human-board Instructions");
   }
   switch (run.phase) {
     case "initialized":
@@ -153,6 +172,9 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
     case "dispatch-queued":
       actions.push("orchestrate await-workers");
       break;
+    case "dry-run-preview":
+      actions.push("orchestrate await-workers (without --dry-run) or orchestrate close");
+      break;
     case "awaiting-commit-approval":
       actions.push("orchestrate approve-commit --tasks <ids>");
       break;
@@ -163,9 +185,7 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
       actions.push("orchestrate journal");
       break;
     default:
-      if (pendingTasks > 0) {
-        actions.push("orchestrate plan");
-      }
+      break;
   }
   return actions;
 }

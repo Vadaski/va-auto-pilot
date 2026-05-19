@@ -8,6 +8,9 @@ import { withPilotFileLock, writeJsonFileAtomicSync } from "./pilot-state.mjs";
 
 export const ORCHESTRATION_SCHEMA_VERSION = 1;
 
+/** Phases where plan/dispatch/await must not run without a fresh init. */
+export const TERMINAL_RUN_PHASES = new Set(["done", "error", "halted"]);
+
 export function resolveOrchestrationDir(workDir = process.cwd()) {
   return path.resolve(workDir, ".va-auto-pilot", "orchestration");
 }
@@ -223,5 +226,16 @@ export function assertActiveRun(run, runId) {
     const error = new Error(`Run ID mismatch: expected ${runId}, active ${run.runId}`);
     error.code = "RUN_ID_MISMATCH";
     throw error;
+  }
+}
+
+export function isTerminalRunPhase(phase) {
+  return TERMINAL_RUN_PHASES.has(phase);
+}
+
+export function clearCheckpoint(workDir) {
+  const { checkpoint } = orchestrationPaths(workDir);
+  if (fs.existsSync(checkpoint)) {
+    fs.unlinkSync(checkpoint);
   }
 }

@@ -4855,6 +4855,7 @@ import {
   hasHaltDirective,
   isCheckpointStale,
   orchestrationPaths,
+  readCheckpoint,
   readRun,
   readWorkerOverrides,
   writeDirectives,
@@ -4944,13 +4945,45 @@ test("readWorkerOverrides collects set-worker directives", async () => {
 
 test("auto-pilot orchestrate: close marks run done and clears tracks", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-close-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
   const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ projectPrefix: "AP", tasks: [] }), "utf8");
   spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], { cwd: tmpDir, encoding: "utf8" });
+  spawnSync(process.execPath, [script, "orchestrate", "plan", "--json", "--state-file", stateFile], { cwd: tmpDir, encoding: "utf8" });
+  spawnSync(process.execPath, [script, "orchestrate", "approve-plan", "--json", "--state-file", stateFile], { cwd: tmpDir, encoding: "utf8" });
   const close = spawnSync(process.execPath, [script, "orchestrate", "close", "--json"], { cwd: tmpDir, encoding: "utf8" });
   assert.equal(close.status, 0, close.stderr);
   const run = readRun(tmpDir);
   assert.equal(run.phase, "done");
   assert.equal(run.locks?.executorPid, null);
+  assert.equal(readCheckpoint(tmpDir), null);
+});
+
+test("auto-pilot orchestrate: PLAN_EMPTY exits 1", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-empty-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ projectPrefix: "AP", tasks: [{ id: "AP-001", state: "Done", title: "x", priority: "P1", dependsOn: [] }] }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], { cwd: tmpDir, encoding: "utf8" });
+  const plan = spawnSync(process.execPath, [script, "orchestrate", "plan", "--json", "--state-file", stateFile], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(plan.status, 1);
+  assert.ok((plan.stderr + plan.stdout).includes("PLAN_EMPTY"));
+});
+
+test("auto-pilot orchestrate: plan blocked when run phase is done", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-terminated-"));
+  const orchDir = path.join(tmpDir, ".va-auto-pilot", "orchestration");
+  fs.mkdirSync(orchDir, { recursive: true });
+  fs.writeFileSync(path.join(orchDir, "run.json"), JSON.stringify({ schemaVersion: 1, runId: "run-x", phase: "done", locks: { executorPid: null } }), "utf8");
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  const plan = spawnSync(process.execPath, [script, "orchestrate", "plan", "--json"], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(plan.status, 2);
+  assert.ok((plan.stderr + plan.stdout).includes("RUN_TERMINATED"));
 });
 
 test("auto-pilot observe: writes snapshot.json", () => {

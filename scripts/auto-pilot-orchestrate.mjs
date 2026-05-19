@@ -12,11 +12,13 @@ import {
 import {
   assertActiveRun,
   buildCheckpoint,
+  clearCheckpoint,
   createPlanId,
   createRunId,
   hasHaltDirective,
   isCheckpointStale,
   isProcessAlive,
+  isTerminalRunPhase,
   readCheckpoint,
   readDirectives,
   readRun,
@@ -40,6 +42,19 @@ function planTaskIds(plan) {
     return [];
   }
   return [plan.primaryTaskId, ...(Array.isArray(plan.parallelTracks) ? plan.parallelTracks : [])].filter(Boolean);
+}
+
+function assertRunnablePhase(run, opts) {
+  assertActiveRun(run, opts.runId || undefined);
+  if (isTerminalRunPhase(run.phase)) {
+    fail(
+      opts,
+      "RUN_TERMINATED",
+      `run phase is ${run.phase}; run orchestrate init before continuing`,
+      { runId: run.runId, phase: run.phase },
+      2
+    );
+  }
 }
 
 async function validatePreDispatch(run, opts) {
@@ -76,9 +91,13 @@ async function orchestrateClose(opts) {
   }
   run.phase = "done";
   run.locks = { executorPid: null };
+  run.candidatePlan = null;
+  run.approvedPlanId = null;
+  run.approvedCommitTasks = [];
   run.updatedAt = new Date().toISOString();
   await writeRun(opts.workDir, run);
   await writeTracks(opts.workDir, { runId: run.runId, tracks: [] });
+  clearCheckpoint(opts.workDir);
   await refreshSnapshot(opts);
   return emitResult(opts, { ok: true, action: "close", runId: run.runId });
 }
@@ -105,18 +124,19 @@ async function initRun(opts) {
     approvedPlanId: null,
     candidatePlan: null,
     approvedCommitTasks: [],
-    locks: { executorPid: process.pid },
+    locks: { executorPid: null },
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
   await writeRun(opts.workDir, run);
   await writeTracks(opts.workDir, { runId, tracks: [] });
+  clearCheckpoint(opts.workDir);
   return run;
 }
 
 async function orchestratePlan(opts) {
   const run = readRun(opts.workDir);
-  assertActiveRun(run, opts.runId || undefined);
+  assertRunnablePhase(run, opts);
 
   const planResult = await sprintBoardExec(
     ["plan", "--json", "--max-parallel", String(opts.maxParallel)],
@@ -128,7 +148,7 @@ async function orchestratePlan(opts) {
 
   const parsed = tryParseJson(planResult.stdout.trim());
   if (!parsed.parsed || !parsed.value?.primaryTaskId) {
-    fail(opts, "PLAN_EMPTY", "no parallel plan available", { stdout: planResult.stdout }, 0);
+    fail(opts, "PLAN_EMPTY", "no parallel plan available", { stdout: planResult.stdout }, 1);
   }
 
   run.candidatePlan = parsed.value;
@@ -145,7 +165,7 @@ async function orchestratePlan(opts) {
 
 async function orchestrateApprovePlan(opts) {
   const run = readRun(opts.workDir);
-  assertActiveRun(run, opts.runId || undefined);
+  assertRunnablePhase(run, opts);
 
   if (!run.candidatePlan?.primaryTaskId) {
     fail(opts, "NO_CANDIDATE_PLAN", "run orchestrate plan first", {}, 2);
@@ -172,7 +192,7 @@ async function orchestrateApprovePlan(opts) {
 
 async function orchestrateDispatch(opts) {
   const run = readRun(opts.workDir);
-  assertActiveRun(run, opts.runId || undefined);
+  assertRunnablePhase(run, opts);
   await validatePreDispatch(run, opts);
 
   const taskIds = planTaskIds(run.candidatePlan);
@@ -189,7 +209,6 @@ async function orchestrateDispatch(opts) {
 
   run.phase = "dispatch-queued";
   run.updatedAt = new Date().toISOString();
-  run.locks = { executorPid: process.pid };
   await writeRun(opts.workDir, run);
   await writeTracks(opts.workDir, { runId: run.runId, tracks });
 
@@ -211,12 +230,34 @@ async function createBridge(opts) {
 
 async function orchestrateAwaitWorkers(opts) {
   const run = readRun(opts.workDir);
-  assertActiveRun(run, opts.runId || undefined);
+  assertRunnablePhase(run, opts);
 
   const tracksDoc = readTracks(opts.workDir);
   const queued = (tracksDoc.tracks ?? []).filter((track) => track.state === "queued");
   if (queued.length === 0) {
     fail(opts, "NO_QUEUED_TRACKS", "no queued tracks; run orchestrate dispatch first", {}, 2);
+  }
+
+  if (opts.dryRun) {
+    const previewAt = new Date().toISOString();
+    for (const track of queued) {
+      track.state = "preview";
+      track.lastHeartbeat = previewAt;
+      track.resultAction = "dry-run-skipped";
+    }
+    await writeTracks(opts.workDir, tracksDoc);
+    run.phase = "dry-run-preview";
+    run.updatedAt = previewAt;
+    await writeRun(opts.workDir, run);
+    const payload = {
+      ok: true,
+      phase: run.phase,
+      runId: run.runId,
+      previewTasks: queued.map((t) => t.taskId),
+      message: "dry-run: no workers executed; re-dispatch without --dry-run to run",
+    };
+    await refreshSnapshot(opts);
+    return emitResult(opts, payload);
   }
 
   const bridge = await createBridge(opts);
@@ -297,7 +338,7 @@ async function orchestrateAwaitWorkers(opts) {
 
 async function orchestrateApproveCommit(opts) {
   const run = readRun(opts.workDir);
-  assertActiveRun(run, opts.runId || undefined);
+  assertRunnablePhase(run, opts);
 
   const tasks = String(opts.tasks || "")
     .split(",")
@@ -319,7 +360,7 @@ async function orchestrateApproveCommit(opts) {
 
 async function orchestrateCommit(opts) {
   const run = readRun(opts.workDir);
-  assertActiveRun(run, opts.runId || undefined);
+  assertRunnablePhase(run, opts);
 
   if (!opts.waiveApprovals && (!Array.isArray(run.approvedCommitTasks) || run.approvedCommitTasks.length === 0)) {
     fail(opts, "APPROVAL_REQUIRED", "approve-commit required before commit", {}, 2);
@@ -356,7 +397,7 @@ async function orchestrateCommit(opts) {
 
 async function orchestrateJournal(opts) {
   const run = readRun(opts.workDir);
-  assertActiveRun(run, opts.runId || undefined);
+  assertRunnablePhase(run, opts);
 
   const state = readSprintState(opts.stateFile);
   const stopCondition = detectStopCondition(state);

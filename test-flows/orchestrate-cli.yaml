@@ -1,0 +1,114 @@
+name: Orchestrated Auto-Pilot CLI
+# Regression flows for scripts/auto-pilot.mjs orchestrate/observe.
+
+flows:
+  - name: "orchestrate: PLAN_EMPTY exits non-zero"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[{"id":"AP-001","title":"done","priority":"P1","state":"Done","dependsOn":[]}]}
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json 2>&1 | grep -q PLAN_EMPTY
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code_nonzero: true
+      should: []
+
+  - name: "orchestrate: plan blocked on terminated run"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot/orchestration" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[{"id":"AP-001","title":"t","priority":"P1","state":"Backlog","dependsOn":[]}]}
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        cat > "$tmpdir/.va-auto-pilot/orchestration/run.json" <<'EOF'
+        {"schemaVersion":1,"runId":"run-test","phase":"done","locks":{"executorPid":null}}
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json 2>&1 | grep -q RUN_TERMINATED
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code_nonzero: true
+      should: []
+
+  - name: "orchestrate: dry-run await-workers uses dry-run-preview phase"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[{"id":"AP-001","title":"t","priority":"P1","state":"Backlog","dependsOn":[]}]}
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json >/dev/null
+        out="$(node "$repo/scripts/auto-pilot.mjs" orchestrate await-workers --dry-run --json)"
+        echo "$out" | grep -q '"phase": "dry-run-preview"'
+        node "$repo/scripts/auto-pilot.mjs" observe --json | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8'));process.exit((j.snapshot?.anomalies?.length??0)===0?0:1)"
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
+  - name: "observe: empty backlog suggests replenish"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        echo '{"projectPrefix":"AP","tasks":[]}' > "$tmpdir/.va-auto-pilot/sprint-state.json"
+        echo -e '# Human Board\n\n## Instructions\n' > "$tmpdir/docs/todo/human-board.md"
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/auto-pilot.mjs" observe --json | grep -q replenish
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []

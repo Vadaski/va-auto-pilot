@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-05-19T12:27:38.976Z",
+  "updatedAt": "2026-05-19T16:16:53.697Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -1989,6 +1989,93 @@
       "failCount": 0,
       "reason": "",
       "verification": "Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-066",
+      "title": "orchestration: add test-flows for orchestrate/observe/intervene CLI",
+      "priority": "P2",
+      "state": "Done",
+      "owner": "",
+      "source": "",
+      "createdAt": "2026-05-19",
+      "startedAt": "",
+      "completedAt": "2026-05-19T16:16:53.502Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "orchestration hardening: check:all + orchestrate-cli.yaml",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-067",
+      "title": "orchestration: PLAN_EMPTY and soft errors must exit non-zero",
+      "priority": "P2",
+      "state": "Done",
+      "owner": "",
+      "source": "",
+      "createdAt": "2026-05-19",
+      "startedAt": "",
+      "completedAt": "2026-05-19T16:16:53.602Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "orchestration hardening: check:all + orchestrate-cli.yaml",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-068",
+      "title": "orchestration: observe suggests replenish when backlog empty",
+      "priority": "P3",
+      "state": "Done",
+      "owner": "",
+      "source": "",
+      "createdAt": "2026-05-19",
+      "startedAt": "",
+      "completedAt": "2026-05-19T16:16:53.697Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "orchestration hardening: check:all + orchestrate-cli.yaml",
       "notes": "",
       "review": {
         "implementer": "",

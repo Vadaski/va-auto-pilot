@@ -2432,3 +2432,22 @@
 - Signals:
   - orchestrated:run-2026-05-19T16-18-06-728Z-e0d7e3bd
 ---
+
+## 2026-05-19T16:50:34.809Z - plan-review
+- Summary: Codex Sprint5 plan review (read-only): hard gate planHash+plan-review.json; order AP-073→069→070→072; defer AP-071 gate; CRITICAL on schema/stale review/checkpoint race — addressed in AP-070 implementation.
+- Signals:
+  - plan-review:codex-manual
+  - sprint5
+---
+
+## 2026-05-19T16:50:49.332Z - plan-review
+- Summary: plan-review passed planHash=59dd16aab802bc86067837e509a11ec2b0a2ed0254deacc9d72903192c305b08 critical=0 warning=0
+- Signals:
+  - plan-review:59dd16aab802bc86067837e509a11ec2b0a2ed0254deacc9d72903192c305b08
+---
+
+## 2026-05-19T16:50:51.739Z - cycle-boundary
+- Summary: orchestrated cycle-boundary: run=run-2026-05-19T16-50-36-988Z-5fb1db1d phase=plan-approved stop=false
+- Signals:
+  - orchestrated:run-2026-05-19T16-50-36-988Z-5fb1db1d
+---

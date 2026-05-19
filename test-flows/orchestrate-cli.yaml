@@ -81,11 +81,71 @@ flows:
         cd "$tmpdir"
         node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --dry-run --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json >/dev/null
         out="$(node "$repo/scripts/auto-pilot.mjs" orchestrate await-workers --dry-run --json)"
         echo "$out" | grep -q '"phase": "dry-run-preview"'
         node "$repo/scripts/auto-pilot.mjs" observe --json | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8'));process.exit((j.snapshot?.anomalies?.length??0)===0?0:1)"
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
+  - name: "orchestrate: approve-plan blocked without review-plan"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[{"id":"AP-001","title":"t","priority":"P1","state":"Backlog","dependsOn":[]}]}
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json 2>&1 | grep -q PLAN_REVIEW_REQUIRED
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code_nonzero: true
+      should: []
+
+  - name: "orchestrate: review-plan dry-run then approve-plan"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[{"id":"AP-001","title":"t","priority":"P1","state":"Backlog","dependsOn":[]}]}
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --dry-run --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
     env:
       ROOT: "."
     assert:

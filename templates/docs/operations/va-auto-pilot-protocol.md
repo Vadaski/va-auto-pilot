@@ -46,8 +46,9 @@ When you work in **Claude Code, Cursor, or Codex**, the **session agent is the m
 
 ### Approval gates (mandatory in orchestrated mode)
 
-1. **`approve-plan`** — required after `plan`, before `dispatch`. Records checkpoint (sprint-state hash, human-board hash, git HEAD).
-2. **`approve-commit --tasks AP-001,...`** — required after workers settle and gates pass, before `commit`.
+1. **`review-plan`** — required after `plan`, before `approve-plan`. Read-only reviewer (default Codex) on candidate plan; writes `plan-review.json` with `planHash`. No CRITICAL before continue.
+2. **`approve-plan`** — required after `review-plan`, before `dispatch`. Records checkpoint. Blocks stale/missing review. `--waive-review-with-reason` for emergencies (journaled).
+3. **`approve-commit --tasks AP-001,...`** — required after workers settle and gates pass, before `commit`.
 
 There is no auto-approve in interactive orchestrated mode.
 
@@ -56,6 +57,8 @@ There is no auto-approve in interactive orchestrated mode.
 ```bash
 node scripts/auto-pilot.mjs orchestrate init --manager-surface cursor
 node scripts/auto-pilot.mjs orchestrate plan --max-parallel 3
+node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate review-plan
 node scripts/auto-pilot.mjs observe --json
 node scripts/auto-pilot.mjs orchestrate approve-plan
 node scripts/auto-pilot.mjs orchestrate dispatch

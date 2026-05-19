@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { readQualityGateConfig } from "./lib/sprint-utils.mjs";
 import { readHumanBoardInstructions, resolveHumanBoardPath } from "./lib/human-board.mjs";
 import { ColonyBridge } from "./lib/colony-bridge.mjs";
@@ -36,6 +39,13 @@ import {
   readSprintState,
 } from "./auto-pilot-loop.mjs";
 import { refreshSnapshot } from "./auto-pilot-observe.mjs";
+import {
+  computeCandidatePlanHash,
+  readPlanReview,
+  runPlanReviewCommand,
+  validatePlanReviewForApprove,
+  writePlanReview,
+} from "./lib/plan-review.mjs";
 
 function planTaskIds(plan) {
   if (!plan) {
@@ -98,6 +108,10 @@ async function orchestrateClose(opts) {
   await writeRun(opts.workDir, run);
   await writeTracks(opts.workDir, { runId: run.runId, tracks: [] });
   clearCheckpoint(opts.workDir);
+  const reviewPath = path.join(opts.workDir, ".va-auto-pilot", "orchestration", "plan-review.json");
+  if (fs.existsSync(reviewPath)) {
+    fs.unlinkSync(reviewPath);
+  }
   await refreshSnapshot(opts);
   return emitResult(opts, { ok: true, action: "close", runId: run.runId });
 }
@@ -163,12 +177,75 @@ async function orchestratePlan(opts) {
   return emitResult(opts, payload);
 }
 
+async function orchestrateReviewPlan(opts) {
+  const run = readRun(opts.workDir);
+  assertRunnablePhase(run, opts);
+
+  if (!run.candidatePlan?.primaryTaskId) {
+    fail(opts, "NO_CANDIDATE_PLAN", "run orchestrate plan first", {}, 2);
+  }
+
+  const gateConfig = readQualityGateConfig();
+  const reviewCommand = gateConfig.planReviewCommand ?? "";
+  const review = await runPlanReviewCommand({
+    workDir: opts.workDir,
+    candidatePlan: run.candidatePlan,
+    runId: run.runId,
+    reviewCommand,
+    dryRun: opts.dryRun,
+  });
+
+  if (!review.passed) {
+    await writePlanReview(opts.workDir, review);
+    fail(opts, "PLAN_REVIEW_CRITICAL", "plan review found CRITICAL findings", { review }, 1);
+  }
+
+  await writePlanReview(opts.workDir, review);
+  run.phase = "plan-reviewed";
+  run.updatedAt = new Date().toISOString();
+  await writeRun(opts.workDir, run);
+
+  await sprintBoardExec(
+    [
+      "journal",
+      "--task",
+      "plan-review",
+      "--summary",
+      `plan-review passed planHash=${review.planHash} critical=0 warning=${review.findings?.warning?.length ?? 0}`,
+      "--signals",
+      `plan-review:${review.planHash}`,
+    ],
+    opts
+  );
+
+  const payload = { ok: true, phase: run.phase, runId: run.runId, planHash: review.planHash, review };
+  await refreshSnapshot(opts);
+  return emitResult(opts, payload);
+}
+
 async function orchestrateApprovePlan(opts) {
   const run = readRun(opts.workDir);
   assertRunnablePhase(run, opts);
 
   if (!run.candidatePlan?.primaryTaskId) {
     fail(opts, "NO_CANDIDATE_PLAN", "run orchestrate plan first", {}, 2);
+  }
+
+  const waiveReason = opts.parsed?.options?.["waive-review-with-reason"] ?? "";
+  if (!waiveReason && !opts.parsed?.flags?.has("waive-review")) {
+    const validation = validatePlanReviewForApprove({
+      review: readPlanReview(opts.workDir),
+      candidatePlan: run.candidatePlan,
+      runId: run.runId,
+    });
+    if (!validation.ok) {
+      fail(opts, validation.code, validation.message, validation.context ?? {}, 2);
+    }
+  } else if (waiveReason) {
+    await sprintBoardExec(
+      ["journal", "--task", "plan-review", "--summary", `plan-review waived: ${waiveReason}`, "--signals", "plan-review:waived"],
+      opts
+    );
   }
 
   const planId = createPlanId();
@@ -484,6 +561,8 @@ export async function runOrchestrateCommand(subcommand, argv) {
     }
     case "plan":
       return orchestratePlan(opts);
+    case "review-plan":
+      return orchestrateReviewPlan(opts);
     case "approve-plan":
       return orchestrateApprovePlan(opts);
     case "dispatch":

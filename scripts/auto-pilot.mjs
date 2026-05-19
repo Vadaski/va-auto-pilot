@@ -21,7 +21,8 @@ function printHelp() {
 Usage:
   node scripts/auto-pilot.mjs orchestrate init [--manager-surface cursor|claude|codex] [--json]
   node scripts/auto-pilot.mjs orchestrate plan [--max-parallel N] [--json]
-  node scripts/auto-pilot.mjs orchestrate approve-plan [--json]
+  node scripts/auto-pilot.mjs orchestrate review-plan [--dry-run] [--json]
+  node scripts/auto-pilot.mjs orchestrate approve-plan [--waive-review-with-reason "..."] [--json]
   node scripts/auto-pilot.mjs orchestrate dispatch [--json]
   node scripts/auto-pilot.mjs orchestrate await-workers [--json]
   node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-001,AP-002 [--json]

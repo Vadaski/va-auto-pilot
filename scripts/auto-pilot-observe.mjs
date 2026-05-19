@@ -164,6 +164,10 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
       actions.push("orchestrate plan");
       break;
     case "awaiting-plan-approval":
+      actions.push("orchestrate review-plan");
+      actions.push("orchestrate approve-plan");
+      break;
+    case "plan-reviewed":
       actions.push("orchestrate approve-plan");
       break;
     case "plan-approved":

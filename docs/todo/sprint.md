@@ -22,7 +22,7 @@
 ## In Progress
 | ID | Task | Owner | Started | Notes |
 |----|------|-------|---------|-------|
-| AP-004 | Add unit test suite for sprint-board.mjs pure functions | - | 2026-02-23 | - |
+| - | - | - | - | - |
 
 ## Failed
 | ID | Task | Fail Count | Reason | Last Failed |
@@ -53,6 +53,7 @@
 | AP-046 | auto-pilot infra: review gate must tolerate unstructured codex output (retry/log/pass when tests+build pass) — current fail-closed causes true-positive tasks to be misclassified | 2026-04-14 | Done in dogfood round 3, committed 2c9d086. See commit body for details. |
 | AP-001 | Upgrade multi-perspective review to dynamic perspective selection | 2026-02-23 | Two cross-reviews (adversarial + protocol designer), 6 CRITICALs resolved, templates synced |
 | AP-003 | Add sprint-board.mjs add command to create tasks via CLI without hand-editing JSON | 2026-02-23 | add command implemented: auto-ID (AP-NNN), validation, depends-on, regex-safe prefix; printHelp updated; templates mirrored; all gates pass |
+| AP-004 | Add unit test suite for sprint-board.mjs pure functions | 2026-02-23 | 41/41 unit tests pass via node:test; check:units added to check:all; all gates pass |
 | AP-006 | Expand test-flows to cover add, update, journal, and next CLI commands | 2026-02-23 | sprint-board-cli.yaml added (9 flows, 18 MUST/3 SHOULD); test-cli-flows.mjs runner with isolated_state/isolated_journal; check:cli-flows added to check:all; all gates pass |
 | AP-009 | Add Strategic Decomposition phase to protocol for high-level goals | 2026-02-23 | Strategic Decomposition section added to both protocol files. Specifies strategic vs tactical detection, parallel dimension-scan with independence constraint, structured audit report format, convergence step with run-journal schema, and transition back to tactical loop. Concurrency follows existing Concurrency Contract. Guards are bounded. npm run check:all and npm run validate:distribution pass. |
 | AP-010 | Add mandatory post-sprint independent adversarial review phase to protocol | 2026-02-23 | Sprint Completion Gate section added to both protocol files. Specifies adversarial reviewer setup (fresh context, diff-only), manager-assigned specific perspective grounded in what changed, structured finding report format, CRITICAL-blocks / WARNING-requires-disposition enforcement, and guard with control-downgrade semantics (not just disclosure) when fresh context is unavailable. npm run check:all and npm run validate:distribution pass. |
@@ -86,6 +87,9 @@
 | AP-060 | Seed initial constraint library — port dogfood pitfalls (PF-004..PF-039 resolved with real root causes) into .va-auto-pilot/constraints/*.yaml; one file per domain (dispatch, review-gate, adopt, mode-enforcement, state-race) | 2026-04-15 | Round 8 dogfood: code landed, check:all green; manually reconciled after loop track-timeout. |
 | AP-062 | orchestrate: parallel await-workers for independent tracks | 2026-05-19 | Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass. |
 | AP-063 | orchestrate: apply set-worker directive during dispatch | 2026-05-19 | Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass. |
+| AP-069 | Sprint5 P1: human-board Plan Review Gate standing instruction | 2026-05-19 | Sprint5 plan-review gate landed; check:all PASS |
+| AP-070 | Sprint5 P1: protocol+skill Plan Review Gate (review-plan before approve-plan) | 2026-05-19 | Sprint5 plan-review gate landed; check:all PASS |
+| AP-071 | Sprint5 P1: orchestrate review-plan CLI + planHash binding + approve gate | 2026-05-19 | Sprint5 plan-review gate landed; check:all PASS |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
@@ -106,6 +110,7 @@
 | AP-065 | docs: orchestrated mode in start prompt and agent-usage | 2026-05-19 | Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass. |
 | AP-066 | orchestration: add test-flows for orchestrate/observe/intervene CLI | 2026-05-19 | orchestration hardening: check:all + orchestrate-cli.yaml |
 | AP-067 | orchestration: PLAN_EMPTY and soft errors must exit non-zero | 2026-05-19 | orchestration hardening: check:all + orchestrate-cli.yaml |
+| AP-072 | Sprint5 P2: orchestrate-cli review-plan + approve blocked flows | 2026-05-19 | Sprint5 plan-review gate landed; check:all PASS |
 | AP-007 | Correct 'human-out-of-the-loop' framing to 'human-on-the-loop' across docs and website | 2026-02-23 | docs/human-on-the-loop.md created with updated framing; old file removed; README.md and README.zh.md references updated; all gates pass |
 | AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | 2026-03-29 | - |
 | AP-068 | orchestration: observe suggests replenish when backlog empty | 2026-05-19 | orchestration hardening: check:all + orchestrate-cli.yaml |

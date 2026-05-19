@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-05-19T16:16:53.697Z",
+  "updatedAt": "2026-05-19T16:50:51.214Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2076,6 +2076,122 @@
       "failCount": 0,
       "reason": "",
       "verification": "orchestration hardening: check:all + orchestrate-cli.yaml",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-069",
+      "title": "Sprint5 P1: human-board Plan Review Gate standing instruction",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "sprint5",
+      "createdAt": "2026-05-19",
+      "startedAt": "",
+      "completedAt": "2026-05-19T16:50:50.677Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Sprint5 plan-review gate landed; check:all PASS",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-070",
+      "title": "Sprint5 P1: protocol+skill Plan Review Gate (review-plan before approve-plan)",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "sprint5",
+      "createdAt": "2026-05-19",
+      "startedAt": "",
+      "completedAt": "2026-05-19T16:50:50.859Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Sprint5 plan-review gate landed; check:all PASS",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-071",
+      "title": "Sprint5 P1: orchestrate review-plan CLI + planHash binding + approve gate",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "sprint5",
+      "createdAt": "2026-05-19",
+      "startedAt": "",
+      "completedAt": "2026-05-19T16:50:51.033Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Sprint5 plan-review gate landed; check:all PASS",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-072",
+      "title": "Sprint5 P2: orchestrate-cli review-plan + approve blocked flows",
+      "priority": "P2",
+      "state": "Done",
+      "owner": "",
+      "source": "sprint5",
+      "createdAt": "2026-05-19",
+      "startedAt": "",
+      "completedAt": "2026-05-19T16:50:51.214Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Sprint5 plan-review gate landed; check:all PASS",
       "notes": "",
       "review": {
         "implementer": "",

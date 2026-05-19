@@ -20,6 +20,7 @@ export const ORCHESTRATE_BOOL_FLAGS = new Set([
   "no-colony",
   "strict",
   "waive-approvals",
+  "waive-review",
   "reset-fail-count",
 ]);
 

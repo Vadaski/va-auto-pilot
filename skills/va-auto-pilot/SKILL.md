@@ -64,7 +64,8 @@ Adaptive: `node scripts/sprint-board.mjs suggest-gate` reads unresolved pitfalls
 node scripts/auto-pilot.mjs orchestrate init --manager-surface cursor
 node scripts/auto-pilot.mjs orchestrate plan
 node scripts/auto-pilot.mjs observe --json
-node scripts/auto-pilot.mjs orchestrate approve-plan   # explicit — required
+node scripts/auto-pilot.mjs orchestrate review-plan    # Codex/read-only plan review — required before approve
+node scripts/auto-pilot.mjs orchestrate approve-plan   # explicit — required after review-plan
 node scripts/auto-pilot.mjs orchestrate dispatch
 node scripts/auto-pilot.mjs orchestrate await-workers
 node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-XXX

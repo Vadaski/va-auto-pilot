@@ -8,6 +8,9 @@
 
 ## Instructions (highest priority)
 
+- [x] **Plan Review Gate（Sprint 5）**：Manager 在 `orchestrate plan` 之后、`approve-plan` 之前，**必须与 Codex（或配置的 plan reviewer）讨论计划**——只评审、不写代码。运行 `orchestrate review-plan`，将结论写入 run-journal；存在 CRITICAL 则调整 backlog 后重新 plan + review。禁止「定计划后直接 dispatch / 实现」。
+> Processed 2026-05-19: `orchestrate review-plan` CLI + plan-review.json planHash gate; protocol/SKILL updated; Codex reviewed Sprint5 plan before implementation (journal plan-review).
+
 - [x] DocStore 打磨至生产级：AP-040..AP-045 是 Sprint 1-bis / 2-bis / 3 的落地任务。
 > Processed 2026-04-14: 6-round dogfood session complete. Done 39→52. Commits:
 > 2407884 / 98fe458 / 2c9d086 / d199904 / 5f49c0a / 57d0c57 / 93b174c. Auto-pilot

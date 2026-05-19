@@ -4889,6 +4889,46 @@ test("orchestration-state: hasHaltDirective detects halt-run", () => {
   assert.equal(hasHaltDirective({ directives: [{ type: "replan", taskId: "AP-001" }] }), false);
 });
 
+test("plan-review: parseReviewFindings extracts CRITICAL lines", async () => {
+  const { parseReviewFindings, computeCandidatePlanHash, validatePlanReviewForApprove } = await import("./lib/plan-review.mjs");
+  const text = "1. **CRITICAL-1**：missing schema\n2. **WARNING-1**：journal fields\n";
+  const findings = parseReviewFindings(text);
+  assert.equal(findings.critical.length, 1);
+  assert.ok(findings.critical[0].includes("missing schema"));
+  const plan = { primaryTaskId: "AP-001", parallelTracks: [] };
+  const hash = computeCandidatePlanHash(plan);
+  assert.equal(validatePlanReviewForApprove({ review: null, candidatePlan: plan }).ok, false);
+  assert.equal(
+    validatePlanReviewForApprove({
+      review: { planHash: hash, passed: true, findings: { critical: [] } },
+      candidatePlan: plan,
+    }).ok,
+    true
+  );
+});
+
+test("auto-pilot orchestrate: approve-plan requires plan-review", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-review-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    tasks: [{ id: "AP-001", title: "t", priority: "P1", state: "Backlog", dependsOn: [] }],
+  }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], { cwd: tmpDir, encoding: "utf8" });
+  spawnSync(process.execPath, [script, "orchestrate", "plan", "--json", "--state-file", stateFile], { cwd: tmpDir, encoding: "utf8" });
+  const approve = spawnSync(process.execPath, [script, "orchestrate", "approve-plan", "--json", "--state-file", stateFile], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(approve.status, 2);
+  assert.ok((approve.stderr + approve.stdout).includes("PLAN_REVIEW_REQUIRED"));
+});
+
 test("auto-pilot orchestrate: dispatch requires approve-plan", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-cli-"));
   const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");

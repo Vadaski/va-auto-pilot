@@ -178,6 +178,35 @@ qualityGate:
         reason: 8 changed files; would route to kimi:va-auto-pilot | falling
         back to agentTemplate spawn | ---"
       triggeredBy: PF-037
+    - name: codex-completed
+      command: 'echo "TODO: implement gate for PF-040"'
+      required: true
+      description: "Suggested from pitfall PF-040: Dispatch failed: exitCode=1 | Codex
+        completed but gate \"undefined\" failed | Gate check failed | objective:
+        auto-pilot infra: fix 'falling back to agentTemplate spawn' path —
+        AP-050 kimi-routing guard correctly avoids kimi but fallback spawn
+        returns exit 1 in 119-414ms (clearly broken construction); restore
+        viable dispatch when kimi is skipped"
+      triggeredBy: PF-040
+    - name: codex-execution
+      command: 'echo "TODO: implement gate for PF-041"'
+      required: true
+      description: "Suggested from pitfall PF-041: Dispatch failed: exitCode=1 | Codex
+        execution exceeded 600000ms | Task too complex or codex hung. |
+        objective: Phase 2 — write path: 'sprint-board pitfall --resolve'
+        auto-synthesizes a new constraint YAML under .va-auto-pilot/constraints/
+        from pitfall.hypothesis + resolution + task.title; commit with message
+        scheme constraint: ... — no external engine call"
+      triggeredBy: PF-041
+    - name: codex-completed
+      command: 'echo "TODO: implement gate for PF-043"'
+      required: true
+      description: 'Suggested from pitfall PF-043: Dispatch failed: exitCode=1 | Codex
+        completed but gate "undefined" failed | Gate check failed | objective:
+        Sprint 4(e): README + start-va-auto-pilot-prompt updates — DocStore
+        usage section (init / adopt / hook install / modes); cross-link from
+        CLAUDE.md Quality Gate section'
+      triggeredBy: PF-043
 review:
   domainRoleName: Domain Expert
   domainPrompt: You are the domain expert for this product. Review behavioral

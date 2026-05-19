@@ -115,7 +115,31 @@ npm run validate:distribution # distribution structure check
 
 ---
 
-## 2. 核心流程
+## 2. 主 Agent 外环（Orchestrated Mode）
+
+会话里的 frontier agent 是 **Manager**；`scripts/auto-pilot.mjs` 是 **Executor**（每相位退出）。
+
+```bash
+node scripts/auto-pilot.mjs orchestrate init --manager-surface cursor
+node scripts/auto-pilot.mjs orchestrate plan
+node scripts/auto-pilot.mjs observe --json                    # 全局快照
+node scripts/auto-pilot.mjs orchestrate approve-plan            # 显式批准（必须）
+node scripts/auto-pilot.mjs orchestrate dispatch
+node scripts/auto-pilot.mjs orchestrate await-workers           # 并行执行 queued tracks
+node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-062,AP-063
+node scripts/auto-pilot.mjs orchestrate commit
+node scripts/auto-pilot.mjs orchestrate journal
+```
+
+- 战术指令：`intervene` → `.va-auto-pilot/orchestration/directives.json`
+- 战略意图：`docs/todo/human-board.md`
+- 无人值守：`orchestrate run-unattended --waive-approvals` 或 `auto-pilot-loop.mjs --max-cycles 50`
+
+详见 `docs/operations/va-auto-pilot-protocol.md` → Orchestrated Execution Mode。
+
+---
+
+## 3. 核心流程
 
 ### TC-01: Sprint Board -- 查看摘要和下一个任务
 

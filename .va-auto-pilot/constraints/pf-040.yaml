@@ -1,0 +1,36 @@
+id: ap-058-pf-040-dispatch
+type: auto-pilot-constraint-set
+payload:
+  domain: dispatch
+  tags:
+    - ap-058
+    - pf-040
+    - dispatch
+    - auto
+    - pilot
+    - infra
+    - fix
+    - falling
+    - back
+  synthesis: "Derived from AP-058 (auto-pilot infra: fix 'falling back to
+    agentTemplate spawn' path — AP-050 kimi-routing guard correctly avoids kimi
+    but fallback spawn returns exit 1 in 119-414ms (clearly broken
+    construction); restore viable dispatch when kimi is skipped): Dispatch
+    failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate
+    check failed | objective: auto-pilot infra: fix 'falling back to
+    agentTemplate spawn' path — AP-050 kimi-routing guard correctly avoids kimi
+    but fallback spawn returns exit 1 in 119-414ms (clearly broken
+    construction); restore viable dispatch when kimi is skipped Resolved via:
+    AP-058 Done: colony-bridge spawn fallback fixed; gate undefined mis-report
+    handled in resolveDispatchFailureGate (auto-pilot-loop.mjs). False-positive
+    pitfall from pre-fix dispatch."
+  constraints:
+    - type: anti-pattern
+      statement: "Avoid aP-058 Done: colony-bridge spawn fallback fixed; gate
+        undefined mis-report handled in resolveDispatchFailureGate
+        (auto-pilot-loop.mjs). False-positive pitfall from pre-fix dispatch"
+      confidence: 0.72
+      sourceFactorIds:
+        - PF-040
+  blindSpots:
+    - auto-generated-from-pitfall

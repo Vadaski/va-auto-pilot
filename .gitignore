@@ -5,3 +5,5 @@ dist/
 *.tgz
 coverage/
 .va-conductor/conductor.db
+.va-auto-pilot/orchestration/
+.va-auto-pilot/parallel-runs/

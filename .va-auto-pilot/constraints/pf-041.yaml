@@ -1,0 +1,36 @@
+id: ap-059-pf-041-sprint-board
+type: auto-pilot-constraint-set
+payload:
+  domain: sprint-board
+  tags:
+    - ap-059
+    - pf-041
+    - sprint-board
+    - phase
+    - write
+    - path
+    - sprint
+    - board
+    - pitfall
+  synthesis: "Derived from AP-059 (Phase 2 — write path: 'sprint-board pitfall
+    --resolve' auto-synthesizes a new constraint YAML under
+    .va-auto-pilot/constraints/ from pitfall.hypothesis + resolution +
+    task.title; commit with message scheme constraint: ... — no external engine
+    call): Dispatch failed: exitCode=1 | Codex execution exceeded 600000ms |
+    Task too complex or codex hung. | objective: Phase 2 — write path:
+    'sprint-board pitfall --resolve' auto-synthesizes a new constraint YAML
+    under .va-auto-pilot/constraints/ from pitfall.hypothesis + resolution +
+    task.title; commit with message scheme constraint: ... — no external engine
+    call Resolved via: AP-059 Done: pitfall --resolve constraint synthesis
+    landed; 600s codex timeout was infra noise during parallel sprint, task
+    completed via direct implementation."
+  constraints:
+    - type: boundary
+      statement: "Ensure aP-059 Done: pitfall --resolve constraint synthesis landed;
+        600s codex timeout was infra noise during parallel sprint, task
+        completed via direct implementation"
+      confidence: 0.72
+      sourceFactorIds:
+        - PF-041
+  blindSpots:
+    - auto-generated-from-pitfall

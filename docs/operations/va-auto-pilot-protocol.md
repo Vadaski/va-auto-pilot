@@ -22,6 +22,65 @@
 
 ---
 
+## Orchestrated Execution Mode (default for interactive sessions)
+
+When you work in **Claude Code, Cursor, or Codex**, the **session agent is the manager**. The auto-pilot CLI is an **executor** that runs one phase at a time and exits. The manager reads global state, approves high-leverage steps, and may intervene between phases.
+
+### Roles
+
+| Role | Who | Responsibility |
+|------|-----|----------------|
+| Manager | Session frontier agent | Plan, **explicit approve-plan / approve-commit**, observe, intervene |
+| Executor | `auto-pilot orchestrate *` | Run a single phase; update orchestration files; exit |
+| Worker | CLI agents (codex, claude, …) | Implement tasks |
+
+### Control plane files
+
+| File | Purpose |
+|------|---------|
+| `docs/todo/human-board.md` | Strategic intent (human + manager): goals, direction, boundaries |
+| `.va-auto-pilot/orchestration/directives.json` | **Tactical** directives for the active run only (halt, replan, supersede-plan) — **not** merged into human-board |
+| `.va-auto-pilot/orchestration/run.json` | Active run phase, approved plan id, approved commit tasks |
+| `.va-auto-pilot/orchestration/tracks.json` | Per-track execution status |
+| `.va-auto-pilot/orchestration/checkpoint.json` | Snapshot at last `approve-plan` (invalidates dispatch if stale) |
+| `.va-auto-pilot/orchestration/snapshot.json` | Read-only aggregate for `observe --json` |
+
+### Approval gates (mandatory in orchestrated mode)
+
+1. **`approve-plan`** — required after `plan`, before `dispatch`. Records checkpoint (sprint-state hash, human-board hash, git HEAD).
+2. **`approve-commit --tasks AP-001,...`** — required after workers settle and gates pass, before `commit`.
+
+There is no auto-approve in interactive orchestrated mode.
+
+### Manager loop (one cycle)
+
+```bash
+node scripts/auto-pilot.mjs orchestrate init --manager-surface cursor
+node scripts/auto-pilot.mjs orchestrate plan --max-parallel 3
+node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate approve-plan
+node scripts/auto-pilot.mjs orchestrate dispatch
+node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate await-workers
+node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-001
+node scripts/auto-pilot.mjs orchestrate commit
+node scripts/auto-pilot.mjs orchestrate journal
+node scripts/auto-pilot.mjs orchestrate close
+```
+
+Between steps the manager may run `intervene` (writes `directives.json`) or update `human-board.md`. If checkpoint is stale after board edits, run `approve-plan` again before `dispatch`.
+
+### Unattended mode (CI / overnight only)
+
+```bash
+node scripts/auto-pilot.mjs orchestrate run-unattended --waive-approvals --max-cycles 50
+```
+
+Or legacy: `node scripts/auto-pilot-loop.mjs --max-cycles 50`. Do **not** use these in an interactive session where the manager should stay in control.
+
+---
+
 ## State Machine
 
 ```

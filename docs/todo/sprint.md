@@ -1,6 +1,6 @@
 # Sprint Board
 
-> Last updated: 2026-04-15 by VA Auto-Pilot
+> Last updated: 2026-05-19 by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:
@@ -84,6 +84,8 @@
 | AP-058 | auto-pilot infra: fix 'falling back to agentTemplate spawn' path — AP-050 kimi-routing guard correctly avoids kimi but fallback spawn returns exit 1 in 119-414ms (clearly broken construction); restore viable dispatch when kimi is skipped | 2026-04-15 | Round 8 dogfood: code landed, check:all green; manually reconciled after loop track-timeout. |
 | AP-059 | Phase 2 — write path: 'sprint-board pitfall --resolve' auto-synthesizes a new constraint YAML under .va-auto-pilot/constraints/ from pitfall.hypothesis + resolution + task.title; commit with message scheme constraint: ... — no external engine call | 2026-04-15 | Round 8 dogfood: code landed, check:all green; manually reconciled after loop track-timeout. |
 | AP-060 | Seed initial constraint library — port dogfood pitfalls (PF-004..PF-039 resolved with real root causes) into .va-auto-pilot/constraints/*.yaml; one file per domain (dispatch, review-gate, adopt, mode-enforcement, state-race) | 2026-04-15 | Round 8 dogfood: code landed, check:all green; manually reconciled after loop track-timeout. |
+| AP-062 | orchestrate: parallel await-workers for independent tracks | 2026-05-19 | Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass. |
+| AP-063 | orchestrate: apply set-worker directive during dispatch | 2026-05-19 | Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass. |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
@@ -100,6 +102,8 @@
 | AP-052 | auto-pilot infra: state-file concurrency race (manual sprint-board updates can be overwritten by running loop) + dispatch success-detection lag (sub-agent exit!=0 masks real code landing); also audit all 'npm test' and 'gate undefined' remaining call sites | 2026-04-14 | Round 6 capstone: state race + success detection + path audit + 28 new regression tests; committed manually after loop self-paradox hit 3-fail stop. |
 | AP-057 | Sprint 4(e): README + start-va-auto-pilot-prompt updates — DocStore usage section (init / adopt / hook install / modes); cross-link from CLAUDE.md Quality Gate section | 2026-04-15 | Round 8 dogfood: code landed, check:all green; manually reconciled after loop track-timeout. |
 | AP-061 | Optional: va-auto-pilot constraints CLI subcommand set — list / add / show; path-to-future 'import-from-collision-engine' subcommand stub with not-yet-implemented placeholder (Phase 3) | 2026-04-15 | Round 8 dogfood: code landed, check:all green; manually reconciled after loop track-timeout. |
+| AP-064 | orchestrate: halt-track cancels running worker | 2026-05-19 | Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass. |
+| AP-065 | docs: orchestrated mode in start prompt and agent-usage | 2026-05-19 | Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass. |
 | AP-007 | Correct 'human-out-of-the-loop' framing to 'human-on-the-loop' across docs and website | 2026-02-23 | docs/human-on-the-loop.md created with updated framing; old file removed; README.md and README.zh.md references updated; all gates pass |
 | AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | 2026-03-29 | - |
 

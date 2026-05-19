@@ -220,6 +220,30 @@ export class ColonyBridge {
     this.useColony = !!Colony && options.useColony !== false;
     this.registeredAdapters = [];
     this._pending = new Map();
+    /** @type {Map<string, import("node:child_process").ChildProcess>} */
+    this._spawnChildren = new Map();
+  }
+
+  /** Cancel a running track (spawn SIGTERM; colony best-effort). */
+  cancelTrack(taskId) {
+    const child = this._spawnChildren.get(taskId);
+    if (child && child.pid) {
+      try {
+        child.kill("SIGTERM");
+        return { cancelled: true, method: "spawn", pid: child.pid };
+      } catch {
+        return { cancelled: false, method: "spawn", pid: child.pid };
+      }
+    }
+    if (this.colony?.cancelTask) {
+      try {
+        this.colony.cancelTask(taskId);
+        return { cancelled: true, method: "colony" };
+      } catch {
+        return { cancelled: false, method: "colony" };
+      }
+    }
+    return { cancelled: false, method: "none" };
   }
 
   /** Initialise Colony and auto-detect agents. Returns true if >= 1 adapter registered. */
@@ -400,6 +424,7 @@ export class ColonyBridge {
           VA_TASK_NOTES: track.notes ?? ""
         },
       });
+      this._spawnChildren.set(track.taskId, child);
       let timedOut = false;
       let killTimer = null;
 
@@ -417,6 +442,7 @@ export class ColonyBridge {
 
       child.on("close", (code, signal) => {
         if (killTimer) clearTimeout(killTimer);
+        this._spawnChildren.delete(track.taskId);
         const durationMs = Date.now() - startedAt;
         appendLog(logFile,
           `\n---\n[${nowIso()}] exit code=${code ?? -1} signal=${signal ?? "-"} durationMs=${durationMs}${timedOut ? " (TIMEOUT)" : ""}\n`
@@ -425,7 +451,7 @@ export class ColonyBridge {
           taskId: track.taskId, command,
           success: code === 0 && !timedOut,
           exitCode: code ?? -1, signal: signal ?? "",
-          durationMs, timedOut, logFile,
+          durationMs, timedOut, logFile, pid: child.pid ?? null,
         });
       });
     });

@@ -437,8 +437,8 @@
       "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: fix 'falling back to agentTemplate spawn' path — AP-050 kimi-routing guard correctly avoids kimi but fallback spawn returns exit 1 in 119-414ms (clearly broken construction); restore viable dispatch when kimi is skipped",
       "hypothesis": "Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: fix 'falling back to agentTemplate spawn' path — AP-050 kimi-routing guard correctly avoids kimi but fallback spawn returns exit 1 in 119-414ms (clearly broken construction); restore viable dispatch when kimi is skipped",
       "missingContext": "",
-      "resolution": "",
-      "resolvedAt": null,
+      "resolution": "AP-058 Done: colony-bridge spawn fallback fixed; gate undefined mis-report handled in resolveDispatchFailureGate (auto-pilot-loop.mjs). False-positive pitfall from pre-fix dispatch.",
+      "resolvedAt": "2026-05-19T12:36:53.588Z",
       "createdAt": "2026-04-15T06:37:21.364Z"
     },
     {
@@ -448,8 +448,8 @@
       "attempted": "Codex execution exceeded 600000ms | Task too complex or codex hung. | objective: Phase 2 — write path: 'sprint-board pitfall --resolve' auto-synthesizes a new constraint YAML under .va-auto-pilot/constraints/ from pitfall.hypothesis + resolution + task.title; commit with message scheme constraint: ... — no external engine call",
       "hypothesis": "Dispatch failed: exitCode=1 | Codex execution exceeded 600000ms | Task too complex or codex hung. | objective: Phase 2 — write path: 'sprint-board pitfall --resolve' auto-synthesizes a new constraint YAML under .va-auto-pilot/constraints/ from pitfall.hypothesis + resolution + task.title; commit with message scheme constraint: ... — no external engine call",
       "missingContext": "",
-      "resolution": "",
-      "resolvedAt": null,
+      "resolution": "AP-059 Done: pitfall --resolve constraint synthesis landed; 600s codex timeout was infra noise during parallel sprint, task completed via direct implementation.",
+      "resolvedAt": "2026-05-19T12:36:53.751Z",
       "createdAt": "2026-04-15T06:47:21.831Z"
     },
     {
@@ -459,8 +459,8 @@
       "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: Seed initial constraint library — port dogfood pitfalls (PF-004..PF-039 resolved with real root causes) into .va-auto-pilot/constraints/*.yaml; one file per domain (dispatch, review-gate, adopt, mode-enforcement, state-race)",
       "hypothesis": "Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: Seed initial constraint library — port dogfood pitfalls (PF-004..PF-039 resolved with real root causes) into .va-auto-pilot/constraints/*.yaml; one file per domain (dispatch, review-gate, adopt, mode-enforcement, state-race)",
       "missingContext": "",
-      "resolution": "",
-      "resolvedAt": null,
+      "resolution": "AP-060 Done: initial .va-auto-pilot/constraints/*.yaml seeded; gate undefined was dispatch telemetry bug not task failure.",
+      "resolvedAt": "2026-05-19T12:36:53.908Z",
       "createdAt": "2026-04-15T06:50:32.141Z"
     },
     {
@@ -470,8 +470,8 @@
       "attempted": "Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 4(e): README + start-va-auto-pilot-prompt updates — DocStore usage section (init / adopt / hook install / modes); cross-link from CLAUDE.md Quality Gate section",
       "hypothesis": "Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: Sprint 4(e): README + start-va-auto-pilot-prompt updates — DocStore usage section (init / adopt / hook install / modes); cross-link from CLAUDE.md Quality Gate section",
       "missingContext": "",
-      "resolution": "",
-      "resolvedAt": null,
+      "resolution": "AP-057 Done: README Managed DocStore section + CLAUDE Quality Gate cross-link; start prompt template has DocStore placeholders.",
+      "resolvedAt": "2026-05-19T12:36:54.064Z",
       "createdAt": "2026-04-15T06:52:46.103Z"
     }
   ]

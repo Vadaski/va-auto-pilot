@@ -13,28 +13,34 @@ Execution rules:
 node "$VA_AUTO_PILOT_ROOT/bin/va-auto-pilot.mjs" init .
 ```
 
-2. **Preferred: use the autonomous loop.**
+2. **Preferred: orchestrated mode (you are the manager).**
+
+You stay in the session loop. The executor runs one phase and exits. You **must** explicitly approve plan and commit.
 
 ```bash
-node scripts/auto-pilot-loop.mjs --max-cycles 50
+node scripts/auto-pilot.mjs orchestrate init --manager-surface claude
+node scripts/auto-pilot.mjs orchestrate plan --max-parallel 3
+node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate approve-plan
+node scripts/auto-pilot.mjs orchestrate dispatch
+node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate await-workers
+node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-XXX
+node scripts/auto-pilot.mjs orchestrate commit
+node scripts/auto-pilot.mjs orchestrate journal
 ```
 
-This runs the full autonomous loop: human-board → pitfall load → constraint load → plan → dispatch (parallel by default) → quality gates → auto-commit → state update → journal. The loop restarts automatically while backlog has tasks.
+Tactical course corrections: `node scripts/auto-pilot.mjs intervene ...` → writes `.va-auto-pilot/orchestration/directives.json` (separate from `human-board.md`).
 
-Options:
-- `--max-cycles <n>` — max task cycles (default: 50)
-- `--max-parallel <n>` — parallel track count (default: 3)
-- `--parallel` — enable multi-track execution (default)
-- `--no-parallel` — serialize all tasks
-- `--single-cycle` — run exactly one cycle then exit
-- `--dry-run` — print plan without executing
-- `--no-commit` — skip auto-commit after gates pass
-- `--no-colony` — skip Colony, use raw spawn
-- `--skip-sprint-review` — bypass sprint completion review gate
-- `--strict` — treat unchecked human-board instructions as hard block
-- `--json` — machine-readable output
+3. **Unattended only (CI / overnight):**
 
-3. **Manual fallback** (when you need fine-grained control):
+```bash
+node scripts/auto-pilot.mjs orchestrate run-unattended --waive-approvals --max-cycles 50
+# or legacy: node scripts/auto-pilot-loop.mjs --max-cycles 50
+```
+
+4. **Manual sprint-board** (fine-grained control without orchestrate):
 
 Read these files in order before taking action:
 - `docs/operations/va-auto-pilot-protocol.md`

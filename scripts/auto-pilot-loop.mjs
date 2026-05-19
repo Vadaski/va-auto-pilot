@@ -870,7 +870,8 @@ async function computeTaskScope(opts) {
 }
 
 async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts) {
-  const template = opts.agentTemplate.replace("{taskId}", task.id);
+  const baseTemplate = opts.workerOverrides?.[task.id] ?? opts.agentTemplate;
+  const template = baseTemplate.replaceAll("{taskId}", task.id);
   const logDir = path.resolve(".va-auto-pilot/parallel-runs");
   const logFile = path.join(logDir, `${task.id}-${Date.now()}.log`);
   const defaultNotes = [task.notes, humanBoardBlock].filter(Boolean).join("\n\n");
@@ -1958,6 +1959,15 @@ async function executeSingleTask(taskId, bridge, pitfalls, gateConfig, opts) {
     }
 
     if (refreshedTask.state === "Done") {
+      if (opts.deferCommit) {
+        return {
+          task: refreshedTask,
+          action: "awaiting-commit-approval",
+          details: "gates passed; commit deferred for orchestrated approve-commit",
+          steps,
+          terminal: true
+        };
+      }
       const finalizeResult = await finalizeDoneTaskCommit(refreshedTask, opts);
       if (finalizeResult.ok) {
         return {
@@ -2505,7 +2515,7 @@ Options:
 `);
 }
 
-export { runLoop, runCycle, readHumanBoard, loadUnresolvedPitfalls, injectPitfallContext, runGateSequence };
+export { runLoop, runCycle, readHumanBoard, loadUnresolvedPitfalls, injectPitfallContext, runGateSequence, readSprintState, countPendingTasks };
 export { extractHumanBoardAcknowledgments, appendHumanBoardAuditEntry };
 export {
   deriveCommitType,

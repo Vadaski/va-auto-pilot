@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-04-15T07:19:52.033Z",
+  "updatedAt": "2026-05-19T12:27:38.976Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -1873,6 +1873,122 @@
       "failCount": 0,
       "reason": "",
       "verification": "Round 8 dogfood: code landed, check:all green; manually reconciled after loop track-timeout.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-062",
+      "title": "orchestrate: parallel await-workers for independent tracks",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "orchestrated-dogfood",
+      "createdAt": "2026-05-19",
+      "startedAt": "",
+      "completedAt": "2026-05-19T12:27:33.520Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-063",
+      "title": "orchestrate: apply set-worker directive during dispatch",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "orchestrated-dogfood",
+      "createdAt": "2026-05-19",
+      "startedAt": "",
+      "completedAt": "2026-05-19T12:27:33.999Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-064",
+      "title": "orchestrate: halt-track cancels running worker",
+      "priority": "P2",
+      "state": "Done",
+      "owner": "",
+      "source": "orchestrated-dogfood",
+      "createdAt": "2026-05-19",
+      "startedAt": "",
+      "completedAt": "2026-05-19T12:27:37.439Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-065",
+      "title": "docs: orchestrated mode in start prompt and agent-usage",
+      "priority": "P2",
+      "state": "Done",
+      "owner": "",
+      "source": "orchestrated-dogfood",
+      "createdAt": "2026-05-19",
+      "startedAt": "",
+      "completedAt": "2026-05-19T12:27:38.976Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Orchestrated dogfood: parallel await-workers, set-worker directives, halt-track pid kill, docs updated. check:all pass.",
       "notes": "",
       "review": {
         "implementer": "",

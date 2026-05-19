@@ -1,0 +1,32 @@
+id: ap-057-pf-043-doc-store
+type: auto-pilot-constraint-set
+payload:
+  domain: doc-store
+  tags:
+    - ap-057
+    - pf-043
+    - doc-store
+    - sprint
+    - readme
+    - start
+    - auto
+    - pilot
+    - prompt
+  synthesis: 'Derived from AP-057 (Sprint 4(e): README +
+    start-va-auto-pilot-prompt updates — DocStore usage section (init / adopt /
+    hook install / modes); cross-link from CLAUDE.md Quality Gate section):
+    Dispatch failed: exitCode=1 | Codex completed but gate "undefined" failed |
+    Gate check failed | objective: Sprint 4(e): README +
+    start-va-auto-pilot-prompt updates — DocStore usage section (init / adopt /
+    hook install / modes); cross-link from CLAUDE.md Quality Gate section
+    Resolved via: AP-057 Done: README Managed DocStore section + CLAUDE Quality
+    Gate cross-link; start prompt template has DocStore placeholders.'
+  constraints:
+    - type: boundary
+      statement: "Ensure aP-057 Done: README Managed DocStore section + CLAUDE Quality
+        Gate cross-link; start prompt template has DocStore placeholders"
+      confidence: 0.72
+      sourceFactorIds:
+        - PF-043
+  blindSpots:
+    - auto-generated-from-pitfall

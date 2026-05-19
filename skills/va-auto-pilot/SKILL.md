@@ -58,13 +58,20 @@ Gates are NOT hardcoded. Auto-detect by project type:
 
 Adaptive: `node scripts/sprint-board.mjs suggest-gate` reads unresolved pitfalls and outputs YAML gate suggestions. Human confirms before writing to quality-gates.yaml.
 
-5. Start the loop:
+5. Start orchestrated mode (interactive — session agent is the manager):
 
 ```bash
-node scripts/auto-pilot-loop.mjs --max-cycles 50
+node scripts/auto-pilot.mjs orchestrate init --manager-surface cursor
+node scripts/auto-pilot.mjs orchestrate plan
+node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate approve-plan   # explicit — required
+node scripts/auto-pilot.mjs orchestrate dispatch
+node scripts/auto-pilot.mjs orchestrate await-workers
+node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-XXX
+node scripts/auto-pilot.mjs orchestrate commit
 ```
 
-The loop runs autonomously: human-board → pitfall load → constraint load → next task → dispatch → quality gates → auto-commit → state update → journal. It restarts automatically while backlog has tasks.
+Unattended only: `node scripts/auto-pilot-loop.mjs --max-cycles 50` or `orchestrate run-unattended --waive-approvals`.
 
 ## Key Features
 

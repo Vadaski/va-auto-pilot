@@ -67,12 +67,18 @@ Usage:
   va-auto-pilot init [target-dir] [options]
   va-auto-pilot upgrade [target-dir] [options]
   va-auto-pilot run [target-dir] [options]
+  va-auto-pilot orchestrate <subcommand> [options]
+  va-auto-pilot observe [options]
+  va-auto-pilot intervene <subcommand> [options]
   va-auto-pilot --help
 
 Commands:
   init      Scaffold a new VA Auto-Pilot project
   upgrade   Update scripts, protocol docs, and templates to the latest version
-  run       Execute the autonomous decision loop
+  run       Execute the autonomous decision loop (unattended; prefer orchestrate for interactive)
+  orchestrate  Manager-on-the-loop phased execution (session agent approves plan/commit)
+  observe      Refresh orchestration snapshot.json and print global status
+  intervene    Tactical directives for the active run (separate from human-board)
 
 Options (run):
   --max-cycles <n>        Maximum task cycles (default: 50)
@@ -662,6 +668,19 @@ function runUpgrade(parsed) {
 // Run command — delegates to scripts/auto-pilot-loop.mjs
 // ---------------------------------------------------------------------------
 
+async function runAutoPilotCli(argv) {
+  const autoPilotScript = path.join(scriptsRoot, "auto-pilot.mjs");
+  const { spawn: spawnChild } = await import("node:child_process");
+  const child = spawnChild(process.execPath, [autoPilotScript, ...argv], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+  });
+
+  child.on("close", (code) => {
+    process.exit(code ?? 0);
+  });
+}
+
 async function runAutoLoop(parsed) {
   const dryRun = parsed.flags.has("dry-run");
   const targetDir = path.resolve(process.cwd(), parsed.targetDir);
@@ -710,17 +729,22 @@ async function runAutoLoop(parsed) {
 
 function main() {
   const argv = process.argv.slice(2);
-  const parsed = parseArgv(argv);
 
   if (
     argv.length === 0 ||
-    parsed.flags.has("help") ||
-    parsed.command === "--help" ||
-    parsed.command === "help"
+    argv.includes("--help") ||
+    argv.includes("help")
   ) {
     printHelp();
     process.exit(0);
   }
+
+  if (argv[0] === "orchestrate" || argv[0] === "observe" || argv[0] === "intervene") {
+    runAutoPilotCli(argv);
+    return;
+  }
+
+  const parsed = parseArgv(argv);
 
   if (parsed.command === "init") {
     runInit(parsed);

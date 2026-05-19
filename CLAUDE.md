@@ -20,6 +20,24 @@ CLI agents (codex, claude, gemini, kimi, glm) → bottom-layer execution
 - Vitest for testing
 - Named exports only
 
+## Orchestrated Mode (default for session agents)
+
+Session agents (Cursor / Claude Code) act as **Manager**; the CLI is **Executor**. Each phase exits immediately — no long-running loop.
+
+```bash
+node scripts/auto-pilot.mjs orchestrate init --manager-surface cursor
+node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate plan
+node scripts/auto-pilot.mjs orchestrate approve-plan
+node scripts/auto-pilot.mjs orchestrate dispatch
+node scripts/auto-pilot.mjs orchestrate await-workers
+node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-XXX
+node scripts/auto-pilot.mjs orchestrate commit
+node scripts/auto-pilot.mjs orchestrate close   # when backlog empty / stale run
+```
+
+Tactical overrides: `node scripts/auto-pilot.mjs intervene …` → `.va-auto-pilot/orchestration/directives.json`. Strategic goals stay in `docs/todo/human-board.md`.
+
 ## Quality Gate
 
 Quality gates are **pluggable per project** — see `docs/operations/va-auto-pilot-protocol.md` Quality Gates section.

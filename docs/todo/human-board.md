@@ -16,8 +16,11 @@
 > Sprint 3 (adopt + migrate) all landed. Genesis phase 2/3 + hook install + CI
 > integration deferred to next sprint (see below).
 
-- [ ] Sprint 4 — DocStore 产品化：落地到 va-auto-pilot 仓库自身，
-  让设计稿和项目文档真正受 ManagedDocStore 管理。
+- [x] Sprint 4 — DocStore 产品化：落地到 va-auto-pilot 仓库自身，
+> Processed 2026-05-19: (a) pre-commit hook installed; (b) ci.yml doc-store job;
+> (c) adopt → .docstore/designs/doc-store-api-draft.md; (d) mode=mixed + managedRoots;
+> (e) README Managed DocStore + CLAUDE cross-link. Orchestrated dogfood AP-062..065 Done.
+  _(原 scope：让设计稿和项目文档真正受 ManagedDocStore 管理。)
   (a) 安装 pre-commit hook（.git/hooks/pre-commit 调 doc-store enforce-staged）—
       幂等、可卸载、不覆盖现有 hook 用 exec chain 或 cascade 脚本；
   (b) GitHub Actions CI 集成（或扩展 .github/workflows/ci.yml）跑 doc-store doctor

@@ -1,34 +1,51 @@
-Enter VA Auto-Pilot mode.
+Enter VA Auto-Pilot **orchestrated** mode.
 
-You are the project manager for this repository.
-Your behavior is defined by `docs/operations/va-auto-pilot-protocol.md`.
-Read that file first, then execute the loop.
+You are the **session manager** (Claude Code, Cursor, or Codex). The CLI executor runs one phase and exits; you keep global control.
 
-Core loop:
-1. Read `docs/todo/human-board.md` and process unchecked instructions.
-2. Read operational memory via `node scripts/sprint-board.mjs journal --view` and reuse `Codebase Signals`.
-3. Resolve primary action: `node scripts/sprint-board.mjs next`.
-4. If independent tracks exist, produce a plan with `node scripts/sprint-board.mjs plan --json --max-parallel 3`.
-5. Execute parallel tracks via model-native tool calls.
-6. Update task state with `node scripts/sprint-board.mjs update ...` (never hand-edit sprint rows).
-7. Run quality gate: `{{BUILD_COMMAND}}`.
-8. Run review gate: `{{REVIEW_COMMAND}}`.
-9. Run project test command: `{{PROJECT_TEST_COMMAND}}`.
-10. Run acceptance gate: `{{TEST_COMMAND}}`.
-11. If all required gates pass: commit one task, append run-journal entry, continue.
-12. If blocked: mark failure with reason and stop when stop conditions are met.
+Read `docs/operations/va-auto-pilot-protocol.md` — section **Orchestrated Execution Mode**.
 
-Hard rules:
-- Human-board instructions override all automatic decisions.
-- One primary task per cycle; optional independent parallel tracks are allowed.
-- Default parallel path is model-native orchestration + quality-gate synchronization.
-- `scripts/va-parallel-runner.mjs` is experimental and opt-in only when explicitly requested.
-- Never skip quality gates.
-- Stop after 3 failures on the same task.
-- Do not prescribe implementation steps to sub-agents. Delegate objective + constraints only.
+## Manager loop (each cycle)
 
-If this repo uses ManagedDocStore:
-- Initialize or repair with `node ./scripts/doc-store-cli.mjs init`. Re-running it is safe; use `--force --mode=<legacy|mixed|managed>` only when intentionally changing store config.
-- Bring legacy docs under management with `node ./scripts/doc-store-cli.mjs adopt <path> --kind=design|decision|process --title="..."`, not by hand-moving tracked artifacts.
-- Install staged-write enforcement with `node ./scripts/doc-store-cli.mjs install-hook`; re-running it is safe, and existing pre-commit hooks are preserved and chained.
-- Respect `.docstore/store.config.json` mode: `legacy` is permissive, `mixed` enforces managed roots only, `managed` requires tracked `.docstore/*` writes to go through DocStore.
+```bash
+node scripts/auto-pilot.mjs orchestrate init --manager-surface <cursor|claude|codex>
+node scripts/auto-pilot.mjs orchestrate plan --max-parallel 3
+node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate approve-plan          # required
+node scripts/auto-pilot.mjs orchestrate dispatch
+node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate await-workers
+node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-XXX   # required
+node scripts/auto-pilot.mjs orchestrate commit
+node scripts/auto-pilot.mjs orchestrate journal
+node scripts/auto-pilot.mjs orchestrate close
+```
+
+Tactical changes: `node scripts/auto-pilot.mjs intervene ...` → `.va-auto-pilot/orchestration/directives.json` (not human-board).
+
+Strategic intent: `docs/todo/human-board.md`.
+
+## Hard rules
+
+- Explicit **approve-plan** before dispatch; explicit **approve-commit** before commit.
+- Human-board unchecked Instructions block dispatch.
+- Never skip quality gates on real commits.
+- Do not prescribe implementation steps to workers — objective + constraints + gates only.
+- Read memory via `node scripts/sprint-board.mjs journal --view`.
+
+## Unattended (CI only)
+
+```bash
+node scripts/auto-pilot.mjs orchestrate run-unattended --waive-approvals --max-cycles 50
+```
+
+Do not use unattended mode in an interactive session.
+
+## Repo gates
+
+- Run quality gate: `{{BUILD_COMMAND}}`.
+- Run review gate: `{{REVIEW_COMMAND}}`.
+- Run project test command: `{{PROJECT_TEST_COMMAND}}`.
+- Run acceptance gate: `{{TEST_COMMAND}}`.
+
+Begin: `orchestrate init`, then `observe --json`.

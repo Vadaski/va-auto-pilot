@@ -292,17 +292,18 @@ test("collectConstraints returns graceful empty on malformed yaml", async () => 
 
 test("seeded constraint library covers PF-004..PF-039 across the expected domains", () => {
   const constraintsDir = path.resolve(".va-auto-pilot", "constraints");
-  const expectedFiles = [
+  const expectedDomainFiles = [
     "adopt.yaml",
     "dispatch.yaml",
     "mode-enforcement.yaml",
     "review-gate.yaml",
     "state-race.yaml",
   ];
-  const actualFiles = fs.readdirSync(constraintsDir).filter((name) => /\.ya?ml$/i.test(name)).sort((a, b) => a.localeCompare(b));
-  assert.deepEqual(actualFiles, expectedFiles);
+  const allYaml = fs.readdirSync(constraintsDir).filter((name) => /\.ya?ml$/i.test(name)).sort((a, b) => a.localeCompare(b));
+  const domainFiles = allYaml.filter((name) => !/^pf-\d+\.ya?ml$/i.test(name));
+  assert.deepEqual(domainFiles, expectedDomainFiles);
 
-  const documents = actualFiles.map((name) => parseYaml(fs.readFileSync(path.join(constraintsDir, name), "utf8")));
+  const documents = domainFiles.map((name) => parseYaml(fs.readFileSync(path.join(constraintsDir, name), "utf8")));
   assert.deepEqual(
     documents.map((document) => document.id).sort((left, right) => left.localeCompare(right)),
     ["adopt", "dispatch", "mode-enforcement", "review-gate", "state-race"],
@@ -4843,6 +4844,126 @@ test("runReviewCommand: uses execRunner output fallback", async () => {
   assert.equal(result.exitCode, 0);
   assert.ok(capturedPrompt.includes("PF-001"), "Prompt should include pitfall ID");
   assert.ok(result.stdoutText.includes("REVIEW STATUS: PASS"), "Should print execRunner output fallback");
+});
+
+// ---------------------------------------------------------------------------
+// Orchestrated auto-pilot — orchestration state + approval gates
+// ---------------------------------------------------------------------------
+import {
+  buildCheckpoint,
+  computeSprintStateHash,
+  hasHaltDirective,
+  isCheckpointStale,
+  orchestrationPaths,
+  readRun,
+  readWorkerOverrides,
+  writeDirectives,
+  writeRun,
+} from "./lib/orchestration-state.mjs";
+
+test("orchestration-state: checkpoint detects sprint-state drift", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ tasks: [{ id: "AP-001", state: "Backlog" }] }), "utf8");
+
+  const checkpoint = buildCheckpoint({
+    stateFile,
+    workDir: tmpDir,
+    approvedPlanId: "plan-1",
+    candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
+  });
+
+  assert.equal(isCheckpointStale(checkpoint, { stateFile, workDir: tmpDir }).stale, false);
+
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  state.tasks[0].state = "In Progress";
+  fs.writeFileSync(stateFile, JSON.stringify(state), "utf8");
+
+  assert.equal(isCheckpointStale(checkpoint, { stateFile, workDir: tmpDir }).stale, true);
+});
+
+test("orchestration-state: hasHaltDirective detects halt-run", () => {
+  assert.equal(hasHaltDirective({ directives: [{ type: "halt-run", halt: true }] }), true);
+  assert.equal(hasHaltDirective({ directives: [{ type: "replan", taskId: "AP-001" }] }), false);
+});
+
+test("auto-pilot orchestrate: dispatch requires approve-plan", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-cli-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(tmpDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(tmpDir, "docs", "todo", "run-journal.md");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    tasks: [{ id: "AP-001", title: "t", priority: "P1", state: "Backlog", dependsOn: [] }],
+  }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint\n\n", "utf8");
+
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  const init = spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(init.status, 0, init.stderr);
+
+  const plan = spawnSync(process.execPath, [script, "orchestrate", "plan", "--json", "--state-file", stateFile], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(plan.status, 0, plan.stderr);
+
+  const dispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--json", "--state-file", stateFile], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.notEqual(dispatch.status, 0);
+  assert.ok(dispatch.stderr.includes("APPROVAL_REQUIRED") || dispatch.stdout.includes("APPROVAL_REQUIRED"));
+});
+
+test("resolveWorkerAgentTemplate maps codex worker to codex exec template", async () => {
+  const { resolveWorkerAgentTemplate } = await import("./lib/orchestration-cli.mjs");
+  const cmd = resolveWorkerAgentTemplate("codex", "AP-099");
+  assert.ok(cmd.includes("codex"), cmd);
+  assert.ok(cmd.includes("AP-099"), cmd);
+});
+
+test("readWorkerOverrides collects set-worker directives", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-worker-"));
+  await writeDirectives(tmpDir, {
+    schemaVersion: 1,
+    directives: [{ type: "set-worker", taskId: "AP-001", worker: "codex" }],
+  });
+  const map = readWorkerOverrides(tmpDir);
+  assert.equal(map.get("AP-001"), "codex");
+});
+
+test("auto-pilot orchestrate: close marks run done and clears tracks", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-close-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], { cwd: tmpDir, encoding: "utf8" });
+  const close = spawnSync(process.execPath, [script, "orchestrate", "close", "--json"], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(close.status, 0, close.stderr);
+  const run = readRun(tmpDir);
+  assert.equal(run.phase, "done");
+  assert.equal(run.locks?.executorPid, null);
+});
+
+test("auto-pilot observe: writes snapshot.json", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-obs-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], { cwd: tmpDir, encoding: "utf8" });
+  const observe = spawnSync(process.execPath, [script, "observe", "--json"], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(observe.status, 0, observe.stderr);
+  const snapshotPath = orchestrationPaths(tmpDir).snapshot;
+  assert.ok(fs.existsSync(snapshotPath));
+  const snapshot = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
+  assert.ok(snapshot.run?.runId);
+  assert.ok(Array.isArray(snapshot.recommendedActions));
 });
 
 // ---------------------------------------------------------------------------

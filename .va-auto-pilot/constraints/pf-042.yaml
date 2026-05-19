@@ -1,0 +1,34 @@
+id: ap-060-pf-042-review
+type: auto-pilot-constraint-set
+payload:
+  domain: review
+  tags:
+    - ap-060
+    - pf-042
+    - review
+    - seed
+    - initial
+    - constraint
+    - library
+    - port
+    - dogfood
+  synthesis: 'Derived from AP-060 (Seed initial constraint library — port dogfood
+    pitfalls (PF-004..PF-039 resolved with real root causes) into
+    .va-auto-pilot/constraints/*.yaml; one file per domain (dispatch,
+    review-gate, adopt, mode-enforcement, state-race)): Dispatch failed:
+    exitCode=1 | Codex completed but gate "undefined" failed | Gate check failed
+    | objective: Seed initial constraint library — port dogfood pitfalls
+    (PF-004..PF-039 resolved with real root causes) into
+    .va-auto-pilot/constraints/*.yaml; one file per domain (dispatch,
+    review-gate, adopt, mode-enforcement, state-race) Resolved via: AP-060 Done:
+    initial .va-auto-pilot/constraints/*.yaml seeded; gate undefined was
+    dispatch telemetry bug not task failure.'
+  constraints:
+    - type: boundary
+      statement: "Ensure aP-060 Done: initial .va-auto-pilot/constraints/*.yaml
+        seeded; gate undefined was dispatch telemetry bug not task failure"
+      confidence: 0.72
+      sourceFactorIds:
+        - PF-042
+  blindSpots:
+    - auto-generated-from-pitfall

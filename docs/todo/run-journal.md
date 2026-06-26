@@ -2517,3 +2517,14 @@
   - check-all-pass
   - stale-only-scan-pass
 ---
+
+## 2026-06-26T12:04:32.600Z - AP-082
+- Summary: Added open-source readiness checklist covering public positioning, install paths, distribution smoke, first-run success, release evidence, stop conditions, and release decision criteria.
+- Files: `docs/operations/open-source-readiness-checklist.md`, `docs/operations/public-narrative-spec.md`, `docs/operations/public-positioning-audit.md`, `README.md`, `README.zh.md`, `docs/todo/sprint.md`, `docs/todo/run-journal.md`, `.va-auto-pilot/sprint-state.json`
+- Signals:
+  - readiness-checklist
+  - install-smoke
+  - release-evidence
+  - first-run-success
+  - check-all-pass
+---

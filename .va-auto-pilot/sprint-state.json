@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T12:00:48.842Z",
+  "updatedAt": "2026-06-26T12:04:32.507Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2478,17 +2478,17 @@
       "id": "AP-082",
       "title": "Reopen P1: build open-source readiness checklist for install, distribution smoke, release evidence, and first-run success",
       "priority": "P1",
-      "state": "Backlog",
-      "owner": "",
+      "state": "Done",
+      "owner": "codex",
       "source": "human-board: reopen harness loop sprint",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T12:01:31.431Z",
+      "completedAt": "2026-06-26T12:04:32.507Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
-      "notes": "Plan review adjustment: open-source readiness checklist should reference finalized install and usage paths.; Readiness checklist follows generic install/use path.",
+      "verification": "npm run check:all PASS; readiness checklist link rg PASS; stale-expression rg PASS excluding guard/checklist docs.",
+      "notes": "Plan review adjustment: open-source readiness checklist should reference finalized install and usage paths.; Readiness checklist follows generic install/use path.; Started open-source readiness checklist using finalized generic CLI install/use path.; Open-source readiness checklist added and linked from README docs index.",
       "review": {
         "implementer": "",
         "security": "",
@@ -2497,9 +2497,9 @@
         "architect": ""
       },
       "testing": {
-        "flow": "",
-        "mustPassRate": "",
-        "shouldPassRate": ""
+        "flow": "open-source-readiness-checklist",
+        "mustPassRate": "100%",
+        "shouldPassRate": "100%"
       },
       "dependsOn": [
         "AP-081"

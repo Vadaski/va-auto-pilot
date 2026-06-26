@@ -323,6 +323,7 @@ node scripts/va-parallel-runner.mjs spawn \
 ### TC-06: 质量门控执行
 
 Quality gates are defined in `.va-auto-pilot/config.yaml` and run as part of the protocol loop.
+Replace `review-agent` with your configured reviewer command or wrapper.
 
 ```bash
 # Gate 1: Build and static quality
@@ -330,7 +331,7 @@ npm run check:all
 # Runs: check + check:sprint + check:units + check:cli-flows + validate:distribution
 
 # Gate 2: Code review
-codex review --uncommitted
+review-agent review --uncommitted
 # Findings policy: CRITICAL/BUG = must fix, style nits = non-blocking
 
 # Gate 3: Acceptance
@@ -338,7 +339,7 @@ npm run validate:distribution
 # Checks: package structure, required files, skill installation paths
 
 # Full gate sequence (as used in delegation)
-npm run check:all && codex review --uncommitted && npm run validate:distribution
+npm run check:all && review-agent review --uncommitted && npm run validate:distribution
 ```
 
 **Smoke tests** (if configured in `config.yaml`):
@@ -405,7 +406,7 @@ node scripts/sprint-board.mjs update --id AP-016 --state Review
 # (This is model reasoning, not a CLI command)
 
 # Step 3: Run code review gate
-codex review --uncommitted
+review-agent review --uncommitted
 # Parse output for CRITICAL/BUG/WARNING findings
 
 # Step 4: If all perspectives clear, advance to Testing
@@ -488,7 +489,7 @@ node scripts/sprint-board.mjs update --id AP-016 --state "In Progress"
 # Example: claude -p "Task AP-016: <objective>. Pass all quality gates."
 
 # 6. Run quality gates
-npm run check:all && codex review --uncommitted && npm run validate:distribution
+npm run check:all && review-agent review --uncommitted && npm run validate:distribution
 
 # 7. On success: advance state + journal
 node scripts/sprint-board.mjs update --id AP-016 --state Done \
@@ -687,8 +688,8 @@ codex -p "Task AP-017: Write integration tests for retry. \
 # Delegate to Gemini
 gemini -p "Task AP-018: Review retry implementation for edge cases."
 
-# Review via Codex
-codex review --uncommitted
+# Review via configured review agent
+review-agent review --uncommitted
 ```
 
 ---
@@ -708,7 +709,7 @@ sprint:
 
 qualityGate:
   buildCommand: "npm run check:all"
-  reviewCommand: "codex review --uncommitted"
+  reviewCommand: "review-agent review --uncommitted"
   acceptanceTestCommand: "npm run validate:distribution"
   smokeTestCommand: "node scripts/smoke-test-runner.mjs --config"
   smokeTest:
@@ -887,7 +888,7 @@ node scripts/sprint-board.mjs update --id AP-016 --state Done
 node scripts/sprint-board.mjs update --id AP-016 --state Done
 
 # RIGHT: run all gates before advancing
-npm run check:all && codex review --uncommitted && npm run validate:distribution
+npm run check:all && review-agent review --uncommitted && npm run validate:distribution
 # Only after all pass:
 node scripts/sprint-board.mjs update --id AP-016 --state Done
 ```

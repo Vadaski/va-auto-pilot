@@ -1,6 +1,7 @@
 # Quality Gate Examples
 
 Stack-specific examples live here so the main protocol can stay focused on gate semantics and decision rules.
+Replace `review-agent` with the reviewer command configured for your environment.
 
 ## Example: Godot Project
 
@@ -16,7 +17,7 @@ gates:
     required: true
     description: "Runtime stability — game runs 120 frames without crash"
   review:
-    command: "codex review --uncommitted"
+    command: "review-agent review --uncommitted"
     required: true
     description: "Code review"
 ```
@@ -32,7 +33,7 @@ gates:
     command: "pytest --tb=short"
     required: true
   review:
-    command: "codex review --uncommitted"
+    command: "review-agent review --uncommitted"
     required: true
 ```
 
@@ -53,7 +54,7 @@ gates:
     required: true
     description: "Godot runtime stability"
   review:
-    command: "codex review --uncommitted"
+    command: "review-agent review --uncommitted"
     required: true
 ```
 

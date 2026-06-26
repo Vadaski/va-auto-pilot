@@ -1,4 +1,4 @@
-# 超越时代两个版本，是时候重新开源 VA Auto-Pilot 了
+# 重新开源 VA Auto-Pilot：从 Prompt 到 Harness + Loop Engineering
 
 四个月前，我开源过一次 VA Auto-Pilot。
 
@@ -123,7 +123,7 @@ VA Auto-Pilot 问的是另一个问题：
 
 当时这个说法听起来可能太抽象。现在，行业开始自己走到这里了。
 
-OpenAI 在讲 harness engineering。Anthropic / Claude Code 圈子在讲 loop。Addy Osmani 在讲 designing systems that prompt agents。LangChain 在讲同一个模型只改 harness，benchmark 表现大幅提升。
+行业开始系统性讨论 harness engineering、loop engineering、agent system design 和通过环境设计提升 agent 表现。
 
 这些讨论把语言补上了。
 
@@ -187,7 +187,7 @@ VA Auto-Pilot 把 failure pattern 记录成 pitfall，再把 pitfall 注入后�
 
 ### 4.5 人类在 Loop 之上，而不是 Loop 之中
 
-VA Auto-Pilot 不是 human-out-of-the-loop。
+VA Auto-Pilot 不是无人监督自治。
 
 它更接近 human-on-the-loop。
 

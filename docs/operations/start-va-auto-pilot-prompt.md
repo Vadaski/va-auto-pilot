@@ -1,6 +1,6 @@
 Enter VA Auto-Pilot **orchestrated** mode.
 
-You are the **session manager** (Claude Code, Cursor, or Codex). The CLI executor runs one phase and exits; you keep global control.
+You are the **session manager** in a capable CLI agent surface. The CLI executor runs one phase and exits; you keep global control.
 
 Read `docs/operations/va-auto-pilot-protocol.md` — section **Orchestrated Execution Mode**.
 
@@ -46,7 +46,7 @@ Do not use unattended mode in an interactive session.
 ## Repo gates
 
 - `npm run check:all`
-- `codex review --uncommitted` (when code changed)
+- configured review gate (when code changed)
 - Run project test command: `npm run check:units`.
 - Run acceptance gate: `npm run validate:distribution`.
 

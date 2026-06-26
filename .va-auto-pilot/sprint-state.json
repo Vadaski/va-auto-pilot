@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T11:42:35.480Z",
+  "updatedAt": "2026-06-26T11:46:59.996Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2603,17 +2603,17 @@
       "id": "AP-086",
       "title": "Reopen P0: clean reopen article, human-on-the-loop article, and protocol docs for stable Harness + Loop framing",
       "priority": "P0",
-      "state": "Backlog",
-      "owner": "",
+      "state": "Done",
+      "owner": "codex",
       "source": "plan-review: split AP-079",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T11:43:16.634Z",
+      "completedAt": "2026-06-26T11:46:59.996Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
-      "notes": "Long-form docs should mirror cleaned README positioning.",
+      "verification": "npm run check:all PASS; stale-expression rg PASS for public docs excluding backlog and narrative spec.",
+      "notes": "Long-form docs should mirror cleaned README positioning.; Started long-form docs and protocol cleanup against public narrative spec.; Long-form article and protocol language cleaned for stable Harness + Loop framing.",
       "review": {
         "implementer": "",
         "security": "",
@@ -2622,9 +2622,9 @@
         "architect": ""
       },
       "testing": {
-        "flow": "",
-        "mustPassRate": "",
-        "shouldPassRate": ""
+        "flow": "longform-protocol-cleanup",
+        "mustPassRate": "100%",
+        "shouldPassRate": "100%"
       },
       "dependsOn": [
         "AP-079",

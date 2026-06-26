@@ -168,7 +168,7 @@ CLI-first 的收益：
 ```text
 va-auto-pilot/
 ├── bin/va-auto-pilot.mjs                # CLI：注入模板到任意项目
-├── skills/va-auto-pilot/                # 可分发 skill（Codex / Claude）
+├── skills/va-auto-pilot/                # 可分发 skill（多 Agent 集成示例）
 ├── templates/
 │   ├── .va-auto-pilot/config.yaml       # 参数化配置
 │   ├── docs/todo/sprint.md

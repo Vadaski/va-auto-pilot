@@ -2487,3 +2487,13 @@
   - agent-neutral-credits
   - check-all-pass
 ---
+
+## 2026-06-26T11:47:00.087Z - AP-086
+- Summary: Cleaned reopen article, human-on-the-loop article, and protocol docs so public-facing wording consistently frames VA Auto-Pilot as Harness + Loop Engineering and uses configurable reviewer/agent language instead of Codex-only defaults.
+- Files: `docs/articles/reopen-va-auto-pilot-harness-loop.zh.md`, `docs/articles/va-auto-pilot-why-this-is-the-future.zh.md`, `docs/human-on-the-loop.md`, `docs/operations/va-auto-pilot-protocol.md`, `docs/operations/start-va-auto-pilot-prompt.md`, `docs/operations/quality-gate-examples.md`, `docs/agent-usage.md`, `docs/todo/sprint.md`, `.va-auto-pilot/sprint-state.json`
+- Signals:
+  - longform-positioning-clean
+  - configured-review-agent
+  - stale-expression-clean
+  - check-all-pass
+---

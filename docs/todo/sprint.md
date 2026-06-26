@@ -124,4 +124,11 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| - | - | - | - | - | - |
+| P0 | AP-079 | Reopen P0: define canonical public narrative spec and stale-expression acceptance checks | - | - | human-board: reopen harness loop sprint |
+| P0 | AP-080 | Reopen P0: run cross-surface Harness + Loop positioning consistency synthesis after public cleanup | AP-084, AP-085, AP-086 | - | human-board: reopen harness loop sprint |
+| P0 | AP-084 | Reopen P0: clean README.md and README.zh.md stale positioning, vendor binding, and protocol-layer confusion | AP-079 | - | plan-review: split AP-079 |
+| P0 | AP-085 | Reopen P0: clean website copy, metadata, demo logs, credits, and generic CLI agent entry points | AP-079, AP-084 | - | plan-review: split AP-079 |
+| P0 | AP-086 | Reopen P0: clean reopen article, human-on-the-loop article, and protocol docs for stable Harness + Loop framing | AP-079, AP-084 | - | plan-review: split AP-079 |
+| P1 | AP-081 | Reopen P1: add generic CLI agent usage path and remove public docs impression of Codex/Claude-only operation | AP-080 | - | human-board: reopen harness loop sprint |
+| P1 | AP-082 | Reopen P1: build open-source readiness checklist for install, distribution smoke, release evidence, and first-run success | AP-081 | - | human-board: reopen harness loop sprint |
+| P2 | AP-083 | Reopen P2: create next-gen Harness and Loop roadmap for observability, cost guardrails, evals, permissions, governance, and MCP adapter | AP-082 | - | human-board: reopen harness loop sprint |

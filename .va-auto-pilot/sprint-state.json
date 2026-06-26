@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T11:04:04.830Z",
+  "updatedAt": "2026-06-26T11:23:22.910Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2380,6 +2380,256 @@
         "shouldPassRate": ""
       },
       "dependsOn": []
+    },
+    {
+      "id": "AP-079",
+      "title": "Reopen P0: define canonical public narrative spec and stale-expression acceptance checks",
+      "priority": "P0",
+      "state": "Backlog",
+      "owner": "",
+      "source": "human-board: reopen harness loop sprint",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Plan review adjustment: AP-079 becomes the canonical narrative/spec task, not a broad multi-file cleanup task. It must define exact wording, layers, and grep acceptance checks before public docs are edited.; Acceptance detail: produce a reusable narrative spec artifact or section containing canonical terminology, stack/layer relationship, banned stale expressions, replacement wording, and rg-based stale-expression checks covering README.md, README.zh.md, website/, docs/articles/, docs/operations/.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-080",
+      "title": "Reopen P0: run cross-surface Harness + Loop positioning consistency synthesis after public cleanup",
+      "priority": "P0",
+      "state": "Backlog",
+      "owner": "",
+      "source": "human-board: reopen harness loop sprint",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Plan review adjustment: positioning rewrite should consume the narrative cleanup result to avoid conflicting README/website/protocol edits.; Updated after split: positioning synthesis depends on all public cleanup tasks.; Plan review adjustment: AP-080 is a consistency synthesis/check after public surfaces are cleaned, not a competing rewrite.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-084",
+        "AP-085",
+        "AP-086"
+      ]
+    },
+    {
+      "id": "AP-081",
+      "title": "Reopen P1: add generic CLI agent usage path and remove public docs impression of Codex/Claude-only operation",
+      "priority": "P1",
+      "state": "Backlog",
+      "owner": "",
+      "source": "human-board: reopen harness loop sprint",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Plan review adjustment: generic CLI agent docs should follow the final public positioning.; Generic CLI path follows final positioning.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-080"
+      ]
+    },
+    {
+      "id": "AP-082",
+      "title": "Reopen P1: build open-source readiness checklist for install, distribution smoke, release evidence, and first-run success",
+      "priority": "P1",
+      "state": "Backlog",
+      "owner": "",
+      "source": "human-board: reopen harness loop sprint",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Plan review adjustment: open-source readiness checklist should reference finalized install and usage paths.; Readiness checklist follows generic install/use path.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-081"
+      ]
+    },
+    {
+      "id": "AP-083",
+      "title": "Reopen P2: create next-gen Harness and Loop roadmap for observability, cost guardrails, evals, permissions, governance, and MCP adapter",
+      "priority": "P2",
+      "state": "Backlog",
+      "owner": "",
+      "source": "human-board: reopen harness loop sprint",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Plan review adjustment: next-gen roadmap should be last so it reflects cleaned positioning and readiness gaps.; Roadmap follows readiness gaps.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-082"
+      ]
+    },
+    {
+      "id": "AP-084",
+      "title": "Reopen P0: clean README.md and README.zh.md stale positioning, vendor binding, and protocol-layer confusion",
+      "priority": "P0",
+      "state": "Backlog",
+      "owner": "",
+      "source": "plan-review: split AP-079",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Consumes canonical narrative spec.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-079"
+      ]
+    },
+    {
+      "id": "AP-085",
+      "title": "Reopen P0: clean website copy, metadata, demo logs, credits, and generic CLI agent entry points",
+      "priority": "P0",
+      "state": "Backlog",
+      "owner": "",
+      "source": "plan-review: split AP-079",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Website should mirror cleaned README positioning.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-079",
+        "AP-084"
+      ]
+    },
+    {
+      "id": "AP-086",
+      "title": "Reopen P0: clean reopen article, human-on-the-loop article, and protocol docs for stable Harness + Loop framing",
+      "priority": "P0",
+      "state": "Backlog",
+      "owner": "",
+      "source": "plan-review: split AP-079",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Long-form docs should mirror cleaned README positioning.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-079",
+        "AP-084"
+      ]
     }
   ],
   "sprintStartCommit": "05306ecac0be8f24461b1832797612976ec70b86"

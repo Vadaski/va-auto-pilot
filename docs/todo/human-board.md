@@ -8,6 +8,26 @@
 
 ## Instructions (highest priority)
 
+- [ ] **Reopen Sprint：把 VA Auto-Pilot 做成最强 Harness + Loop Engineering 开源项目。**
+  先清理过时叙事，再分解工程任务，不要反过来。
+  当前判断：重新开源前必须统一公共叙事，避免让用户误解为特定厂商/模型绑定、MCP/A2A 竞争者、单纯 prompt/protocol 模板，或只是一套本地 dogfood 脚手架。
+  目标定位：
+  - VA Auto-Pilot 是独立可用的 CLI-first autonomous engineering loop。
+  - 它以 Loop Engineering 为骨架，以 Harness Engineering 为可靠性层。
+  - 它也是 va-agent-protocol 的 reference engine / managed-agent implementation；va-agent-protocol 是任务协议契约，不是 Auto-Pilot 独立运行的硬依赖。
+  - 它应与 MCP/A2A 等连接层互补，而不是被表述成同层竞争者。
+  - 它应能被 Codex、Claude Code、Cursor、Kimi 或任何可用 CLI Agent 驱动；公共文档不要暗示只有某一厂商 agent 才能使用。
+  立即分解方向：
+  1. Public narrative cleanup：清理 README、README.zh、website、articles、protocol 中的过时表达，包括厂商绑定、旧模型名、过强自夸、MCP/A2A 对抗表述、`protocol engineering` 旧核心叙事、旧模板路径。
+  2. Harness + Loop positioning：补强“它在 agent stack 里的层级”与 Harness/Loop 对应表，让新读者 60 秒内明白它是什么、不是什么、和 va-agent-protocol 的关系。
+  3. Reopen readiness：补齐开源首屏、安装路径、generic CLI agent 使用说明、distribution smoke、release checklist。
+  4. Next-gen roadmap：围绕 observability、cost guardrails、evals/benchmarks、permission scope、human-on-the-loop governance、MCP adapter 形成可执行 backlog。
+  验收：
+  - public docs 不再把 Codex/Claude 写成平级共创者或唯一默认运行面。
+  - README 中英文与 website 对 VA Auto-Pilot / va-agent-protocol / MCP / A2A 的层级关系一致。
+  - reopen 文章标题和正文更稳健，强调行业语言成熟，而不是“超前两个版本”的自夸。
+  - auto-pilot backlog 形成 P0/P1/P2 任务，并通过 plan-review 后再 dispatch。
+
 - [x] **Plan Review Gate（Sprint 5）**：Manager 在 `orchestrate plan` 之后、`approve-plan` 之前，**必须与 Codex（或配置的 plan reviewer）讨论计划**——只评审、不写代码。运行 `orchestrate review-plan`，将结论写入 run-journal；存在 CRITICAL 则调整 backlog 后重新 plan + review。禁止「定计划后直接 dispatch / 实现」。
 > Processed 2026-05-19: `orchestrate review-plan` CLI + plan-review.json planHash gate; protocol/SKILL updated; Codex reviewed Sprint5 plan before implementation (journal plan-review).
 

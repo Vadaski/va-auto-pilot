@@ -22,6 +22,12 @@ import {
   writeJsonFileAtomicSync,
   writeTextFileAtomicSync
 } from "./lib/pilot-state.mjs";
+import {
+  DEFAULT_EVAL_HISTORY_FILE,
+  readEvalHistory,
+  resolveEvalHistoryFile,
+  summarizeEvalHistory,
+} from "./lib/eval-history.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -105,6 +111,7 @@ Usage:
   node scripts/sprint-board.mjs pitfall --task <TASK-ID> --failure-type <gate|acceptance|review> --attempted <text> --hypothesis <text> [--missing-context <text>]
   node scripts/sprint-board.mjs pitfall --resolve <PF-ID> --resolution <text>
   node scripts/sprint-board.mjs pitfall --list [--unresolved] [--json]
+  node scripts/sprint-board.mjs eval-compare [--gate <name>] [--limit <n>] [--json]
   node scripts/sprint-board.mjs review [--pitfalls-file <path>]
 
 Options (add):
@@ -162,6 +169,7 @@ Global options:
   --board-file <path>
   --journal-file <path>
   --pitfalls-file <path>
+  --history-file <path>
 `);
 }
 
@@ -1025,6 +1033,25 @@ function renderJournalView(filePath) {
     }
   }
 
+  lines.push("");
+  return lines.join("\n");
+}
+
+function formatEvalCompare(summary, { gate = "", historyFile = "" } = {}) {
+  const lines = [
+    "Eval History",
+    `History : ${historyFile ? path.relative(process.cwd(), historyFile) : DEFAULT_EVAL_HISTORY_FILE}`,
+    `Gate    : ${gate || "all"}`,
+    `Total   : ${summary.total}`,
+    `Passed  : ${summary.passed}`,
+    `Failed  : ${summary.failed}`,
+    `PassRate: ${(summary.passRate * 100).toFixed(1)}%`,
+  ];
+  if (summary.latest) {
+    lines.push(`Latest  : ${summary.latest.gateName} ${summary.latest.state} task=${summary.latest.taskId || ""} score=${summary.latest.score ?? ""}`);
+  } else {
+    lines.push("Latest  : none");
+  }
   lines.push("");
   return lines.join("\n");
 }
@@ -1977,6 +2004,7 @@ async function main() {
   const boardFile = path.resolve(parsed.options["board-file"] ?? DEFAULTS.boardFile);
   const journalFile = path.resolve(parsed.options["journal-file"] ?? DEFAULTS.journalFile);
   const pitfallsFile = path.resolve(parsed.options["pitfalls-file"] ?? DEFAULT_PITFALLS_FILE);
+  const historyFile = resolveEvalHistoryFile(process.cwd(), parsed.options["history-file"] ?? DEFAULT_EVAL_HISTORY_FILE);
   const humanBoardFile = resolveHumanBoardPath(stateFile);
 
   if (parsed.command === "journal") {
@@ -2077,6 +2105,24 @@ async function main() {
       projectDir: resolveProjectDirFromPilotArtifact(pitfallsFile)
     });
     process.stdout.write(stringifyYaml(suggestions));
+    return;
+  }
+
+  if (parsed.command === "eval-compare") {
+    const limit = Number.parseInt(String(parsed.options.limit ?? "10"), 10);
+    const gate = String(parsed.options.gate ?? "");
+    const records = readEvalHistory(historyFile);
+    const summary = summarizeEvalHistory(records, { gate, limit });
+    if (parsed.flags.has("json")) {
+      console.log(JSON.stringify({
+        historyFile,
+        gate: gate || null,
+        limit: Number.isFinite(limit) ? limit : 10,
+        ...summary,
+      }, null, 2));
+    } else {
+      process.stdout.write(formatEvalCompare(summary, { gate, historyFile }));
+    }
     return;
   }
 

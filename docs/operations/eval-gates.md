@@ -67,8 +67,27 @@ The gate sequence is:
 Eval gates run after local acceptance so expensive external judgments are not
 spent on changes that already fail deterministic checks.
 
-## Regression History
+## History
 
-AP-090 adds the parser and runner hook. A later task can persist eval history by
-recording eval result summaries in evidence bundles and comparing current scores
-against previous task/run baselines.
+Eval gates append JSONL records to:
+
+```text
+.va-auto-pilot/evidence/eval-history.jsonl
+```
+
+Each record includes the task id, run id when available, gate name, command,
+pass/fail state, optional score, exit code, timestamp, and current commit hash.
+JSON eval output can include a numeric `score`; text output can include
+`score=<number>`.
+
+To summarize recent eval history:
+
+```bash
+node scripts/sprint-board.mjs eval-compare
+node scripts/sprint-board.mjs eval-compare --gate fixture-eval --limit 20
+node scripts/sprint-board.mjs eval-compare --json
+```
+
+The comparison view is intentionally small: it reports recent totals, pass rate,
+and latest result. Use it as an early regression signal before promoting a more
+domain-specific baseline comparator.

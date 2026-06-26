@@ -74,6 +74,10 @@ import {
   readAllReadOnlyMcpResources,
   readReadOnlyMcpResource,
 } from "./lib/mcp-readonly-resources.mjs";
+import {
+  readEvalHistory,
+  resolveEvalHistoryFile,
+} from "./lib/eval-history.mjs";
 import { withPilotFileLock, writeTextFileAtomicSync } from "./lib/pilot-state.mjs";
 
 // ---------------------------------------------------------------------------
@@ -1813,39 +1817,51 @@ test("parseEvalGateOutput treats ambiguous eval output as non-passing", () => {
 });
 
 test("runGateSequence blocks on failing evalCommand", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-eval-history-fail-"));
   const gateResult = await runGateSequence(
     { evalCommand: "printf 'EVAL STATUS: FAIL\\nregression found\\n'" },
-    { dryRun: false, json: false, workDir: process.cwd() }
+    { dryRun: false, json: false, workDir: repoDir, taskId: "AP-EVAL" }
   );
 
   assert.equal(gateResult.passed, false);
   assert.equal(gateResult.gate, "eval");
   assert.match(gateResult.output, /eval gate fail/);
   assert.match(gateResult.output, /regression found/);
+  const history = readEvalHistory(resolveEvalHistoryFile(repoDir));
+  assert.equal(history.length, 1);
+  assert.equal(history[0].taskId, "AP-EVAL");
+  assert.equal(history[0].passed, false);
 });
 
 test("runGateSequence treats ambiguous evalCommand as non-passing", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-eval-history-ambiguous-"));
   const gateResult = await runGateSequence(
     { evalCommand: "printf 'score=0.71\\n'" },
-    { dryRun: false, json: false, workDir: process.cwd() }
+    { dryRun: false, json: false, workDir: repoDir }
   );
 
   assert.equal(gateResult.passed, false);
   assert.equal(gateResult.gate, "eval");
   assert.match(gateResult.output, /ambiguous/);
+  const history = readEvalHistory(resolveEvalHistoryFile(repoDir));
+  assert.equal(history[0].score, 0.71);
 });
 
 test("runGateSequence allows advisory eval gates to fail without blocking", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-eval-history-advisory-"));
   const gateResult = await runGateSequence(
     {
       evalGates: [
         { name: "fixture-eval", command: "printf 'EVAL STATUS: FAIL\\n'", required: false },
       ],
     },
-    { dryRun: false, json: false, workDir: process.cwd() }
+    { dryRun: false, json: false, workDir: repoDir }
   );
 
   assert.equal(gateResult.passed, true);
+  const history = readEvalHistory(resolveEvalHistoryFile(repoDir));
+  assert.equal(history[0].gateName, "fixture-eval");
+  assert.equal(history[0].passed, false);
 });
 
 test("extractReviewerReport parses JSON reviewer output", () => {
@@ -4780,6 +4796,37 @@ test("journal: includes files and signals in output", () => {
   assert.ok(content.includes("`src/b.ts`"), content);
   assert.ok(content.includes("lint-fail"), content);
   assert.ok(content.includes("test-pass"), content);
+});
+
+// ---------------------------------------------------------------------------
+// sprint-board CLI: eval history comparison
+// ---------------------------------------------------------------------------
+test("eval-compare summarizes eval history in text and JSON modes", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-eval-compare-"));
+  const historyFile = path.join(tmpDir, "eval-history.jsonl");
+  fs.writeFileSync(historyFile, [
+    JSON.stringify({ schemaVersion: 1, gateName: "fixture", taskId: "UT-001", passed: true, state: "pass", score: 0.9 }),
+    JSON.stringify({ schemaVersion: 1, gateName: "fixture", taskId: "UT-002", passed: false, state: "fail", score: 0.4 }),
+    "",
+  ].join("\n"), "utf8");
+
+  const text = spawnSync("node", [BOARD_SCRIPT, "eval-compare", "--history-file", historyFile, "--gate", "fixture"], {
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /Eval History/);
+  assert.match(text.stdout, /PassRate: 50\.0%/);
+  assert.match(text.stdout, /Latest\s+: fixture fail task=UT-002 score=0\.4/);
+
+  const json = spawnSync("node", [BOARD_SCRIPT, "eval-compare", "--history-file", historyFile, "--json"], {
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.equal(json.status, 0, json.stderr);
+  const payload = JSON.parse(json.stdout);
+  assert.equal(payload.total, 2);
+  assert.equal(payload.failed, 1);
 });
 
 // ---------------------------------------------------------------------------

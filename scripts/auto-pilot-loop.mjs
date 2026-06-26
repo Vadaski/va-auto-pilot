@@ -54,6 +54,13 @@ import {
   evaluateBudget,
   normalizeBudgetConfig,
 } from "./lib/budget-guardrails.mjs";
+import {
+  appendEvalHistoryRecord,
+  buildEvalHistoryRecord,
+  currentCommitHash,
+  parseEvalScore,
+  resolveEvalHistoryFile,
+} from "./lib/eval-history.mjs";
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./lib/pilot-state.mjs";
@@ -585,7 +592,15 @@ async function runGateSequence(gateConfig, opts) {
       if (gate.type === "eval") {
         const stdout = String(result.stdout ?? "");
         const stderr = String(result.stderr ?? "");
-        const parsed = parseEvalGateOutput(`${stdout}\n${stderr}`);
+        const evalOutput = `${stdout}\n${stderr}`;
+        const parsed = parseEvalGateOutput(evalOutput);
+        recordEvalHistory(gate, parsed, {
+          ...opts,
+          exitCode: 0,
+          stdout,
+          stderr,
+          score: parseEvalScore(evalOutput),
+        });
         if (!parsed.passed) {
           const output = [`eval gate ${parsed.state}: ${parsed.reason}`, stdout, stderr].filter(Boolean).join("\n");
           if (gate.required === false) {
@@ -608,6 +623,16 @@ async function runGateSequence(gateConfig, opts) {
       const stdout = String(err.stdout ?? "");
       const stderr = String(err.stderr ?? err.message);
       const output = stdout + "\n" + stderr;
+      if (gate.type === "eval") {
+        const parsed = parseEvalGateOutput(output);
+        recordEvalHistory(gate, parsed, {
+          ...opts,
+          exitCode: typeof err.code === "number" ? err.code : 1,
+          stdout,
+          stderr,
+          score: parseEvalScore(output),
+        });
+      }
       if (gate.required === false) {
         log(opts, `  gate "${gate.name}" FAILED (advisory, continuing)`);
       } else {
@@ -625,6 +650,23 @@ async function runGateSequence(gateConfig, opts) {
   }
 
   return { passed: true, gate: "", output: "", exitCode: 0, stdout: "", stderr: "" };
+}
+
+function recordEvalHistory(gate, parsed, opts) {
+  const workDir = opts.workDir ?? process.cwd();
+  const record = buildEvalHistoryRecord({
+    taskId: opts.taskId ?? "",
+    runId: opts.runId ?? "",
+    gateName: gate.name,
+    evalCommand: gate.cmd,
+    passed: parsed.passed,
+    state: parsed.state,
+    reason: parsed.reason,
+    score: opts.score ?? null,
+    exitCode: opts.exitCode ?? (parsed.passed ? 0 : 1),
+    commitHash: currentCommitHash(workDir),
+  });
+  appendEvalHistoryRecord(resolveEvalHistoryFile(workDir, opts.evalHistoryFile), record);
 }
 
 function parseEvalGateOutput(output) {
@@ -1968,7 +2010,7 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
     case "run-review": {
       const gateResult = await runGateSequence(
         { buildCommand: gateConfig.buildCommand, reviewCommand: gateConfig.reviewCommand },
-        opts
+        { ...opts, taskId: task.id }
       );
       if (gateResult.passed || opts.dryRun) {
         await transitionToTesting(task, opts, "Review");
@@ -1984,7 +2026,7 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
     }
 
     case "run-acceptance": {
-      const gateResult = await runGateSequence(gateConfig, opts);
+      const gateResult = await runGateSequence(gateConfig, { ...opts, taskId: task.id });
       if (gateResult.passed || opts.dryRun) {
         await transitionToDone(task, opts, "Testing");
         await journalEntry(task, "All gates passed → Done", opts);

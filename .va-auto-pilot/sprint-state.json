@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T15:46:54.491Z",
+  "updatedAt": "2026-06-26T15:55:13.965Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2937,17 +2937,17 @@
       "id": "AP-097",
       "title": "Research follow-up: add eval history persistence and comparison",
       "priority": "P2",
-      "state": "Backlog",
+      "state": "Done",
       "owner": "",
       "source": "kimi-research:harness-loop",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T15:47:53.269Z",
+      "completedAt": "2026-06-26T15:55:13.965Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
-      "notes": "",
+      "verification": "npm run typecheck; npm run check:units; npm run check:all",
+      "notes": "Implementing eval history JSONL persistence plus sprint-board eval-compare summary.; Eval gates append JSONL history and sprint-board eval-compare summarizes recent pass/fail trend.",
       "review": {
         "implementer": "",
         "security": "",

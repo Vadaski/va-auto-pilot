@@ -92,6 +92,7 @@ function validatePackContents() {
     "coverage/",
     "node_modules/",
     "e2e/",
+    "test-flows/",
     "website/",
     "archive/",
     "conductor/",
@@ -101,6 +102,14 @@ function validatePackContents() {
     "docs/research/"
   ];
   const forbiddenSuffixes = [".tgz", ".DS_Store"];
+  const forbiddenFiles = [
+    "scripts/test-cli-flows.mjs",
+    "scripts/test-doc-store-adoption.mjs",
+    "scripts/test-doc-store-mode.mjs",
+    "scripts/test-doc-store.mjs",
+    "scripts/test-units-coverage.mjs",
+    "scripts/test-units.mjs"
+  ];
 
   for (const required of requiredPackedFiles) {
     if (!fileSet.has(required)) {
@@ -110,7 +119,8 @@ function validatePackContents() {
 
   for (const file of files) {
     if (forbiddenPrefixes.some((prefix) => file.startsWith(prefix))
-      || forbiddenSuffixes.some((suffix) => file.endsWith(suffix))) {
+      || forbiddenSuffixes.some((suffix) => file.endsWith(suffix))
+      || forbiddenFiles.includes(file)) {
       fail(`Packed artifact includes forbidden file: ${file}`);
     }
   }

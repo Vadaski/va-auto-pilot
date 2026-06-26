@@ -304,6 +304,9 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 - 多语言 SDK（Python、Go）
 - 分布式编排
 
+下一代 Harness + Loop 路线图：
+`docs/operations/next-gen-harness-loop-roadmap.md`
+
 ---
 
 ## 文档索引
@@ -313,6 +316,7 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 - 协议：`docs/operations/va-auto-pilot-protocol.md`
 - 公共叙事规范：`docs/operations/public-narrative-spec.md`
 - 开源准备清单：`docs/operations/open-source-readiness-checklist.md`
+- 下一代路线图：`docs/operations/next-gen-harness-loop-roadmap.md`
 - 启动提示：`docs/operations/start-va-auto-pilot-prompt.md`
 - 分发说明：`docs/operations/distribute-skill.md`
 - 理念文章：`docs/human-on-the-loop.md`

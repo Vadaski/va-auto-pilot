@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T12:04:32.507Z",
+  "updatedAt": "2026-06-26T12:08:22.429Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2509,17 +2509,17 @@
       "id": "AP-083",
       "title": "Reopen P2: create next-gen Harness and Loop roadmap for observability, cost guardrails, evals, permissions, governance, and MCP adapter",
       "priority": "P2",
-      "state": "Backlog",
-      "owner": "",
+      "state": "Done",
+      "owner": "codex",
       "source": "human-board: reopen harness loop sprint",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T12:05:49.699Z",
+      "completedAt": "2026-06-26T12:08:22.429Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
-      "notes": "Plan review adjustment: next-gen roadmap should be last so it reflects cleaned positioning and readiness gaps.; Roadmap follows readiness gaps.",
+      "verification": "npm run check:all PASS; roadmap link rg PASS; stale-expression rg PASS.",
+      "notes": "Plan review adjustment: next-gen roadmap should be last so it reflects cleaned positioning and readiness gaps.; Roadmap follows readiness gaps.; Started next-gen Harness + Loop roadmap after readiness checklist.; Next-gen Harness + Loop roadmap added and linked from README.",
       "review": {
         "implementer": "",
         "security": "",
@@ -2528,9 +2528,9 @@
         "architect": ""
       },
       "testing": {
-        "flow": "",
-        "mustPassRate": "",
-        "shouldPassRate": ""
+        "flow": "next-gen-harness-loop-roadmap",
+        "mustPassRate": "100%",
+        "shouldPassRate": "100%"
       },
       "dependsOn": [
         "AP-082"

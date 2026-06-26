@@ -2528,3 +2528,14 @@
   - first-run-success
   - check-all-pass
 ---
+
+## 2026-06-26T12:08:22.520Z - AP-083
+- Summary: Added next-gen Harness + Loop roadmap covering observability, cost guardrails, eval gates, permissions, governance, MCP adapter, and va-agent-protocol reference hardening, with backlog seed tasks and execution order.
+- Files: `docs/operations/next-gen-harness-loop-roadmap.md`, `README.md`, `README.zh.md`, `docs/todo/sprint.md`, `docs/todo/run-journal.md`, `.va-auto-pilot/sprint-state.json`
+- Signals:
+  - next-gen-roadmap
+  - observability-harness
+  - governance-loop
+  - mcp-adapter
+  - check-all-pass
+---

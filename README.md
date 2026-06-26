@@ -292,6 +292,9 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 - Multi-language SDK (Python, Go)
 - Distributed orchestration across machines
 
+See the next-gen Harness + Loop roadmap:
+`docs/operations/next-gen-harness-loop-roadmap.md`
+
 ---
 
 ## Documentation
@@ -299,6 +302,7 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 - Protocol: `docs/operations/va-auto-pilot-protocol.md`
 - Public narrative spec: `docs/operations/public-narrative-spec.md`
 - Open-source readiness checklist: `docs/operations/open-source-readiness-checklist.md`
+- Next-gen roadmap: `docs/operations/next-gen-harness-loop-roadmap.md`
 - Start prompt: `docs/operations/start-va-auto-pilot-prompt.md`
 - Distribution: `docs/operations/distribute-skill.md`
 - Vision article: `docs/human-on-the-loop.md`

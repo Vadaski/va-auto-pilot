@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T11:55:33.930Z",
+  "updatedAt": "2026-06-26T12:00:48.842Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2447,17 +2447,17 @@
       "id": "AP-081",
       "title": "Reopen P1: add generic CLI agent usage path and remove public docs impression of Codex/Claude-only operation",
       "priority": "P1",
-      "state": "Backlog",
-      "owner": "",
+      "state": "Done",
+      "owner": "codex",
       "source": "human-board: reopen harness loop sprint",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T11:56:58.125Z",
+      "completedAt": "2026-06-26T12:00:48.842Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
-      "notes": "Plan review adjustment: generic CLI agent docs should follow the final public positioning.; Generic CLI path follows final positioning.",
+      "verification": "npm run check:all PASS; generic CLI path rg PASS; Codex/Claude-only stale scan PASS excluding guard docs.",
+      "notes": "Plan review adjustment: generic CLI agent docs should follow the final public positioning.; Generic CLI path follows final positioning.; Started generic CLI agent usage path cleanup after positioning audit.; Generic CLI agent path added to README, distribution docs, and website command generation.",
       "review": {
         "implementer": "",
         "security": "",
@@ -2466,9 +2466,9 @@
         "architect": ""
       },
       "testing": {
-        "flow": "",
-        "mustPassRate": "",
-        "shouldPassRate": ""
+        "flow": "generic-cli-agent-distribution",
+        "mustPassRate": "100%",
+        "shouldPassRate": "100%"
       },
       "dependsOn": [
         "AP-080"

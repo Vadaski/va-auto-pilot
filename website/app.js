@@ -694,7 +694,7 @@ function renderDynamicContent() {
   setText("genericInstallCmd", "npx va-auto-pilot init .\nnpm install");
   setText(
     "genericUseCmd",
-    "node scripts/auto-pilot.mjs orchestrate init --manager-surface <agent>\nnode scripts/auto-pilot.mjs orchestrate plan\nnode scripts/auto-pilot.mjs orchestrate review-plan\nnode scripts/auto-pilot.mjs orchestrate approve-plan"
+    "node scripts/auto-pilot.mjs orchestrate init --manager-surface generic-cli-agent\nnode scripts/auto-pilot.mjs orchestrate plan\nnode scripts/auto-pilot.mjs orchestrate review-plan\nnode scripts/auto-pilot.mjs orchestrate approve-plan"
   );
 
   setText("codexInstallCmd", `$skill-installer install ${skillDirUrl}`);

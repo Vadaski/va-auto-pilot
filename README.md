@@ -256,7 +256,17 @@ npm run check:all && review-agent review --uncommitted && npm run validate:distr
 # npm
 npm i -g va-auto-pilot
 
-# Agent integration example: Claude Code
+# Generic CLI agent path
+npx va-auto-pilot init .
+npm install
+
+# Then drive the loop from any capable CLI agent surface
+node scripts/auto-pilot.mjs orchestrate init --manager-surface generic-cli-agent
+node scripts/auto-pilot.mjs orchestrate plan
+node scripts/auto-pilot.mjs orchestrate review-plan
+node scripts/auto-pilot.mjs orchestrate approve-plan
+
+# Agent integration example: Claude Code command
 mkdir -p .claude/commands
 curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/va-auto-pilot/claude-command.md \
   -o .claude/commands/va-auto-pilot.md

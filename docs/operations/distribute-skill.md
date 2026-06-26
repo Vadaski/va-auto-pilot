@@ -24,13 +24,21 @@ Required paths:
 - `scripts/sprint-board.mjs`
 - `scripts/va-parallel-runner.mjs` (experimental runtime helper, opt-in)
 
-## 3) Distribute to Codex
+## 3) Generic CLI Agent Path
 
-```text
-$skill-installer install https://github.com/Vadaski/va-auto-pilot/tree/main/skills/va-auto-pilot
+Use this path when the agent can run shell commands in the target repository.
+It does not depend on Codex or Claude Code.
+
+```bash
+npx va-auto-pilot init .
+npm install
+node scripts/auto-pilot.mjs orchestrate init --manager-surface generic-cli-agent
+node scripts/auto-pilot.mjs orchestrate plan
+node scripts/auto-pilot.mjs orchestrate review-plan
+node scripts/auto-pilot.mjs orchestrate approve-plan
 ```
 
-If `skill-installer` is unavailable in your environment, use GitHub-source install path:
+If npm package access is unavailable, use the GitHub-source install path:
 
 ```bash
 tmp="$(mktemp -d)"
@@ -40,13 +48,19 @@ npm install
 rm -rf "$tmp"
 ```
 
-After installation, restart Codex and invoke:
+## 4) Codex Skill Installer Example
+
+```text
+$skill-installer install https://github.com/Vadaski/va-auto-pilot/tree/main/skills/va-auto-pilot
+```
+
+After installation, restart the agent surface and invoke:
 
 ```text
 $va-auto-pilot
 ```
 
-## 4) Distribute to Claude Code
+## 5) Claude Code Command Example
 
 ```bash
 mkdir -p .claude/commands

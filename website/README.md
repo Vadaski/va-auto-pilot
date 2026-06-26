@@ -7,7 +7,7 @@ Features:
 - bilingual switch (EN / 中文)
 - interactive state machine
 - animated execution demo
-- dynamic install commands for Codex and Claude Code
+- generic CLI agent install commands plus Codex and Claude Code examples
 - SEO + OG metadata
 
 ## Repository Metadata

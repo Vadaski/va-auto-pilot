@@ -268,7 +268,17 @@ npm run check:all && review-agent review --uncommitted && npm run validate:distr
 # npm
 npm i -g va-auto-pilot
 
-# Agent 集成示例：Claude Code
+# 通用 CLI Agent 路径
+npx va-auto-pilot init .
+npm install
+
+# 然后从任意高能力 CLI Agent 界面驱动闭环
+node scripts/auto-pilot.mjs orchestrate init --manager-surface generic-cli-agent
+node scripts/auto-pilot.mjs orchestrate plan
+node scripts/auto-pilot.mjs orchestrate review-plan
+node scripts/auto-pilot.mjs orchestrate approve-plan
+
+# Agent 集成示例：Claude Code command
 mkdir -p .claude/commands
 curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/va-auto-pilot/claude-command.md \
   -o .claude/commands/va-auto-pilot.md

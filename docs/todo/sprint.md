@@ -101,6 +101,7 @@
 | AP-076 | P1 release: acceptance gate inference must prefer behavioral e2e/smoke over distribution validation | 2026-06-26 | check:units covers acceptance gate priority preferring check:e2e over validate:distribution; npm run check:all passes |
 | AP-077 | P1 release: public docs and skill commands must include review-plan and consistent install story | 2026-06-26 | Public docs and skill commands use review-plan and public-first install paths; npm run check:all and check:e2e pass |
 | AP-078 | P1 release: trim npm package to runtime scaffold assets only | 2026-06-26 | npm pack trimmed to 80 files / 655.8KB unpacked; tarball install init project passes without source-only tests or root CLI flows |
+| AP-081 | Reopen P1: add generic CLI agent usage path and remove public docs impression of Codex/Claude-only operation | 2026-06-26 | npm run check:all PASS; generic CLI path rg PASS; Codex/Claude-only stale scan PASS excluding guard docs. |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
@@ -129,6 +130,5 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| P1 | AP-081 | Reopen P1: add generic CLI agent usage path and remove public docs impression of Codex/Claude-only operation | AP-080 | - | human-board: reopen harness loop sprint |
 | P1 | AP-082 | Reopen P1: build open-source readiness checklist for install, distribution smoke, release evidence, and first-run success | AP-081 | - | human-board: reopen harness loop sprint |
 | P2 | AP-083 | Reopen P2: create next-gen Harness and Loop roadmap for observability, cost guardrails, evals, permissions, governance, and MCP adapter | AP-082 | - | human-board: reopen harness loop sprint |

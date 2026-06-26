@@ -2507,3 +2507,13 @@
   - vendor-mentions-reviewed
   - check-all-pass
 ---
+
+## 2026-06-26T12:00:48.934Z - AP-081
+- Summary: Added generic CLI agent usage path across README, README.zh, distribution docs, and website commands so public docs no longer imply Codex/Claude-only operation.
+- Files: `README.md`, `README.zh.md`, `docs/operations/distribute-skill.md`, `website/app.js`, `website/README.md`, `docs/todo/sprint.md`, `docs/todo/run-journal.md`, `.va-auto-pilot/sprint-state.json`
+- Signals:
+  - generic-cli-agent-path
+  - codex-claude-as-examples
+  - check-all-pass
+  - stale-only-scan-pass
+---

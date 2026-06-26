@@ -1608,6 +1608,9 @@ test("va-auto-pilot init renders prompt gates from target package.json scripts",
   assert.match(config, /acceptanceTestCommand: "pnpm run test:unit"/);
   assert.match(packageJson.dependencies.tsx, /^\^?4\./);
   assert.match(packageJson.dependencies.yaml, /^\^?2\./);
+  assert.equal(packageJson.scripts["check:all"], "pnpm run lint && pnpm run test:unit");
+  assert.equal(packageJson.scripts["check:sprint"], "node ./scripts/sprint-board.mjs summary");
+  assert.equal(packageJson.scripts["validate:distribution"], "node ./scripts/validate-distribution.mjs");
   assert.match(prompt, /Run quality gate: `pnpm run check:all`\./);
   assert.match(prompt, /Run project test command: `pnpm run test:unit`\./);
   assert.match(prompt, /Run acceptance gate: `pnpm run test:unit`\./);
@@ -1630,6 +1633,9 @@ test("va-auto-pilot init creates a minimal package.json with runtime dependencie
   const packageJson = JSON.parse(fs.readFileSync(path.join(repoDir, "package.json"), "utf8"));
   assert.equal(packageJson.private, true);
   assert.equal(packageJson.type, "module");
+  assert.equal(packageJson.scripts["check:sprint"], "node ./scripts/sprint-board.mjs summary");
+  assert.equal(packageJson.scripts["validate:distribution"], "node ./scripts/validate-distribution.mjs");
+  assert.equal(packageJson.scripts["check:all"], "npm run check:sprint && npm run validate:distribution");
   assert.match(packageJson.dependencies.tsx, /^\^?4\./);
   assert.match(packageJson.dependencies.yaml, /^\^?2\./);
 });

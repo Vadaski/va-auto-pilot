@@ -164,9 +164,15 @@ function validateProjectInstall() {
   const targetPackageJson = readJson("package.json");
   const dependencies = targetPackageJson?.dependencies ?? {};
   const devDependencies = targetPackageJson?.devDependencies ?? {};
+  const scripts = targetPackageJson?.scripts ?? {};
   for (const dependency of ["tsx", "yaml"]) {
     if (!dependencies[dependency] && !devDependencies[dependency]) {
       fail(`package.json missing runtime dependency: ${dependency}`);
+    }
+  }
+  for (const scriptName of ["check:sprint", "validate:distribution"]) {
+    if (typeof scripts[scriptName] !== "string" || !scripts[scriptName].trim()) {
+      fail(`package.json missing scaffold script: ${scriptName}`);
     }
   }
 }

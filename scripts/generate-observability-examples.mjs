@@ -123,7 +123,7 @@ function generateCompletedTask() {
   ].join("\n");
 
   const events = [
-    makeEvent("task.started", taskId, phase, { worker: "generic-cli-agent", command: "<agent> run AP-087", workingDir: "." }, 0),
+    makeEvent("task.started", taskId, phase, { worker: "generic-cli-agent", command: "generic-cli-agent run AP-087", workingDir: "." }, 0),
     makeEvent("task.command", taskId, phase, { command: "npm run check:all", exitCode: 0, durationMs: 4200, stdoutArtifact: "artifacts/build-gate.log" }, 5),
     makeEvent("task.gate", taskId, phase, { gateName: "build", required: true, passed: true, exitCode: 0, durationMs: 4200, outputArtifact: "artifacts/build-gate.log" }, 10),
     makeEvent("task.review", taskId, phase, { reviewArtifact: "artifacts/review-report.json", findingsIndexArtifact: "findings/findings-index.json", criticalCount: 0, warningCount: 1 }, 120),
@@ -226,7 +226,7 @@ function generateFailedTask() {
   };
 
   const events = [
-    makeEvent("task.started", taskId, phase, { worker: "generic-cli-agent", command: "<agent> run AP-088", workingDir: "." }, 0),
+    makeEvent("task.started", taskId, phase, { worker: "generic-cli-agent", command: "generic-cli-agent run AP-088", workingDir: "." }, 0),
     makeEvent("task.command", taskId, phase, { command: "npm run check:units", exitCode: 1, durationMs: 1800, stdoutArtifact: "artifacts/build-gate.log" }, 5),
     makeEvent("task.gate", taskId, phase, { gateName: "build", required: true, passed: false, exitCode: 1, durationMs: 1800, outputArtifact: "artifacts/build-gate.log" }, 10),
     makeEvent("task.failed", taskId, phase, { state: "failed", failureType: "gate", firstFailingGate: "build", recoveryDecision: "escalate", pitfallId: "PF-045" }, 12),

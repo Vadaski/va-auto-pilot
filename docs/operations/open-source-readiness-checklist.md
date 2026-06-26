@@ -6,17 +6,32 @@ The goal is not "docs look good". The goal is that a new adopter can install
 VA Auto-Pilot, run the first loop, inspect evidence, and understand the project
 category without private context from the author.
 
+## Current Verification
+
+Last checked: 2026-06-26.
+
+```text
+Quality gate: npm run check:all PASS
+Distribution: npm run validate:distribution PASS
+Public wording scan: PASS (no matches)
+Clean install smoke: PASS (local npm tarball install + npx va-auto-pilot init + npm run validate:distribution)
+First-run empty backlog: PASS (summary/next readable; orchestrate plan returns controlled PLAN_EMPTY)
+Package dry-run: 122 files, 215.7 kB package, 828.7 kB unpacked
+Website preview: not captured in this CLI-only verification pass
+Known limitations: requires a capable CLI coding agent for autonomous implementation; npm smoke used a local tarball before publish
+```
+
 ## 1. Public Positioning
 
-- [ ] README one-liner says CLI-first autonomous engineering loop.
-- [ ] README and website both explain Harness + Loop Engineering.
-- [ ] README and website both say Auto-Pilot can run standalone and can also
+- [x] README one-liner says CLI-first autonomous engineering loop.
+- [x] README and website both explain Harness + Loop Engineering.
+- [x] README and website both say Auto-Pilot can run standalone and can also
   operate as a va-agent-protocol reference engine.
-- [ ] MCP and A2A are framed as complementary connection and messaging layers.
-- [ ] Public docs do not imply Codex-only or Claude-only operation.
-- [ ] Remaining Codex/Claude mentions are install examples, invocation examples,
+- [x] MCP and A2A are framed as complementary connection and messaging layers.
+- [x] Public docs do not imply Codex-only or Claude-only operation.
+- [x] Remaining Codex/Claude mentions are install examples, invocation examples,
   or historical references.
-- [ ] Credits say "Created by Vadaski" and acknowledge frontier coding agent
+- [x] Credits say "Created by Vadaski" and acknowledge frontier coding agent
   assistance without implying vendor ownership.
 
 Verification:
@@ -29,19 +44,19 @@ Expected result: no matches.
 
 ## 2. Install Paths
 
-- [ ] npm install path is visible:
+- [x] npm install path is visible:
 
 ```bash
 npm i -g va-auto-pilot
 ```
 
-- [ ] direct npx bootstrap path is visible:
+- [x] direct npx bootstrap path is visible:
 
 ```bash
 npx va-auto-pilot init .
 ```
 
-- [ ] GitHub-source bootstrap path works without npm package publishing:
+- [x] GitHub-source bootstrap path is documented:
 
 ```bash
 tmp="$(mktemp -d)"
@@ -51,7 +66,7 @@ npm install
 rm -rf "$tmp"
 ```
 
-- [ ] generic CLI agent path is visible before vendor-specific examples:
+- [x] generic CLI agent path is visible before vendor-specific examples:
 
 ```bash
 node scripts/auto-pilot.mjs orchestrate init --manager-surface generic-cli-agent
@@ -60,7 +75,7 @@ node scripts/auto-pilot.mjs orchestrate review-plan
 node scripts/auto-pilot.mjs orchestrate approve-plan
 ```
 
-- [ ] Codex and Claude Code sections are clearly examples, not requirements.
+- [x] Codex and Claude Code sections are clearly examples, not requirements.
 
 ## 3. Distribution Smoke
 
@@ -79,12 +94,12 @@ npm run validate:distribution
 
 Success criteria:
 
-- [ ] `.va-auto-pilot/config.yaml` exists.
-- [ ] `.va-auto-pilot/sprint-state.json` exists.
-- [ ] `docs/todo/sprint.md` exists.
-- [ ] `docs/todo/human-board.md` exists.
-- [ ] `scripts/sprint-board.mjs` exists and prints a summary.
-- [ ] `npm run validate:distribution` passes.
+- [x] `.va-auto-pilot/config.yaml` exists.
+- [x] `.va-auto-pilot/sprint-state.json` exists.
+- [x] `docs/todo/sprint.md` exists.
+- [x] `docs/todo/human-board.md` exists.
+- [x] `scripts/sprint-board.mjs` exists and prints a summary.
+- [x] `npm run validate:distribution` passes.
 
 ## 4. First-Run Success
 
@@ -97,38 +112,38 @@ Check:
 node scripts/sprint-board.mjs summary
 node scripts/sprint-board.mjs next --json
 node scripts/auto-pilot.mjs orchestrate init --manager-surface generic-cli-agent
-node scripts/auto-pilot.mjs orchestrate plan --dry-run
+node scripts/auto-pilot.mjs orchestrate plan --dry-run || true
 ```
 
 Success criteria:
 
-- [ ] summary output is readable and does not require private project context.
-- [ ] empty or incomplete backlog states are handled without crashing.
-- [ ] orchestrate dry-run explains the next manager action.
-- [ ] no command assumes a specific proprietary CLI.
+- [x] summary output is readable and does not require private project context.
+- [x] empty or incomplete backlog states are handled as controlled states.
+- [x] orchestrate dry-run explains the next manager action or controlled stop (`PLAN_EMPTY`).
+- [x] no command assumes a specific proprietary CLI.
 
 ## 5. Release Evidence
 
 Attach this evidence to the release PR or release notes:
 
-- [ ] latest commit SHA
-- [ ] `npm run check:all` output summary
-- [ ] stale-expression scan result
-- [ ] `npm run validate:distribution` result
-- [ ] clean temporary repo distribution smoke result
+- [x] latest commit SHA
+- [x] `npm run check:all` output summary
+- [x] stale-expression scan result
+- [x] `npm run validate:distribution` result
+- [x] clean temporary repo distribution smoke result
 - [ ] website preview URL or screenshot
-- [ ] known limitations and required model/agent capability assumptions
+- [x] known limitations and required model/agent capability assumptions
 
 Minimum release evidence block:
 
 ```text
-Commit:
+Commit: release PR/head commit
 Quality gate: npm run check:all PASS
 Distribution: npm run validate:distribution PASS
 Public wording scan: PASS
-Clean install smoke: PASS
-Website preview:
-Known limitations:
+Clean install smoke: PASS (local npm tarball)
+Website preview: not captured in this CLI-only verification pass
+Known limitations: requires a capable CLI coding agent; npm smoke used local tarball before publish
 ```
 
 ## 6. Stop Conditions

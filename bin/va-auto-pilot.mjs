@@ -232,6 +232,13 @@ function ensureRuntimeDependencies(targetDir, { dryRun }) {
   const devDependencies = targetPackage.devDependencies && typeof targetPackage.devDependencies === "object"
     ? targetPackage.devDependencies
     : {};
+  const scripts = targetPackage.scripts && typeof targetPackage.scripts === "object"
+    ? { ...targetPackage.scripts }
+    : {};
+  const scaffoldScripts = {
+    "check:sprint": "node ./scripts/sprint-board.mjs summary",
+    "validate:distribution": "node ./scripts/validate-distribution.mjs"
+  };
 
   let changed = !existing;
   for (const [name, version] of Object.entries(RUNTIME_DEPENDENCIES)) {
@@ -241,11 +248,23 @@ function ensureRuntimeDependencies(targetDir, { dryRun }) {
     dependencies[name] = version;
     changed = true;
   }
+  for (const [name, command] of Object.entries(scaffoldScripts)) {
+    if (typeof scripts[name] === "string" && scripts[name].trim()) {
+      continue;
+    }
+    scripts[name] = command;
+    changed = true;
+  }
+  if (typeof scripts["check:all"] !== "string" || !scripts["check:all"].trim()) {
+    scripts["check:all"] = "npm run check:sprint && npm run validate:distribution";
+    changed = true;
+  }
 
   if (!changed) {
     return null;
   }
 
+  targetPackage.scripts = scripts;
   targetPackage.dependencies = dependencies;
   if (dryRun) {
     return { destination: packageJsonPath, dryRun: true };

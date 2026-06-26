@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T14:08:15.598Z",
+  "updatedAt": "2026-06-26T14:16:05.059Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2664,16 +2664,16 @@
       "id": "AP-088",
       "title": "Roadmap: define governance checkpoints and stale approval invalidation",
       "priority": "P1",
-      "state": "Backlog",
+      "state": "Done",
       "owner": "",
       "source": "next-gen-harness-loop-roadmap",
       "createdAt": "2026-06-26",
       "startedAt": "",
-      "completedAt": "",
+      "completedAt": "2026-06-26T14:16:05.059Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
+      "verification": "Governance checkpoints defined and implemented: checkpoint governance block, plan.approved/dispatch.queued/checkpoint.stale events, human-board stale invalidation coverage, governance doc. typecheck PASS; check:all PASS.",
       "notes": "Roadmap order: governance follows observability evidence.",
       "review": {
         "implementer": "",

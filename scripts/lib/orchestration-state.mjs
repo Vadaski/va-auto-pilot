@@ -8,6 +8,7 @@ import { withPilotFileLock, writeJsonFileAtomicSync } from "./pilot-state.mjs";
 import { observabilityPaths, OBSERVABILITY_SCHEMA_VERSION } from "./observability.mjs";
 
 export const ORCHESTRATION_SCHEMA_VERSION = 1;
+export const GOVERNANCE_SCHEMA_VERSION = 1;
 
 /** Phases where plan/dispatch/await must not run without a fresh init. */
 export const TERMINAL_RUN_PHASES = new Set(["done", "error", "halted"]);
@@ -159,6 +160,16 @@ export function buildCheckpoint({ stateFile, workDir, approvedPlanId, candidateP
     humanBoardHash: computeHumanBoardHash(stateFile),
     gitHead: computeGitHead(workDir),
     createdAt: new Date().toISOString(),
+    governance: {
+      schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+      checkpointId: approvedPlanId,
+      decisionPoint: "plan.approved",
+      approvalScope: ["plan", "dispatch"],
+      requiredBefore: "dispatch",
+      invalidatesOn: ["sprint-state", "human-board", "git-head"],
+      stalePolicy: "block-dispatch-and-require-approve-plan",
+      resumePhase: "plan-approved",
+    },
     observability: {
       schemaVersion: OBSERVABILITY_SCHEMA_VERSION,
       eventLogPath: obsPaths.eventsLog,

@@ -348,9 +348,10 @@ object to `checkpoint.json`:
 }
 ```
 
-AP-088 can:
+AP-088 uses this contract in `docs/operations/governance-checkpoints.md`:
 
-1. Read `eventLogPath` to append `plan.approved` / `checkpoint.stale` events.
+1. Read `eventLogPath` to append `plan.approved`, `dispatch.queued`, and
+   `checkpoint.stale` events.
 2. Use `evidenceBundleDir` to locate per-task bundles deterministically.
 3. Use `redactedShareableDir` to produce manager-shareable evidence.
 4. Treat the observability schema version as a compatibility gate: if unknown,

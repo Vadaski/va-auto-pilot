@@ -47,12 +47,28 @@ import {
   validatePlanReviewForApprove,
   writePlanReview,
 } from "./lib/plan-review.mjs";
+import { appendEventLog, buildEvent, observabilityPaths } from "./lib/observability.mjs";
 
 function planTaskIds(plan) {
   if (!plan) {
     return [];
   }
   return [plan.primaryTaskId, ...(Array.isArray(plan.parallelTracks) ? plan.parallelTracks : [])].filter(Boolean);
+}
+
+async function appendGovernanceEvent(opts, run, eventType, payload) {
+  const checkpoint = readCheckpoint(opts.workDir);
+  const logFile = checkpoint?.observability?.eventLogPath ?? observabilityPaths(opts.workDir).eventsLog;
+  await appendEventLog(
+    logFile,
+    buildEvent({
+      eventType,
+      runId: run.runId,
+      phase: run.phase,
+      payload,
+      provenance: { source: "auto-pilot-orchestrate" },
+    })
+  );
 }
 
 function assertRunnablePhase(run, opts) {
@@ -74,12 +90,6 @@ async function validatePreDispatch(run, opts) {
     fail(opts, "HALTED", "directives.json contains halt-run", { directives }, 2);
   }
 
-  const boardPath = resolveHumanBoardPath(opts.stateFile);
-  const unchecked = readHumanBoardInstructions(boardPath);
-  if (unchecked.length > 0) {
-    fail(opts, "HUMAN_BOARD_BLOCKED", `human-board has ${unchecked.length} unchecked instruction(s)`, { unchecked }, 2);
-  }
-
   if (!run.approvedPlanId) {
     fail(opts, "APPROVAL_REQUIRED", "approve-plan required before dispatch", {}, 2);
   }
@@ -87,7 +97,20 @@ async function validatePreDispatch(run, opts) {
   const checkpoint = readCheckpoint(opts.workDir);
   const stale = isCheckpointStale(checkpoint, { stateFile: opts.stateFile, workDir: opts.workDir });
   if (stale.stale) {
+    await appendGovernanceEvent(opts, run, "checkpoint.stale", {
+      checkpointId: checkpoint?.governance?.checkpointId ?? checkpoint?.approvedPlanId ?? null,
+      approvedPlanId: checkpoint?.approvedPlanId ?? null,
+      reason: stale.reason,
+      stalePolicy: checkpoint?.governance?.stalePolicy ?? "block-dispatch-and-require-approve-plan",
+      resumePhase: "awaiting-plan-approval",
+    });
     fail(opts, "STALE_CONTEXT", stale.reason, { checkpoint }, 2);
+  }
+
+  const boardPath = resolveHumanBoardPath(opts.stateFile);
+  const unchecked = readHumanBoardInstructions(boardPath);
+  if (unchecked.length > 0) {
+    fail(opts, "HUMAN_BOARD_BLOCKED", `human-board has ${unchecked.length} unchecked instruction(s)`, { unchecked }, 2);
   }
 
   if (run.locks?.executorPid && isProcessAlive(run.locks.executorPid)) {
@@ -264,6 +287,14 @@ async function orchestrateApprovePlan(opts) {
     candidatePlan: run.candidatePlan,
   });
   await writeCheckpoint(opts.workDir, checkpoint);
+  await appendGovernanceEvent(opts, run, "plan.approved", {
+    planId,
+    checkpointId: checkpoint.governance.checkpointId,
+    candidatePlan: run.candidatePlan,
+    approvalScope: checkpoint.governance.approvalScope,
+    invalidatesOn: checkpoint.governance.invalidatesOn,
+    stalePolicy: checkpoint.governance.stalePolicy,
+  });
 
   const payload = { ok: true, phase: run.phase, runId: run.runId, approvedPlanId: planId, checkpoint };
   await refreshSnapshot(opts);
@@ -291,6 +322,10 @@ async function orchestrateDispatch(opts) {
   run.updatedAt = new Date().toISOString();
   await writeRun(opts.workDir, run);
   await writeTracks(opts.workDir, { runId: run.runId, tracks });
+  await appendGovernanceEvent(opts, run, "dispatch.queued", {
+    checkpointId: readCheckpoint(opts.workDir)?.governance?.checkpointId ?? run.approvedPlanId,
+    queuedTasks: taskIds,
+  });
 
   const payload = { ok: true, phase: run.phase, runId: run.runId, queuedTasks: taskIds };
   await refreshSnapshot(opts);

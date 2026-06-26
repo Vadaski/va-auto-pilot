@@ -230,6 +230,7 @@ export function redactEvent(event, rules = DEFAULT_REDACTION_RULES) {
 }
 
 export async function appendEventLog(logFile, event) {
+  fs.mkdirSync(path.dirname(path.resolve(logFile)), { recursive: true });
   const line = `${JSON.stringify(event)}\n`;
   await withPilotFileLock(logFile, async () => {
     const existing = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";

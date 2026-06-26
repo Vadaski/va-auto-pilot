@@ -237,7 +237,7 @@ immature behavior.
 
 - `roadmap-observability-events`: design event schema and evidence bundle shape
 - `roadmap-governance-checkpoints`: define human approval checkpoints and stale
-  approval invalidation
+  approval invalidation. See `docs/operations/governance-checkpoints.md`.
 - `roadmap-permission-scope`: define file/command/network policy schema
 - `roadmap-eval-gates`: add eval gate type to config and runner
 - `roadmap-budget-guardrails`: add soft/hard budget policy and journal output

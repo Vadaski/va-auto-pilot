@@ -4927,6 +4927,30 @@ test("orchestration-state: checkpoint detects sprint-state drift", () => {
   assert.equal(isCheckpointStale(checkpoint, { stateFile, workDir: tmpDir }).stale, true);
 });
 
+test("orchestration-state: checkpoint detects live human-board instruction drift", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-human-board-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ tasks: [{ id: "AP-001", state: "Backlog" }] }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  const checkpoint = buildCheckpoint({
+    stateFile,
+    workDir: tmpDir,
+    approvedPlanId: "plan-1",
+    candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
+  });
+
+  assert.equal(isCheckpointStale(checkpoint, { stateFile, workDir: tmpDir }).stale, false);
+
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n- [ ] Change strategy before dispatch\n", "utf8");
+  const stale = isCheckpointStale(checkpoint, { stateFile, workDir: tmpDir });
+  assert.equal(stale.stale, true);
+  assert.equal(stale.reason, "human-board changed since approve-plan");
+});
+
 test("orchestration-state: hasHaltDirective detects halt-run", () => {
   assert.equal(hasHaltDirective({ directives: [{ type: "halt-run", halt: true }] }), true);
   assert.equal(hasHaltDirective({ directives: [{ type: "replan", taskId: "AP-001" }] }), false);
@@ -5056,6 +5080,71 @@ test("auto-pilot orchestrate: dispatch requires approve-plan", () => {
   });
   assert.notEqual(dispatch.status, 0);
   assert.ok(dispatch.stderr.includes("APPROVAL_REQUIRED") || dispatch.stdout.includes("APPROVAL_REQUIRED"));
+});
+
+test("auto-pilot orchestrate: governance events record approval, dispatch, and stale checkpoint", async () => {
+  const { computeCandidatePlanHash } = await import("./lib/plan-review.mjs");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-governance-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const reviewFile = path.join(tmpDir, ".va-auto-pilot", "orchestration", "plan-review.json");
+  const boardFile = path.join(tmpDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(tmpDir, "docs", "todo", "run-journal.md");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(reviewFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    tasks: [{ id: "AP-001", title: "t", priority: "P1", state: "Backlog", dependsOn: [] }],
+  }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint\n\n", "utf8");
+
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  assert.equal(spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], { cwd: tmpDir, encoding: "utf8" }).status, 0);
+  const plan = spawnSync(process.execPath, [script, "orchestrate", "plan", "--json", "--state-file", stateFile], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(plan.status, 0, plan.stderr);
+  const planPayload = JSON.parse(plan.stdout);
+  const candidatePlan = planPayload.candidatePlan;
+  fs.writeFileSync(reviewFile, JSON.stringify({
+    schemaVersion: 1,
+    runId: planPayload.runId,
+    planHash: computeCandidatePlanHash(candidatePlan),
+    passed: true,
+    findings: { critical: [], warning: [], suggestion: [] },
+  }), "utf8");
+
+  const approve = spawnSync(process.execPath, [script, "orchestrate", "approve-plan", "--json", "--state-file", stateFile], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(approve.status, 0, approve.stderr);
+  const checkpoint = JSON.parse(approve.stdout).checkpoint;
+  assert.equal(checkpoint.governance.decisionPoint, "plan.approved");
+  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board", "git-head"]);
+
+  const dispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--json", "--state-file", stateFile], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(dispatch.status, 0, dispatch.stderr);
+
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n- [ ] Pause before re-dispatch\n", "utf8");
+  const staleDispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--json", "--state-file", stateFile], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(staleDispatch.status, 2);
+  assert.ok((staleDispatch.stderr + staleDispatch.stdout).includes("STALE_CONTEXT"));
+
+  const events = readEventLog(path.join(tmpDir, ".va-auto-pilot", "evidence", "events.jsonl"));
+  assert.deepEqual(events.map((event) => event.eventType), ["plan.approved", "dispatch.queued", "checkpoint.stale"]);
+  assert.equal(events[0].payload.checkpointId, checkpoint.governance.checkpointId);
+  assert.equal(events[2].payload.reason, "human-board changed since approve-plan");
 });
 
 test("resolveWorkerAgentTemplate maps codex worker to codex exec template", async () => {
@@ -5279,6 +5368,29 @@ test("orchestration-state: buildCheckpoint carries observability contract", () =
   assert.equal(checkpoint.observability.schemaVersion, 1);
   assert.ok(checkpoint.observability.eventLogPath.includes("evidence/events.jsonl"));
   assert.ok(checkpoint.observability.evidenceBundleDir.includes("evidence"));
+});
+
+test("orchestration-state: buildCheckpoint carries governance contract", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-gov-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ tasks: [{ id: "AP-001", state: "Backlog" }] }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  const checkpoint = buildCheckpoint({
+    stateFile,
+    workDir: tmpDir,
+    approvedPlanId: "plan-1",
+    candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
+  });
+
+  assert.equal(checkpoint.governance.schemaVersion, 1);
+  assert.equal(checkpoint.governance.checkpointId, "plan-1");
+  assert.equal(checkpoint.governance.requiredBefore, "dispatch");
+  assert.equal(checkpoint.governance.stalePolicy, "block-dispatch-and-require-approve-plan");
+  assert.equal(checkpoint.governance.resumePhase, "plan-approved");
 });
 
 // ---------------------------------------------------------------------------

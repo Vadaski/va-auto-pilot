@@ -218,12 +218,16 @@ export function isProcessAlive(pid) {
 
 export function assertActiveRun(run, runId) {
   if (!run) {
-    const error = new Error("No active orchestration run. Run: auto-pilot orchestrate init");
+    const error = /** @type {Error & { code: string }} */ (
+      new Error("No active orchestration run. Run: auto-pilot orchestrate init")
+    );
     error.code = "NO_ACTIVE_RUN";
     throw error;
   }
   if (runId && run.runId !== runId) {
-    const error = new Error(`Run ID mismatch: expected ${runId}, active ${run.runId}`);
+    const error = /** @type {Error & { code: string }} */ (
+      new Error(`Run ID mismatch: expected ${runId}, active ${run.runId}`)
+    );
     error.code = "RUN_ID_MISMATCH";
     throw error;
   }

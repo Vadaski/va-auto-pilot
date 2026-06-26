@@ -246,6 +246,8 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 
 ## 文档索引
 
+- 重新开源：`docs/articles/reopen-va-auto-pilot-harness-loop.zh.md`
+- 理念文章：`docs/articles/va-auto-pilot-why-this-is-the-future.zh.md`
 - 协议：`docs/operations/va-auto-pilot-protocol.md`
 - 启动提示：`docs/operations/start-va-auto-pilot-prompt.md`
 - 分发说明：`docs/operations/distribute-skill.md`

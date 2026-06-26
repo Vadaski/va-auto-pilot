@@ -7,11 +7,11 @@
     <title>VA Auto-Pilot | CLI-First Autonomous Multi-Agent Engineering Loop</title>
     <meta
       name="description"
-      content="CLI-first autonomous multi-agent engineering loop — set a goal, the model finds the path. Governed parallel execution with deterministic quality gates. Powered by va-agent-protocol."
+      content="CLI-first autonomous engineering loop — set a goal, the model finds the path. Standalone loop engine and va-agent-protocol reference engine."
     />
     <meta
       name="keywords"
-      content="autonomous engineering, multi-agent loop, cli orchestration, quality gates, codex skill, va auto-pilot, frontier model, va-agent-protocol, MCP, A2A"
+      content="autonomous engineering, multi-agent loop, cli orchestration, quality gates, agent skill, va auto-pilot, frontier model, va-agent-protocol, MCP, A2A"
     />
     <meta name="theme-color" content="#f3f5f9" />
     <meta name="robots" content="index,follow" />
@@ -24,7 +24,7 @@
     <meta property="og:title" content="VA Auto-Pilot | CLI-First Autonomous Multi-Agent Engineering Loop" />
     <meta
       property="og:description"
-      content="CLI-first autonomous multi-agent engineering loop: governed parallel execution, adversarial review, and deterministic release gates. Built on va-agent-protocol."
+      content="CLI-first autonomous engineering loop: governed parallel execution, adversarial review, and deterministic release gates."
     />
     <meta property="og:url" content="https://vadaski.github.io/va-auto-pilot/" />
     <meta property="og:image" content="https://vadaski.github.io/va-auto-pilot/og-cover.svg" />
@@ -52,12 +52,8 @@
         "operatingSystem": "Cross-platform",
         "url": "https://vadaski.github.io/va-auto-pilot/",
         "softwareVersion": "0.2.0",
-        "author": [
-          { "@type": "Person", "name": "Vadaski" },
-          { "@type": "SoftwareApplication", "name": "Codex" },
-          { "@type": "SoftwareApplication", "name": "Claude" }
-        ],
-        "description": "CLI-first autonomous multi-agent engineering loop — set a goal, the model finds the path. Governed parallel execution, CLI-enforced quality gates, and adversarial sprint completion reviews. Powered by va-agent-protocol."
+        "author": [{ "@type": "Person", "name": "Vadaski" }],
+        "description": "CLI-first autonomous engineering loop — set a goal, the model finds the path. Governed parallel execution, CLI-enforced quality gates, and adversarial sprint completion reviews."
       }
     </script>
 
@@ -107,7 +103,7 @@
         <p class="eyebrow" data-i18n="hero.eyebrow">CLI-first autonomous multi-agent engineering loop</p>
         <h1 data-i18n="hero.title">Set a goal, the model finds the path.</h1>
         <p class="hero-lead" data-i18n="hero.lead">
-          VA Auto-Pilot is a CLI-first autonomous multi-agent engineering loop. Define objective, constraints, and acceptance criteria — the framework runs planning, parallel execution, adversarial review, and deterministic gates. Built on va-agent-protocol, the universal task protocol that wraps any CLI agent into a composable unit.
+          VA Auto-Pilot is a CLI-first autonomous engineering loop. Define objective, constraints, and acceptance criteria — the framework runs planning, parallel execution, adversarial review, and deterministic gates. It runs standalone and can also operate as a va-agent-protocol reference engine.
         </p>
 
         <div class="hero-cta">
@@ -116,7 +112,7 @@
         </div>
 
         <div class="signal-row">
-          <span class="signal-pill" data-i18n="hero.signal1">Requires frontier coding model capability</span>
+          <span class="signal-pill" data-i18n="hero.signal1">Built for capable coding agents with strong tool use</span>
           <span class="signal-pill" data-i18n="hero.signal2">Goal in -> audit-traceable commit out</span>
           <span class="signal-pill" data-i18n="hero.signal3">Works standalone or as a managed agent inside va-agent-protocol</span>
         </div>
@@ -250,11 +246,21 @@
         </div>
 
         <div class="tab-switch" role="tablist" aria-label="Install commands">
-          <button class="tab-btn active" type="button" data-tab="codex">Codex</button>
+          <button class="tab-btn active" type="button" data-tab="generic">Generic CLI Agent</button>
+          <button class="tab-btn" type="button" data-tab="codex">Codex</button>
           <button class="tab-btn" type="button" data-tab="claude">Claude Code</button>
         </div>
 
-        <article class="card tab-panel active" data-panel="codex">
+        <article class="card tab-panel active" data-panel="generic">
+          <h3 data-i18n="commands.genericInstall">Generic CLI install</h3>
+          <pre><code id="genericInstallCmd"></code></pre>
+          <button type="button" class="btn btn-mini copy-btn" data-copy-target="genericInstallCmd" data-i18n="common.copyCmd">Copy Command</button>
+          <h3 data-i18n="commands.genericUse">Generic CLI loop</h3>
+          <pre><code id="genericUseCmd"></code></pre>
+          <button type="button" class="btn btn-mini copy-btn" data-copy-target="genericUseCmd" data-i18n="common.copyCmd">Copy Command</button>
+        </article>
+
+        <article class="card tab-panel" data-panel="codex">
           <h3 data-i18n="commands.codexInstall">Codex install</h3>
           <pre><code id="codexInstallCmd"></code></pre>
           <button type="button" class="btn btn-mini copy-btn" data-copy-target="codexInstallCmd" data-i18n="common.copyCmd">Copy Command</button>
@@ -296,16 +302,16 @@
       <section id="credits" class="section reveal credits">
         <div class="section-head">
           <p class="eyebrow" data-i18n="credits.eyebrow">Credits</p>
-          <h2 data-i18n="credits.title">Built by Vadaski, Codex & Claude</h2>
+          <h2 data-i18n="credits.title">Created by Vadaski</h2>
         </div>
         <article class="card">
-          <p data-i18n="credits.body">Co-creators: Vadaski, Codex, Claude. Acknowledgements: the Vera project, where many practical patterns were distilled and validated.</p>
+          <p data-i18n="credits.body">Developed with assistance from frontier coding agents and validated through VA Auto-Pilot's own engineering loop. Acknowledgements: the Vera project, where many practical patterns were distilled and validated.</p>
         </article>
       </section>
     </main>
 
     <footer class="site-footer reveal">
-      <p data-i18n="footer.tagline">CLI-first autonomous multi-agent engineering loop — governed execution from goal to merge. Powered by va-agent-protocol.</p>
+      <p data-i18n="footer.tagline">CLI-first autonomous engineering loop — governed execution from goal to merge. Standalone or as a va-agent-protocol reference engine.</p>
       <a id="footerRepoLink" href="#" target="_blank" rel="noreferrer">GitHub</a>
     </footer>
 

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T11:36:50.806Z",
+  "updatedAt": "2026-06-26T11:42:35.480Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2571,28 +2571,28 @@
       "id": "AP-085",
       "title": "Reopen P0: clean website copy, metadata, demo logs, credits, and generic CLI agent entry points",
       "priority": "P0",
-      "state": "Backlog",
-      "owner": "",
+      "state": "Done",
+      "owner": "codex",
       "source": "plan-review: split AP-079",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T11:37:05.322Z",
+      "completedAt": "2026-06-26T11:42:35.480Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
-      "notes": "Website should mirror cleaned README positioning.",
+      "verification": "Website cleaned: metadata and hero clarify standalone/reference-engine positioning; generic CLI tab added; credits made Vadaski-created with agent assistance; demo review gate made configured-agent neutral. node --check website/app.js PASS; npm run check:all PASS.",
+      "notes": "Website should mirror cleaned README positioning.; Started website cleanup against README baseline and public narrative spec.",
       "review": {
-        "implementer": "",
+        "implementer": "Website copy, metadata, demo logs, credits, and generic CLI tab cleaned.",
         "security": "",
         "qa": "",
         "domain": "",
-        "architect": ""
+        "architect": "Website now mirrors README positioning: standalone loop engine, va-agent-protocol reference engine, MCP/A2A as complementary connection layers, agent-neutral credits."
       },
       "testing": {
-        "flow": "",
-        "mustPassRate": "",
-        "shouldPassRate": ""
+        "flow": "website-narrative-cleanup",
+        "mustPassRate": "100%",
+        "shouldPassRate": "100%"
       },
       "dependsOn": [
         "AP-079",

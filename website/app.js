@@ -2,9 +2,9 @@ const I18N = {
   en: {
     "meta.title": "VA Auto-Pilot | CLI-First Autonomous Multi-Agent Engineering Loop",
     "meta.description":
-      "CLI-first autonomous multi-agent engineering loop — set a goal, the model finds the path. Governed parallel execution with deterministic quality gates. Powered by va-agent-protocol.",
+      "CLI-first autonomous engineering loop — set a goal, the model finds the path. Standalone loop engine and va-agent-protocol reference engine.",
     "meta.ogDescription":
-      "CLI-first autonomous multi-agent engineering loop: governed parallel execution, adversarial review, and deterministic release gates. Built on va-agent-protocol.",
+      "CLI-first autonomous engineering loop: governed parallel execution, adversarial review, and deterministic release gates.",
     "meta.twitterDescription":
       "CLI-first autonomous multi-agent engineering loop: goal in, governed delivery out.",
 
@@ -22,8 +22,8 @@ const I18N = {
     "hero.eyebrow": "CLI-first autonomous multi-agent engineering loop",
     "hero.title": "Set a goal, the model finds the path.",
     "hero.lead":
-      "VA Auto-Pilot is a CLI-first autonomous multi-agent engineering loop. Define objective, constraints, and acceptance criteria — the framework runs planning, parallel execution, adversarial review, and deterministic gates. Built on va-agent-protocol, the universal task protocol that wraps any CLI agent into a composable unit.",
-    "hero.signal1": "Requires frontier coding model capability",
+      "VA Auto-Pilot is a CLI-first autonomous engineering loop. Define objective, constraints, and acceptance criteria — the framework runs planning, parallel execution, adversarial review, and deterministic gates. It runs standalone and can also operate as a va-agent-protocol reference engine.",
+    "hero.signal1": "Built for capable coding agents with strong tool use",
     "hero.signal2": "Goal in -> audit-traceable commit out",
     "hero.signal3": "Works standalone or as a managed agent inside va-agent-protocol",
 
@@ -74,8 +74,10 @@ const I18N = {
 
     "commands.eyebrow": "Rollout",
     "commands.title": "Install once, standardize execution across repos",
-    "commands.skillDirLabel": "Skill directory (for Codex skill-installer)",
+    "commands.skillDirLabel": "Skill directory (Codex skill-installer example)",
     "commands.skillRawLabel": "Direct skill URL (for any agent)",
+    "commands.genericInstall": "Generic CLI install",
+    "commands.genericUse": "Generic CLI loop",
     "commands.codexInstall": "Codex install",
     "commands.codexUse": "Codex invocation",
     "commands.claudeInstall": "Claude install",
@@ -85,18 +87,18 @@ const I18N = {
     "compare.title": "Best when you own delivery outcomes, not just code generation",
     "compare.va.title": "This fits your team if",
     "compare.va.body":
-      "You lead teams shipping production systems, run frontier coding models, and need auditability, release gates, and reliable merge readiness. Unlike MCP (model-to-tool) or A2A (agent-to-agent messaging), VA Auto-Pilot is a full execution loop with governed state transitions and deterministic quality gates.",
+      "You lead teams shipping production systems, run capable coding agents, and need auditability, release gates, and reliable merge readiness. MCP and A2A are complementary connection layers; VA Auto-Pilot governs long-running execution with state transitions and deterministic quality gates.",
     "compare.notfor.title": "This likely does not fit if",
     "compare.notfor.body":
-      "You need full manual control of implementation steps, prefer zero-ceremony iteration, or run below frontier coding model capability.",
+      "You need full manual control of implementation steps, prefer zero-ceremony iteration, or cannot provide an agent with strong planning, tool-use, and verification behavior.",
     "compare.link": "Read full comparison",
 
     "credits.eyebrow": "Credits",
-    "credits.title": "Built by Vadaski, Codex & Claude",
+    "credits.title": "Created by Vadaski",
     "credits.body":
-      "Co-creators: Vadaski, Codex, Claude. Acknowledgements: the Vera project, where practical patterns were distilled and validated.",
+      "Developed with assistance from frontier coding agents and validated through VA Auto-Pilot's own engineering loop. Acknowledgements: the Vera project, where practical patterns were distilled and validated.",
 
-    "footer.tagline": "CLI-first autonomous multi-agent engineering loop — governed execution from goal to merge. Powered by va-agent-protocol.",
+    "footer.tagline": "CLI-first autonomous engineering loop — governed execution from goal to merge. Standalone or as a va-agent-protocol reference engine.",
 
     "common.copy": "Copy",
     "common.copyLink": "Copy Link",
@@ -107,9 +109,9 @@ const I18N = {
   zh: {
     "meta.title": "VA Auto-Pilot | CLI 优先的自主多智能体工程闭环",
     "meta.description":
-      "CLI 优先的自主多智能体工程闭环——设定目标，模型自行寻路。治理化并行执行与确定性质量门禁。基于 va-agent-protocol 构建。",
+      "CLI 优先的自主工程闭环——设定目标，模型自行寻路。可独立运行，也可作为 va-agent-protocol reference engine。",
     "meta.ogDescription":
-      "CLI 优先的自主多智能体工程闭环：治理化并行执行、对抗审查、确定性发布门禁。基于 va-agent-protocol 构建。",
+      "CLI 优先的自主工程闭环：治理化并行执行、对抗审查、确定性发布门禁。",
     "meta.twitterDescription":
       "CLI 优先的自主多智能体工程闭环：目标输入，治理化交付输出。",
 
@@ -127,8 +129,8 @@ const I18N = {
     "hero.eyebrow": "CLI 优先的自主多智能体工程闭环",
     "hero.title": "设定目标，模型自行寻路。",
     "hero.lead":
-      "VA Auto-Pilot 是 CLI 优先的自主多智能体工程闭环。定义目标、约束和验收标准——框架自动执行规划、并行推进、对抗审查和确定性门禁。基于 va-agent-protocol（通用任务协议）构建，可将任何 CLI Agent 封装为可组合单元。",
-    "hero.signal1": "要求前沿级编程模型能力",
+      "VA Auto-Pilot 是 CLI 优先的自主工程闭环。定义目标、约束和验收标准——框架自动执行规划、并行推进、对抗审查和确定性门禁。它可以独立运行，也可以作为 va-agent-protocol 的 reference engine。",
+    "hero.signal1": "面向具备强工具使用能力的编程 Agent",
     "hero.signal2": "目标输入 -> 可审计提交输出",
     "hero.signal3": "可独立运行，也可作为 va-agent-protocol 编排下的托管 Agent",
 
@@ -179,8 +181,10 @@ const I18N = {
 
     "commands.eyebrow": "落地推广",
     "commands.title": "安装一次，在多仓库统一执行标准",
-    "commands.skillDirLabel": "Skill 目录链接（Codex skill-installer）",
+    "commands.skillDirLabel": "Skill 目录链接（Codex skill-installer 示例）",
     "commands.skillRawLabel": "Skill 直链（任意 Agent）",
+    "commands.genericInstall": "通用 CLI 安装",
+    "commands.genericUse": "通用 CLI 闭环",
     "commands.codexInstall": "Codex 安装",
     "commands.codexUse": "Codex 调用",
     "commands.claudeInstall": "Claude 安装",
@@ -190,18 +194,18 @@ const I18N = {
     "compare.title": "当你对交付结果负责时，它最有价值",
     "compare.va.title": "适合你的团队，如果",
     "compare.va.body":
-      "你在负责生产级系统交付，使用前沿级编程模型，并且需要可审计、可门禁、可稳定合并的执行闭环。与 MCP（模型到工具）或 A2A（Agent 间消息传递）不同，VA Auto-Pilot 是具备治理化状态转换和确定性质量门禁的完整执行闭环。",
+      "你在负责生产级系统交付，使用具备强能力的编程 Agent，并且需要可审计、可门禁、可稳定合并的执行闭环。MCP 和 A2A 是互补连接层；VA Auto-Pilot 治理长链路执行、状态转换和确定性质量门禁。",
     "compare.notfor.title": "大概率不适合，如果",
     "compare.notfor.body":
-      "你必须人工控制每个实现步骤、追求零仪式试错，或当前模型能力低于前沿级编程模型能力。",
+      "你必须人工控制每个实现步骤、追求零仪式试错，或无法提供具备强规划、工具使用和验证能力的 Agent。",
     "compare.link": "阅读完整对比",
 
     "credits.eyebrow": "作者与致谢",
-    "credits.title": "由 Vadaski、Codex、Claude 共创",
+    "credits.title": "由 Vadaski 创建",
     "credits.body":
-      "共创作者：Vadaski、Codex、Claude。致谢：Vera 项目，许多可复用工程模式在其中沉淀并得到验证。",
+      "在前沿级编程 Agent 协助下开发，并通过 VA Auto-Pilot 自身工程闭环验证。致谢：Vera 项目，许多可复用工程模式在其中沉淀并得到验证。",
 
-    "footer.tagline": "CLI 优先的自主多智能体工程闭环——从目标到可合并提交的治理化执行。基于 va-agent-protocol 驱动。",
+    "footer.tagline": "CLI 优先的自主工程闭环——从目标到可合并提交的治理化执行。可独立运行，也可作为 va-agent-protocol reference engine。",
 
     "common.copy": "复制",
     "common.copyLink": "复制链接",
@@ -288,7 +292,7 @@ const DEMO_LINES = {
     "[review:threat-model] CRITICAL: token appears in debug trace at line 847",
     "[fix] removing debug trace — re-running review ...",
     "[review:threat-model] PASS",
-    "[gate] codex review --uncommitted ... PASS",
+    "[gate] configured review gate ... PASS",
     "[gate] npm run validate:distribution ... PASS",
     "[moment 3] Pitfall guide prevents a known failure",
     "[pitfall-check] PF-003: p95 degradation under parallel load — injected as hard constraint",
@@ -316,7 +320,7 @@ const DEMO_LINES = {
     "[\u5BA1\u67E5:\u5A01\u80C1\u5EFA\u6A21] CRITICAL\uFF1A\u4EE4\u724C\u51FA\u73B0\u5728\u7B2C 847 \u884C\u8C03\u8BD5\u8F68\u8FF9",
     "[\u4FEE\u590D] \u79FB\u9664\u8C03\u8BD5\u8F68\u8FF9\u2014\u2014\u91CD\u65B0\u5BA1\u67E5 ...",
     "[\u5BA1\u67E5:\u5A01\u80C1\u5EFA\u6A21] PASS",
-    "[\u95E8\u7981] codex review --uncommitted ... PASS",
+    "[\u95E8\u7981] \u914D\u7F6E\u7684 review gate ... PASS",
     "[\u95E8\u7981] npm run validate:distribution ... PASS",
     "[\u5173\u952E\u65F6\u523B 3] \u9677\u9631\u6307\u5357\u9884\u9632\u5DF2\u77E5\u5931\u8D25",
     "[\u9677\u9631\u68C0\u67E5] PF-003\uFF1A\u5E76\u53D1\u8D1F\u8F7D\u4E0B p95 \u964D\u7EA7\u2014\u2014\u5DF2\u4F5C\u4E3A\u786C\u6027\u7EA6\u675F\u6CE8\u5165",
@@ -340,7 +344,7 @@ Constraints:
 
 Acceptance:
 - typecheck / lint / tests pass
-- codex review: no blocking findings
+- configured review gate: no blocking findings
 - acceptance flow: MUST 100%, SHOULD >= 80%`,
   zh: `$va-auto-pilot
 
@@ -354,7 +358,7 @@ Acceptance:
 
 \u9A8C\u6536\uFF1A
 - typecheck / lint / test \u5168\u901A\u8FC7
-- codex review \u65E0\u963B\u65AD\u95EE\u9898
+- \u914D\u7F6E\u7684 review gate \u65E0\u963B\u65AD\u95EE\u9898
 - \u9A8C\u6536\u6D41 MUST 100%\uFF0CSHOULD >= 80%`
 };
 
@@ -686,6 +690,12 @@ function renderDynamicContent() {
   if (footerRepoLink) footerRepoLink.href = repoUrl;
   const compareDocLink = document.getElementById("compareDocLink");
   if (compareDocLink) compareDocLink.href = compareDocUrl;
+
+  setText("genericInstallCmd", "npx va-auto-pilot init .\nnpm install");
+  setText(
+    "genericUseCmd",
+    "node scripts/auto-pilot.mjs orchestrate init --manager-surface <agent>\nnode scripts/auto-pilot.mjs orchestrate plan\nnode scripts/auto-pilot.mjs orchestrate review-plan\nnode scripts/auto-pilot.mjs orchestrate approve-plan"
+  );
 
   setText("codexInstallCmd", `$skill-installer install ${skillDirUrl}`);
   setText(

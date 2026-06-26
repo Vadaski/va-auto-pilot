@@ -2477,3 +2477,13 @@
   - protocol-layer-clarified
   - check-all-pass
 ---
+
+## 2026-06-26T11:42:35.573Z - AP-085
+- Summary: Website public copy cleaned for agent-neutral Harness + Loop positioning; generic CLI agent install/use path added.
+- Files: `website/app.js`, `website/index.html`, `docs/todo/sprint.md`, `.va-auto-pilot/sprint-state.json`
+- Signals:
+  - website-positioning-clean
+  - generic-cli-agent
+  - agent-neutral-credits
+  - check-all-pass
+---

@@ -239,7 +239,7 @@ $va-auto-pilot
 
 验收：
 - typecheck/lint/test 全通过
-- codex review 无阻断问题
+- 配置的 review gate 无阻断问题
 - 验收流 MUST 100%，SHOULD >= 80%
 ```
 
@@ -256,7 +256,7 @@ $va-auto-pilot
 
 ```bash
 node scripts/sprint-board.mjs plan --json --max-parallel 3 > .va-auto-pilot/parallel-plan.json
-npm run check:all && codex review --uncommitted && npm run validate:distribution
+npm run check:all && <review-agent> review --uncommitted && npm run validate:distribution
 ```
 
 ---

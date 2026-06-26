@@ -55,6 +55,7 @@
 | AP-074 | P0 release: remove author-machine absolute paths from CLI flow tests | 2026-06-26 | npm run check:cli-flows passes with pitfall-cli.yaml using repo-relative paths |
 | AP-079 | Reopen P0: define canonical public narrative spec and stale-expression acceptance checks | 2026-06-26 | Added docs/operations/public-narrative-spec.md with canonical positioning, banned expressions, replacements, acceptance rg checks, and initial stale surface inventory. npm run check:all PASS; npm run validate:distribution PASS. |
 | AP-084 | Reopen P0: clean README.md and README.zh.md stale positioning, vendor binding, and protocol-layer confusion | 2026-06-26 | README stale positioning cleaned: removed weak-model gatekeeping wording, removed Codex/Claude co-creator ownership, replaced protocol comparison table with layer model, clarified standalone + va-agent-protocol reference engine relationship. npm run check:all PASS; validate:distribution PASS. |
+| AP-085 | Reopen P0: clean website copy, metadata, demo logs, credits, and generic CLI agent entry points | 2026-06-26 | Website cleaned: metadata and hero clarify standalone/reference-engine positioning; generic CLI tab added; credits made Vadaski-created with agent assistance; demo review gate made configured-agent neutral. node --check website/app.js PASS; npm run check:all PASS. |
 | AP-001 | Upgrade multi-perspective review to dynamic perspective selection | 2026-02-23 | Two cross-reviews (adversarial + protocol designer), 6 CRITICALs resolved, templates synced |
 | AP-003 | Add sprint-board.mjs add command to create tasks via CLI without hand-editing JSON | 2026-02-23 | add command implemented: auto-ID (AP-NNN), validation, depends-on, regex-safe prefix; printHelp updated; templates mirrored; all gates pass |
 | AP-004 | Add unit test suite for sprint-board.mjs pure functions | 2026-02-23 | 41/41 unit tests pass via node:test; check:units added to check:all; all gates pass |
@@ -127,7 +128,6 @@
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
 | P0 | AP-080 | Reopen P0: run cross-surface Harness + Loop positioning consistency synthesis after public cleanup | AP-084, AP-085, AP-086 | - | human-board: reopen harness loop sprint |
-| P0 | AP-085 | Reopen P0: clean website copy, metadata, demo logs, credits, and generic CLI agent entry points | AP-079, AP-084 | - | plan-review: split AP-079 |
 | P0 | AP-086 | Reopen P0: clean reopen article, human-on-the-loop article, and protocol docs for stable Harness + Loop framing | AP-079, AP-084 | - | plan-review: split AP-079 |
 | P1 | AP-081 | Reopen P1: add generic CLI agent usage path and remove public docs impression of Codex/Claude-only operation | AP-080 | - | human-board: reopen harness loop sprint |
 | P1 | AP-082 | Reopen P1: build open-source readiness checklist for install, distribution smoke, release evidence, and first-run success | AP-081 | - | human-board: reopen harness loop sprint |

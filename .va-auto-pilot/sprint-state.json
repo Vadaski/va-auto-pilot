@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T11:23:22.910Z",
+  "updatedAt": "2026-06-26T11:33:41.292Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2385,28 +2385,28 @@
       "id": "AP-079",
       "title": "Reopen P0: define canonical public narrative spec and stale-expression acceptance checks",
       "priority": "P0",
-      "state": "Backlog",
-      "owner": "",
+      "state": "Done",
+      "owner": "codex",
       "source": "human-board: reopen harness loop sprint",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T11:30:56.941Z",
+      "completedAt": "2026-06-26T11:33:41.292Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
-      "notes": "Plan review adjustment: AP-079 becomes the canonical narrative/spec task, not a broad multi-file cleanup task. It must define exact wording, layers, and grep acceptance checks before public docs are edited.; Acceptance detail: produce a reusable narrative spec artifact or section containing canonical terminology, stack/layer relationship, banned stale expressions, replacement wording, and rg-based stale-expression checks covering README.md, README.zh.md, website/, docs/articles/, docs/operations/.",
+      "verification": "Added docs/operations/public-narrative-spec.md with canonical positioning, banned expressions, replacements, acceptance rg checks, and initial stale surface inventory. npm run check:all PASS; npm run validate:distribution PASS.",
+      "notes": "Plan review adjustment: AP-079 becomes the canonical narrative/spec task, not a broad multi-file cleanup task. It must define exact wording, layers, and grep acceptance checks before public docs are edited.; Acceptance detail: produce a reusable narrative spec artifact or section containing canonical terminology, stack/layer relationship, banned stale expressions, replacement wording, and rg-based stale-expression checks covering README.md, README.zh.md, website/, docs/articles/, docs/operations/.; Started canonical public narrative spec for sustainable reopen decomposition.",
       "review": {
-        "implementer": "",
+        "implementer": "Canonical narrative spec added at docs/operations/public-narrative-spec.md.",
         "security": "",
         "qa": "",
         "domain": "",
-        "architect": ""
+        "architect": "Spec defines stack layers, Harness/Loop terms, banned expressions, replacements, acceptance rg checks, and sustainable decomposition sequence."
       },
       "testing": {
-        "flow": "",
-        "mustPassRate": "",
-        "shouldPassRate": ""
+        "flow": "narrative-spec",
+        "mustPassRate": "100%",
+        "shouldPassRate": "100%"
       },
       "dependsOn": []
     },

@@ -2457,3 +2457,13 @@
 - Signals:
   - plan-review:b382e54d5d5b3835c63100639b1710a87c1b4daab6e39eca1e7a89964d8e8165
 ---
+
+## 2026-06-26T11:33:41.387Z - AP-079
+- Summary: Canonical public narrative spec created for reopen Harness + Loop sprint; stale-expression checks now define README/website/articles/protocol cleanup targets.
+- Files: `docs/operations/public-narrative-spec.md`, `docs/todo/human-board.md`, `docs/todo/sprint.md`, `.va-auto-pilot/sprint-state.json`
+- Signals:
+  - public-narrative-spec
+  - harness-loop-positioning
+  - sustainable-decomposition
+  - check-all-pass
+---

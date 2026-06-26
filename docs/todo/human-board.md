@@ -8,7 +8,7 @@
 
 ## Instructions (highest priority)
 
-- [ ] **Reopen Sprint：把 VA Auto-Pilot 做成最强 Harness + Loop Engineering 开源项目。**
+- [x] **Reopen Sprint：把 VA Auto-Pilot 做成最强 Harness + Loop Engineering 开源项目。**
   先清理过时叙事，再分解工程任务，不要反过来。
   当前判断：重新开源前必须统一公共叙事，避免让用户误解为特定厂商/模型绑定、MCP/A2A 竞争者、单纯 prompt/protocol 模板，或只是一套本地 dogfood 脚手架。
   目标定位：
@@ -27,6 +27,7 @@
   - README 中英文与 website 对 VA Auto-Pilot / va-agent-protocol / MCP / A2A 的层级关系一致。
   - reopen 文章标题和正文更稳健，强调行业语言成熟，而不是“超前两个版本”的自夸。
   - auto-pilot backlog 形成 P0/P1/P2 任务，并通过 plan-review 后再 dispatch。
+> Processed 2026-06-26: Folded into AP-079..AP-086. AP-079 creates the canonical public narrative spec and stale-expression checks; follow-up tasks clean README, website, long-form docs/protocol, cross-surface consistency, generic CLI agent path, readiness checklist, and next-gen roadmap.
 
 - [x] **Plan Review Gate（Sprint 5）**：Manager 在 `orchestrate plan` 之后、`approve-plan` 之前，**必须与 Codex（或配置的 plan reviewer）讨论计划**——只评审、不写代码。运行 `orchestrate review-plan`，将结论写入 run-journal；存在 CRITICAL 则调整 backlog 后重新 plan + review。禁止「定计划后直接 dispatch / 实现」。
 > Processed 2026-05-19: `orchestrate review-plan` CLI + plan-review.json planHash gate; protocol/SKILL updated; Codex reviewed Sprint5 plan before implementation (journal plan-review).

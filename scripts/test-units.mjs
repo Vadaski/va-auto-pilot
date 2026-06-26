@@ -54,6 +54,14 @@ import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-pa
 import { suggestGateFromPitfall, suggestGatesFromPitfalls } from "./lib/adaptive-gates.mjs";
 import { collectConstraints, formatConstraintsForPrompt } from "./lib/constraint-bridge.mjs";
 import { inferProjectGateCommands, selectProjectTestCommand } from "./lib/project-gates.mjs";
+import {
+  buildDefaultPermissionPolicy,
+  classifyCommandPermission,
+  detectOutOfScopeFiles,
+  formatPermissionPolicyForPrompt,
+  normalizePermissionPolicy,
+  validatePermissionPolicy,
+} from "./lib/permission-scope.mjs";
 import { withPilotFileLock, writeTextFileAtomicSync } from "./lib/pilot-state.mjs";
 
 // ---------------------------------------------------------------------------
@@ -408,10 +416,13 @@ test("dispatchTask injects constraint prompt sections when bridge returns conten
   assert.match(capturedTrack.notes, /## Constraints \(hard rules first\)/);
   assert.match(capturedTrack.notes, /Keep this change on the read path\./);
   assert.match(capturedTrack.notes, /## Blind spots \(not covered — use judgment\)/);
+  assert.match(capturedTrack.notes, /## Permission Scope/);
+  assert.match(capturedTrack.notes, /Network: none/);
   assert.match(capturedTrack.notes, /## Pitfalls/);
   assert.match(capturedTrack.notes, /Known pitfall: prior fix regressed tests -- retry failed/);
   assert.match(capturedTrack.notes, /## Human-board/);
   assert.match(capturedTrack.notes, /Explicitly acknowledge the board before coding\./);
+  assert.equal(capturedTrack.metadata.permissionPolicy.schemaVersion, 1);
 });
 
 test("dispatchTask keeps the legacy prompt layout when constraint injection is empty", async () => {
@@ -446,7 +457,9 @@ test("dispatchTask keeps the legacy prompt layout when constraint injection is e
   });
 
   assert.equal(capturedTrack.title, task.title + pitfallContext);
-  assert.equal(capturedTrack.notes, `${task.notes}\n\n${humanBoardBlock}`);
+  assert.match(capturedTrack.notes, /^Task note\n\nBoard instruction\n\n## Permission Scope/);
+  assert.match(capturedTrack.notes, /File boundaries:/);
+  assert.equal(capturedTrack.metadata.permissionPolicy.schemaVersion, 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -1065,6 +1078,59 @@ test("inferProjectGateCommands prefers behavioral e2e over distribution validati
   assert.equal(commands.testCommand, "npm run check:units");
   assert.equal(commands.acceptanceCommand, "npm run check:e2e");
   assert.equal(commands.releaseCommand, "npm run validate:distribution");
+});
+
+test("permission-scope: default policy uses task source as file boundary", () => {
+  const policy = buildDefaultPermissionPolicy({
+    source: "scripts/lib/permission-scope.mjs",
+  });
+  assert.equal(validatePermissionPolicy(policy).ok, true);
+  assert.equal(policy.fileScopes[0].path, "scripts/lib/permission-scope.mjs");
+  assert.equal(policy.fileScopes[0].access, "read-write");
+});
+
+test("permission-scope: validation rejects missing allowlist for allowlist network mode", () => {
+  const policy = normalizePermissionPolicy({
+    schemaVersion: 1,
+    fileScopes: [{ path: "scripts/", access: "read-write" }],
+    commands: { allow: [], deny: [], destructiveRequiresOptIn: true, destructiveAllow: [] },
+    network: { mode: "allowlist", allowlist: [] },
+    review: { warnOnOutOfScopeDiff: true },
+  });
+  const result = validatePermissionPolicy(policy);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("network.allowlist")));
+});
+
+test("permission-scope: detects out-of-scope changed files", () => {
+  const policy = normalizePermissionPolicy({
+    schemaVersion: 1,
+    fileScopes: [{ path: "scripts/lib/", access: "read-write" }],
+    commands: { allow: [], deny: [], destructiveRequiresOptIn: true, destructiveAllow: [] },
+    network: { mode: "none", allowlist: [] },
+    review: { warnOnOutOfScopeDiff: true },
+  });
+  assert.deepEqual(
+    detectOutOfScopeFiles(["scripts/lib/permission-scope.mjs", "README.md"], policy),
+    ["README.md"]
+  );
+});
+
+test("permission-scope: destructive commands require explicit opt-in", () => {
+  const policy = buildDefaultPermissionPolicy({ source: "scripts/" });
+  assert.deepEqual(
+    classifyCommandPermission("rm -rf dist", policy),
+    { action: "requires-opt-in", reason: "destructive command requires explicit opt-in" }
+  );
+  assert.equal(classifyCommandPermission("npm run check:all", policy).action, "allow");
+});
+
+test("permission-scope: formatPermissionPolicyForPrompt renders worker boundaries", () => {
+  const text = formatPermissionPolicyForPrompt(buildDefaultPermissionPolicy({ source: "docs/operations/permission-scope.md" }));
+  assert.match(text, /## Permission Scope/);
+  assert.match(text, /read-write: docs\/operations\/permission-scope\.md/);
+  assert.match(text, /Network: none/);
+  assert.match(text, /Out-of-scope diff warning: enabled/);
 });
 
 test("suggestGateFromPitfall maps gate pitfall into required suggestion", () => {

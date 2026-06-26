@@ -105,6 +105,7 @@
 | AP-082 | Reopen P1: build open-source readiness checklist for install, distribution smoke, release evidence, and first-run success | 2026-06-26 | npm run check:all PASS; readiness checklist link rg PASS; stale-expression rg PASS excluding guard/checklist docs. |
 | AP-087 | Roadmap: design observability event schema and evidence bundle | 2026-06-26 | Observability contract landed: event schema + evidence bundle spec, JSON schemas, validator, deterministic completed/failed examples, checkpoint observability pointer. check:observability PASS; observability unit tests PASS. |
 | AP-088 | Roadmap: define governance checkpoints and stale approval invalidation | 2026-06-26 | Governance checkpoints defined and implemented: checkpoint governance block, plan.approved/dispatch.queued/checkpoint.stale events, human-board stale invalidation coverage, governance doc. typecheck PASS; check:all PASS. |
+| AP-089 | Roadmap: define file command network permission scope schema | 2026-06-26 | Permission scope contract landed: file/command/network JSON schema, runtime helper, worker prompt permission block, out-of-scope diff and destructive command classifiers, distribution allowlist update. typecheck PASS; check:all PASS. |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
@@ -134,7 +135,6 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| P1 | AP-089 | Roadmap: define file command network permission scope schema | AP-088 | - | next-gen-harness-loop-roadmap |
 | P2 | AP-090 | Roadmap: add eval gate type to config and runner | AP-089 | - | next-gen-harness-loop-roadmap |
 | P2 | AP-091 | Roadmap: add budget guardrails and journal output | AP-090 | - | next-gen-harness-loop-roadmap |
 | P2 | AP-092 | Roadmap: map TaskUnit evidence fixtures to Auto-Pilot | AP-091 | - | next-gen-harness-loop-roadmap |

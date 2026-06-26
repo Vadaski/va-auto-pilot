@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T14:16:05.059Z",
+  "updatedAt": "2026-06-26T14:22:39.013Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2695,16 +2695,16 @@
       "id": "AP-089",
       "title": "Roadmap: define file command network permission scope schema",
       "priority": "P1",
-      "state": "Backlog",
+      "state": "Done",
       "owner": "",
       "source": "next-gen-harness-loop-roadmap",
       "createdAt": "2026-06-26",
       "startedAt": "",
-      "completedAt": "",
+      "completedAt": "2026-06-26T14:22:39.013Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
+      "verification": "Permission scope contract landed: file/command/network JSON schema, runtime helper, worker prompt permission block, out-of-scope diff and destructive command classifiers, distribution allowlist update. typecheck PASS; check:all PASS.",
       "notes": "Roadmap order: permission scope follows governance checkpoints.",
       "review": {
         "implementer": "",

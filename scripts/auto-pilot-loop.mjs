@@ -46,6 +46,10 @@ import {
   collectConstraints as defaultCollectConstraints,
   formatConstraintsForPrompt as defaultFormatConstraintsForPrompt
 } from "./lib/constraint-bridge.mjs";
+import {
+  buildDefaultPermissionPolicy,
+  formatPermissionPolicyForPrompt,
+} from "./lib/permission-scope.mjs";
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./lib/pilot-state.mjs";
@@ -884,6 +888,8 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
   const formatTaskConstraints = constraintBridge.formatConstraintsForPrompt ?? defaultFormatConstraintsForPrompt;
   const constraintResult = await collectTaskConstraints(`${task.title}\n${task.notes ?? ""}`, { maxFactors: 5 });
   const constraintBlock = formatTaskConstraints(constraintResult);
+  const permissionPolicy = task.permissionPolicy ?? buildDefaultPermissionPolicy(task);
+  const permissionBlock = formatPermissionPolicyForPrompt(permissionPolicy);
 
   if (constraintBlock) {
     const pitfallBlock = pitfallContext
@@ -893,12 +899,14 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
         .trim()}`
       : "";
     const humanBoardSection = humanBoardBlock ? `## Human-board\n${humanBoardBlock}` : "";
-    notes = [task.notes, constraintBlock, pitfallBlock, humanBoardSection].filter(Boolean).join("\n\n");
+    notes = [task.notes, constraintBlock, permissionBlock, pitfallBlock, humanBoardSection].filter(Boolean).join("\n\n");
     title = task.title;
     log(
       opts,
       `  constraint injection: ${constraintResult.constraints.length} constraints + ${constraintResult.blindSpots.length} blind spots (${constraintResult.durationMs}ms)`
     );
+  } else {
+    notes = [defaultNotes, permissionBlock].filter(Boolean).join("\n\n");
   }
 
   const scope = await computeTaskScope(opts);
@@ -909,7 +917,7 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
     priority: task.priority,
     dependsOn: task.dependsOn,
     notes,
-    metadata: { scope },
+    metadata: { scope, permissionPolicy },
   };
 
   if (opts.dryRun) {

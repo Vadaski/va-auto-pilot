@@ -55,12 +55,24 @@ preview field alone.
 
 ## Validation
 
-The read-only resource layer is covered by unit tests in `scripts/test-units.mjs`.
+The read-only resource layer has a dedicated adapter-facing gate:
+
+```bash
+npm run check:mcp-resources
+```
+
+The gate validates the descriptor set, read-only metadata, fixture payloads,
+summary dispatch-authority fields, pitfall filtering, and fail-closed behavior
+for unknown resource URIs.
+
+The core resource helpers are also covered by unit tests in
+`scripts/test-units.mjs`.
 Run:
 
 ```bash
 npm run typecheck
+npm run check:mcp-resources
 npm run check:units
 ```
 
-`npm run check:all` includes the same unit coverage.
+`npm run check:all` includes both gates.

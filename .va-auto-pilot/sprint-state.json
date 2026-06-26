@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T15:17:39.477Z",
+  "updatedAt": "2026-06-26T15:37:02.492Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2845,6 +2845,35 @@
       "dependsOn": [
         "AP-092"
       ]
+    },
+    {
+      "id": "AP-094",
+      "title": "Project review: add MCP resource validation gate",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "project-review:harness-loop",
+      "createdAt": "2026-06-26",
+      "startedAt": "2026-06-26T15:33:46.480Z",
+      "completedAt": "2026-06-26T15:37:02.492Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "npm run typecheck; npm run check:mcp-resources; npm run validate:distribution; npm run check:all",
+      "notes": "Implementing standalone MCP read-only resource validation gate.; Added standalone adapter-facing validation for read-only MCP resource descriptors and payloads.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
     }
   ],
   "sprintStartCommit": "05306ecac0be8f24461b1832797612976ec70b86"

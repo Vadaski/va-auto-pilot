@@ -638,6 +638,21 @@ test("classifyFailure marks exit-0 stderr as transient lint noise", () => {
   );
 });
 
+test("classifyFailure detects provider auth, rate-limit, and availability failures", () => {
+  assert.deepEqual(
+    classifyFailure(1, "", "Failed to authenticate. API Error: 401 Invalid authentication credentials", "dispatch"),
+    { type: "auth", severity: "fixable", pattern: "api error: 401" }
+  );
+  assert.deepEqual(
+    classifyFailure(1, "429 rate limit exceeded; please retry later", "", "review"),
+    { type: "rate-limit", severity: "transient", pattern: "429" }
+  );
+  assert.deepEqual(
+    classifyFailure(1, "ECONNRESET from provider", "", "dispatch"),
+    { type: "provider", severity: "transient", pattern: "econnreset" }
+  );
+});
+
 test("getRecoveryStrategy selects retry, escalation, fix-task, and stop states", () => {
   assert.equal(
     getRecoveryStrategy({ type: "dispatch", severity: "transient", pattern: "timeout" }, 1).action,
@@ -657,6 +672,12 @@ test("getRecoveryStrategy selects retry, escalation, fix-task, and stop states",
     getRecoveryStrategy({ type: "unknown", severity: "critical", pattern: "oops" }, 3).action,
     "stop"
   );
+});
+
+test("getRecoveryStrategy gives auth failures a credential-focused fix path", () => {
+  const strategy = getRecoveryStrategy({ type: "auth", severity: "fixable", pattern: "api error: 401" }, 1);
+  assert.equal(strategy.action, "retry-with-fix");
+  assert.match(strategy.fixPrompt ?? "", /API key|token environment|account permissions/);
 });
 
 test("parseReviewFindings extracts severities, files, lines, and blocking summary", () => {

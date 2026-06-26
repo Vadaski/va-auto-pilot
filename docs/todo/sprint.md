@@ -108,6 +108,7 @@
 | AP-089 | Roadmap: define file command network permission scope schema | 2026-06-26 | Permission scope contract landed: file/command/network JSON schema, runtime helper, worker prompt permission block, out-of-scope diff and destructive command classifiers, distribution allowlist update. typecheck PASS; check:all PASS. |
 | AP-094 | Project review: add MCP resource validation gate | 2026-06-26 | npm run typecheck; npm run check:mcp-resources; npm run validate:distribution; npm run check:all |
 | AP-095 | Project review: add executable next commands to observe snapshots | 2026-06-26 | npm run typecheck; npm run check:units; npm run check:all |
+| AP-096 | Research follow-up: classify API auth rate-limit and model availability failures | 2026-06-26 | npm run typecheck; npm run check:units; npm run check:all |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
@@ -141,4 +142,5 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| - | - | - | - | - | - |
+| P2 | AP-097 | Research follow-up: add eval history persistence and comparison | - | - | kimi-research:harness-loop |
+| P2 | AP-098 | Research follow-up: fix gate name propagation in fix-and-retest paths | - | - | kimi-research:harness-loop |

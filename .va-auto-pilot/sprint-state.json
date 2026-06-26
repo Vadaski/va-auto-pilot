@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T15:42:25.102Z",
+  "updatedAt": "2026-06-26T15:46:54.491Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2890,6 +2890,93 @@
       "reason": "",
       "verification": "npm run typecheck; npm run check:units; npm run check:all",
       "notes": "Adding structured executable nextCommands to observe snapshot output.; observe snapshot now includes structured executable nextCommands alongside recommendedActions.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-096",
+      "title": "Research follow-up: classify API auth rate-limit and model availability failures",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "kimi-research:harness-loop",
+      "createdAt": "2026-06-26",
+      "startedAt": "2026-06-26T15:43:37.701Z",
+      "completedAt": "2026-06-26T15:46:54.491Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "npm run typecheck; npm run check:units; npm run check:all",
+      "notes": "Extending failure classifier for API auth/rate-limit/provider availability errors.; Classifies auth, rate-limit, and provider availability failures with targeted recovery prompts.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-097",
+      "title": "Research follow-up: add eval history persistence and comparison",
+      "priority": "P2",
+      "state": "Backlog",
+      "owner": "",
+      "source": "kimi-research:harness-loop",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-098",
+      "title": "Research follow-up: fix gate name propagation in fix-and-retest paths",
+      "priority": "P2",
+      "state": "Backlog",
+      "owner": "",
+      "source": "kimi-research:harness-loop",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
       "review": {
         "implementer": "",
         "security": "",

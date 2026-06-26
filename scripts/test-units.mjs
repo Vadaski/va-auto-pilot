@@ -4934,10 +4934,18 @@ test("orchestration-state: hasHaltDirective detects halt-run", () => {
 
 test("plan-review: parseReviewFindings extracts CRITICAL lines", async () => {
   const { parseReviewFindings, computeCandidatePlanHash, validatePlanReviewForApprove } = await import("./lib/plan-review.mjs");
-  const text = "1. **CRITICAL-1**：missing schema\n2. **WARNING-1**：journal fields\n";
+  const text = [
+    "1. **CRITICAL-1**：missing schema",
+    "2. **WARNING-1**：journal fields",
+    "SUGGESTION: add acceptance evidence",
+    "Review output: no CRITICAL findings were found",
+    "`approve-plan` requires no CRITICAL findings",
+  ].join("\n");
   const findings = parseReviewFindings(text);
   assert.equal(findings.critical.length, 1);
   assert.ok(findings.critical[0].includes("missing schema"));
+  assert.equal(findings.warning.length, 1);
+  assert.equal(findings.suggestion.length, 1);
   const plan = { primaryTaskId: "AP-001", parallelTracks: [] };
   const hash = computeCandidatePlanHash(plan);
   assert.equal(validatePlanReviewForApprove({ review: null, candidatePlan: plan }).ok, false);
@@ -4948,6 +4956,47 @@ test("plan-review: parseReviewFindings extracts CRITICAL lines", async () => {
     }).ok,
     true
   );
+});
+
+test("auto-pilot orchestrate: new plan clears stale plan-review", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-clear-review-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const reviewFile = path.join(tmpDir, ".va-auto-pilot", "orchestration", "plan-review.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(reviewFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    tasks: [{ id: "AP-001", title: "t", priority: "P1", state: "Backlog", dependsOn: [] }],
+  }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(reviewFile, JSON.stringify({
+    schemaVersion: 1,
+    planHash: "stale",
+    passed: false,
+    findings: { critical: ["old failure"], warning: [], suggestion: [] },
+  }), "utf8");
+
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  const init = spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(init.status, 0, init.stderr);
+  fs.writeFileSync(reviewFile, JSON.stringify({
+    schemaVersion: 1,
+    planHash: "stale-after-init",
+    passed: false,
+    findings: { critical: ["old failure"], warning: [], suggestion: [] },
+  }), "utf8");
+
+  const plan = spawnSync(process.execPath, [script, "orchestrate", "plan", "--json", "--state-file", stateFile], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.equal(fs.existsSync(reviewFile), false);
 });
 
 test("auto-pilot orchestrate: approve-plan requires plan-review", () => {

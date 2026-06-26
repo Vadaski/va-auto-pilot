@@ -40,6 +40,7 @@ import {
 } from "./auto-pilot-loop.mjs";
 import { refreshSnapshot } from "./auto-pilot-observe.mjs";
 import {
+  clearPlanReview,
   computeCandidatePlanHash,
   readPlanReview,
   runPlanReviewCommand,
@@ -145,6 +146,7 @@ async function initRun(opts) {
   await writeRun(opts.workDir, run);
   await writeTracks(opts.workDir, { runId, tracks: [] });
   clearCheckpoint(opts.workDir);
+  clearPlanReview(opts.workDir);
   return run;
 }
 
@@ -171,6 +173,7 @@ async function orchestratePlan(opts) {
   run.phase = "awaiting-plan-approval";
   run.updatedAt = new Date().toISOString();
   await writeRun(opts.workDir, run);
+  clearPlanReview(opts.workDir);
 
   const payload = { ok: true, phase: run.phase, runId: run.runId, candidatePlan: run.candidatePlan };
   await refreshSnapshot(opts);

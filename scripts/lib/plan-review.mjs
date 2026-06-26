@@ -33,6 +33,13 @@ export async function writePlanReview(workDir, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+export function clearPlanReview(workDir) {
+  const filePath = planReviewPath(workDir);
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+  }
+}
+
 /** Parse reviewer stdout into structured findings (line-based CRITICAL/WARNING/SUGGESTION). */
 export function parseReviewFindings(text) {
   const findings = { critical: [], warning: [], suggestion: [] };
@@ -42,16 +49,17 @@ export function parseReviewFindings(text) {
     if (!trimmed) {
       continue;
     }
-    const colon = trimmed.search(/[：:]/);
-    if (colon < 0) {
+    const match = trimmed.match(/^(?:[-*]\s*)?(?:\d+[.)]\s*)?(?:\*\*)?(CRITICAL|WARNING|SUGGESTION)(?:[-_\s]*\d+)?(?:\*\*)?\s*[：:]\s*(.+)$/i);
+    if (!match) {
       continue;
     }
-    const body = trimmed.slice(colon + 1).replace(/^\*+|\*+$/g, "").trim();
-    if (/CRITICAL/i.test(trimmed)) {
+    const severity = match[1].toUpperCase();
+    const body = match[2].replace(/^\*+|\*+$/g, "").trim();
+    if (severity === "CRITICAL") {
       findings.critical.push(body);
-    } else if (/WARNING/i.test(trimmed)) {
+    } else if (severity === "WARNING") {
       findings.warning.push(body);
-    } else if (/SUGGESTION/i.test(trimmed)) {
+    } else if (severity === "SUGGESTION") {
       findings.suggestion.push(body);
     }
   }

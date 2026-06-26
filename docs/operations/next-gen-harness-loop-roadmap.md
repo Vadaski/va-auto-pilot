@@ -240,7 +240,8 @@ immature behavior.
   approval invalidation. See `docs/operations/governance-checkpoints.md`.
 - `roadmap-permission-scope`: define file/command/network policy schema. See
   `docs/operations/permission-scope.md`.
-- `roadmap-eval-gates`: add eval gate type to config and runner
+- `roadmap-eval-gates`: add eval gate type to config and runner. See
+  `docs/operations/eval-gates.md`.
 - `roadmap-budget-guardrails`: add soft/hard budget policy and journal output
 - `roadmap-protocol-fixtures`: map TaskUnit/evidence fixtures to Auto-Pilot
 - `roadmap-mcp-adapter`: implement read-only MCP resources before write tools

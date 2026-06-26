@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T14:22:39.013Z",
+  "updatedAt": "2026-06-26T14:27:08.347Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2726,16 +2726,16 @@
       "id": "AP-090",
       "title": "Roadmap: add eval gate type to config and runner",
       "priority": "P2",
-      "state": "Backlog",
+      "state": "Done",
       "owner": "",
       "source": "next-gen-harness-loop-roadmap",
       "createdAt": "2026-06-26",
       "startedAt": "",
-      "completedAt": "",
+      "completedAt": "2026-06-26T14:27:08.347Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
+      "verification": "Eval gate type landed: evalCommand/evalGates runner support, parseEvalGateOutput pass/fail/ambiguous parser, ambiguous output blocks required evals, advisory evals continue, eval gate docs. typecheck PASS; check:all PASS.",
       "notes": "Roadmap order: eval gates follow permission scope.",
       "review": {
         "implementer": "",

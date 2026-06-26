@@ -128,6 +128,7 @@
 | AP-067 | orchestration: PLAN_EMPTY and soft errors must exit non-zero | 2026-05-19 | orchestration hardening: check:all + orchestrate-cli.yaml |
 | AP-072 | Sprint5 P2: orchestrate-cli review-plan + approve blocked flows | 2026-05-19 | Sprint5 plan-review gate landed; check:all PASS |
 | AP-083 | Reopen P2: create next-gen Harness and Loop roadmap for observability, cost guardrails, evals, permissions, governance, and MCP adapter | 2026-06-26 | npm run check:all PASS; roadmap link rg PASS; stale-expression rg PASS. |
+| AP-090 | Roadmap: add eval gate type to config and runner | 2026-06-26 | Eval gate type landed: evalCommand/evalGates runner support, parseEvalGateOutput pass/fail/ambiguous parser, ambiguous output blocks required evals, advisory evals continue, eval gate docs. typecheck PASS; check:all PASS. |
 | AP-007 | Correct 'human-out-of-the-loop' framing to 'human-on-the-loop' across docs and website | 2026-02-23 | docs/human-on-the-loop.md created with updated framing; old file removed; README.md and README.zh.md references updated; all gates pass |
 | AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | 2026-03-29 | - |
 | AP-068 | orchestration: observe suggests replenish when backlog empty | 2026-05-19 | orchestration hardening: check:all + orchestrate-cli.yaml |
@@ -135,7 +136,6 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| P2 | AP-090 | Roadmap: add eval gate type to config and runner | AP-089 | - | next-gen-harness-loop-roadmap |
 | P2 | AP-091 | Roadmap: add budget guardrails and journal output | AP-090 | - | next-gen-harness-loop-roadmap |
 | P2 | AP-092 | Roadmap: map TaskUnit evidence fixtures to Auto-Pilot | AP-091 | - | next-gen-harness-loop-roadmap |
 | P2 | AP-093 | Roadmap: implement read-only MCP resources before write tools | AP-092 | - | next-gen-harness-loop-roadmap |

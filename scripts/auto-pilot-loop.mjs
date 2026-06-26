@@ -519,7 +519,7 @@ function isRelevantPitfall(task, pitfall, taskTokens) {
 // ---------------------------------------------------------------------------
 
 /**
- * Run the quality gate sequence: build → review → acceptance.
+ * Run the quality gate sequence: build → review → acceptance → eval.
  * Runs sequentially; returns on first failure.
  * @param {object} gateConfig
  * @param {object} opts
@@ -530,6 +530,17 @@ async function runGateSequence(gateConfig, opts) {
     { name: "build", cmd: gateConfig.buildCommand },
     { name: "review", cmd: gateConfig.reviewCommand },
     { name: "acceptance", cmd: gateConfig.acceptanceTestCommand },
+    { name: "eval", cmd: gateConfig.evalCommand, type: "eval" },
+    ...Array.isArray(gateConfig.evalGates)
+      ? gateConfig.evalGates
+        .filter((gate) => gate && typeof gate === "object" && String(gate.command ?? "").trim())
+        .map((gate, index) => ({
+          name: String(gate.name ?? `eval-${index + 1}`),
+          cmd: String(gate.command),
+          type: "eval",
+          required: gate.required !== false
+        }))
+      : [],
     ...Array.isArray(gateConfig.adaptiveGates)
       ? gateConfig.adaptiveGates
         .filter((gate) => gate && typeof gate === "object" && String(gate.command ?? "").trim())
@@ -563,10 +574,31 @@ async function runGateSequence(gateConfig, opts) {
 
     log(opts, `  running gate "${gate.name}": ${gate.cmd}`);
     try {
-      await execFileAsync(
+      const result = await execFileAsync(
         "bash", ["-lc", gate.cmd],
         { encoding: "utf8", timeout: 300_000, cwd: opts.workDir ?? process.cwd() }
       );
+      if (gate.type === "eval") {
+        const stdout = String(result.stdout ?? "");
+        const stderr = String(result.stderr ?? "");
+        const parsed = parseEvalGateOutput(`${stdout}\n${stderr}`);
+        if (!parsed.passed) {
+          const output = [`eval gate ${parsed.state}: ${parsed.reason}`, stdout, stderr].filter(Boolean).join("\n");
+          if (gate.required === false) {
+            log(opts, `  gate "${gate.name}" ${parsed.state.toUpperCase()} (advisory, continuing)`);
+            continue;
+          }
+          log(opts, `  gate "${gate.name}" ${parsed.state.toUpperCase()}`);
+          return {
+            passed: false,
+            gate: gate.name,
+            output: output.slice(0, 2000),
+            exitCode: 1,
+            stdout,
+            stderr
+          };
+        }
+      }
       log(opts, `  gate "${gate.name}" PASSED`);
     } catch (err) {
       const stdout = String(err.stdout ?? "");
@@ -589,6 +621,43 @@ async function runGateSequence(gateConfig, opts) {
   }
 
   return { passed: true, gate: "", output: "", exitCode: 0, stdout: "", stderr: "" };
+}
+
+function parseEvalGateOutput(output) {
+  const text = String(output ?? "").trim();
+  if (!text) {
+    return { passed: false, state: "ambiguous", reason: "eval output was empty" };
+  }
+
+  try {
+    const parsed = JSON.parse(text);
+    const status = String(parsed.status ?? parsed.result ?? "").trim().toLowerCase();
+    if (parsed.passed === true || status === "pass" || status === "passed") {
+      return { passed: true, state: "pass", reason: parsed.reason ?? "eval passed" };
+    }
+    if (parsed.passed === false || status === "fail" || status === "failed") {
+      return { passed: false, state: "fail", reason: parsed.reason ?? "eval failed" };
+    }
+    if (status === "ambiguous" || status === "unknown") {
+      return { passed: false, state: "ambiguous", reason: parsed.reason ?? "eval output was ambiguous" };
+    }
+  } catch {
+    // Fall through to text parsing.
+  }
+
+  const statusMatch = text.match(/^\s*EVAL STATUS:\s*(PASS|FAIL|AMBIGUOUS|UNKNOWN)\b/im);
+  const status = statusMatch?.[1]?.toLowerCase();
+  if (status === "pass") {
+    return { passed: true, state: "pass", reason: "eval passed" };
+  }
+  if (status === "fail") {
+    return { passed: false, state: "fail", reason: "eval failed" };
+  }
+  if (status === "ambiguous" || status === "unknown") {
+    return { passed: false, state: "ambiguous", reason: "eval output was ambiguous" };
+  }
+
+  return { passed: false, state: "ambiguous", reason: "missing EVAL STATUS or JSON result" };
 }
 
 function isCodexReviewCommand(command) {
@@ -2523,7 +2592,17 @@ Options:
 `);
 }
 
-export { runLoop, runCycle, readHumanBoard, loadUnresolvedPitfalls, injectPitfallContext, runGateSequence, readSprintState, countPendingTasks };
+export {
+  runLoop,
+  runCycle,
+  readHumanBoard,
+  loadUnresolvedPitfalls,
+  injectPitfallContext,
+  runGateSequence,
+  parseEvalGateOutput,
+  readSprintState,
+  countPendingTasks,
+};
 export { extractHumanBoardAcknowledgments, appendHumanBoardAuditEntry };
 export {
   deriveCommitType,

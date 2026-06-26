@@ -47,7 +47,8 @@ import {
   injectPitfallContext,
   handleSprintCompletionReview,
   extractReviewerReport,
-  selectSprintReviewPerspective
+  selectSprintReviewPerspective,
+  parseEvalGateOutput
 } from "./auto-pilot-loop.mjs";
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
@@ -1551,6 +1552,62 @@ test("runGateSequence still fails when unstructured review output contains block
   assert.equal(gateResult.passed, false);
   assert.equal(gateResult.gate, "review");
   assert.match(gateResult.output, /\[P1\] Regression risk in retry handling/);
+});
+
+test("parseEvalGateOutput accepts JSON and text pass signals", () => {
+  assert.deepEqual(
+    parseEvalGateOutput(JSON.stringify({ passed: true, reason: "fixtures matched" })),
+    { passed: true, state: "pass", reason: "fixtures matched" }
+  );
+  assert.deepEqual(
+    parseEvalGateOutput("EVAL STATUS: PASS\nscore=0.94"),
+    { passed: true, state: "pass", reason: "eval passed" }
+  );
+});
+
+test("parseEvalGateOutput treats ambiguous eval output as non-passing", () => {
+  assert.equal(parseEvalGateOutput("").passed, false);
+  assert.equal(parseEvalGateOutput("score was probably fine").state, "ambiguous");
+  assert.deepEqual(
+    parseEvalGateOutput(JSON.stringify({ status: "ambiguous", reason: "judge timed out" })),
+    { passed: false, state: "ambiguous", reason: "judge timed out" }
+  );
+});
+
+test("runGateSequence blocks on failing evalCommand", async () => {
+  const gateResult = await runGateSequence(
+    { evalCommand: "printf 'EVAL STATUS: FAIL\\nregression found\\n'" },
+    { dryRun: false, json: false, workDir: process.cwd() }
+  );
+
+  assert.equal(gateResult.passed, false);
+  assert.equal(gateResult.gate, "eval");
+  assert.match(gateResult.output, /eval gate fail/);
+  assert.match(gateResult.output, /regression found/);
+});
+
+test("runGateSequence treats ambiguous evalCommand as non-passing", async () => {
+  const gateResult = await runGateSequence(
+    { evalCommand: "printf 'score=0.71\\n'" },
+    { dryRun: false, json: false, workDir: process.cwd() }
+  );
+
+  assert.equal(gateResult.passed, false);
+  assert.equal(gateResult.gate, "eval");
+  assert.match(gateResult.output, /ambiguous/);
+});
+
+test("runGateSequence allows advisory eval gates to fail without blocking", async () => {
+  const gateResult = await runGateSequence(
+    {
+      evalGates: [
+        { name: "fixture-eval", command: "printf 'EVAL STATUS: FAIL\\n'", required: false },
+      ],
+    },
+    { dryRun: false, json: false, workDir: process.cwd() }
+  );
+
+  assert.equal(gateResult.passed, true);
 });
 
 test("extractReviewerReport parses JSON reviewer output", () => {

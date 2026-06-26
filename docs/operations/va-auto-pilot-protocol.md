@@ -369,6 +369,10 @@ gates:
     command: "npm run validate:distribution"
     required: false
     description: "Distribution validation"
+  eval:
+    command: "node scripts/eval-fixtures.mjs"
+    required: false
+    description: "Fixture or rubric evaluation"
 ```
 
 #### Example: TypeScript Project (default)
@@ -386,7 +390,7 @@ gates:
     required: false
 ```
 
-See [quality-gate-examples.md](./quality-gate-examples.md) for stack-specific examples (Godot, Python, mixed stacks, validation scripts, and the Fate Weaver learning sequence).
+See [quality-gate-examples.md](./quality-gate-examples.md) for stack-specific examples (Godot, Python, mixed stacks, validation scripts, and the Fate Weaver learning sequence). See [eval-gates.md](./eval-gates.md) for eval output semantics.
 
 ### Gate Resolution
 

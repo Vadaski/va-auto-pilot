@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T14:27:08.347Z",
+  "updatedAt": "2026-06-26T14:50:24.817Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2757,16 +2757,16 @@
       "id": "AP-091",
       "title": "Roadmap: add budget guardrails and journal output",
       "priority": "P2",
-      "state": "Backlog",
+      "state": "Done",
       "owner": "",
       "source": "next-gen-harness-loop-roadmap",
       "createdAt": "2026-06-26",
       "startedAt": "",
-      "completedAt": "",
+      "completedAt": "2026-06-26T14:50:24.817Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
+      "verification": "Budget guardrails landed: run/task/token budget normalization, soft/hard evaluation, budget summaries in cycle journal, hard budget stop behavior. typecheck PASS; check:all PASS.",
       "notes": "Roadmap order: budget guardrails follow eval gate semantics.",
       "review": {
         "implementer": "",

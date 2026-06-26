@@ -40,6 +40,7 @@ import {
   autoCommitTask,
   dispatchTask,
   finalizeDoneTaskCommit,
+  runLoop,
   runCycle,
   runGateSequence,
   extractCreatedTaskId,
@@ -63,6 +64,11 @@ import {
   normalizePermissionPolicy,
   validatePermissionPolicy,
 } from "./lib/permission-scope.mjs";
+import {
+  evaluateBudget,
+  formatBudgetSummary,
+  normalizeBudgetConfig,
+} from "./lib/budget-guardrails.mjs";
 import { withPilotFileLock, writeTextFileAtomicSync } from "./lib/pilot-state.mjs";
 
 // ---------------------------------------------------------------------------
@@ -869,6 +875,72 @@ test("detectStopCondition ignores completed tasks even when failCount reached th
   assert.deepEqual(result, { stop: false, code: "", reason: "" });
 });
 
+test("budget-guardrails: normalizeBudgetConfig accepts flat and nested limits", () => {
+  const policy = normalizeBudgetConfig({
+    maxCyclesSoft: 2,
+    run: { maxCyclesHard: 3 },
+    task: { maxCommandsHard: 4 },
+    tokens: { provider: "example-provider", model: "example-model", softTokens: 1000 },
+  });
+  assert.equal(policy.run.maxCyclesSoft, 2);
+  assert.equal(policy.run.maxCyclesHard, 3);
+  assert.equal(policy.task.maxCommandsHard, 4);
+  assert.equal(policy.tokens.provider, "example-provider");
+  assert.equal(policy.tokens.softTokens, 1000);
+});
+
+test("budget-guardrails: evaluateBudget warns before hard stop", () => {
+  const warning = evaluateBudget({
+    policy: { run: { maxCyclesSoft: 2, maxCyclesHard: 3 } },
+    cycle: 2,
+    startedAtMs: 1000,
+    nowMs: 1500,
+  });
+  assert.equal(warning.status, "warn");
+  assert.equal(warning.stop, false);
+  assert.match(warning.reason, /soft cycle budget/);
+
+  const stopped = evaluateBudget({
+    policy: { run: { maxCyclesSoft: 2, maxCyclesHard: 3 } },
+    cycle: 3,
+    startedAtMs: 1000,
+    nowMs: 1500,
+  });
+  assert.equal(stopped.status, "stop");
+  assert.equal(stopped.stop, true);
+  assert.match(stopped.reason, /hard cycle budget/);
+});
+
+test("budget-guardrails: command and token budgets appear in summary", () => {
+  const result = evaluateBudget({
+    policy: {
+      task: { maxCommandsSoft: 2 },
+      tokens: { provider: "provider", model: "model", softTokens: 100 },
+    },
+    cycle: 1,
+    startedAtMs: 1000,
+    nowMs: 1250,
+    commandCount: 2,
+    tokenCount: 100,
+  });
+  assert.equal(result.status, "warn");
+  assert.match(result.summary, /commands=2/);
+  assert.match(result.summary, /tokens=100/);
+  assert.match(result.summary, /tokenMetadata=provider\/model/);
+});
+
+test("budget-guardrails: formatBudgetSummary includes stops for journal output", () => {
+  const summary = formatBudgetSummary({
+    status: "stop",
+    cycle: 4,
+    elapsedMs: 5000,
+    commandCount: 3,
+    stops: ["hard elapsed budget reached"],
+  });
+  assert.match(summary, /budget=stop/);
+  assert.match(summary, /stops=hard elapsed budget reached/);
+});
+
 test("finalizeDoneTaskCommit rolls a task back to Failed when git commit fails", async () => {
   const repoDir = createTempGitRepo({
     ".va-auto-pilot/sprint-state.json": JSON.stringify({
@@ -1019,6 +1091,72 @@ test("runCycle review failure creates fix tasks for blocking review findings", a
     assert.match(journal, /Failure classified: type=review/);
     assert.match(journal, /Review failed with 3 blocking findings\. Creating fix tasks\./);
     assert.match(journal, /Created review fix tasks: AP-031, AP-032, AP-033/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("runLoop stops on hard budget and journals the budget summary", async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-budget-loop-"));
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const boardFile = path.join(repoDir, "docs", "todo", "sprint.md");
+  const journalFile = path.join(repoDir, "docs", "todo", "run-journal.md");
+  const humanBoardFile = path.join(repoDir, "docs", "todo", "human-board.md");
+  const configFile = path.join(repoDir, ".va-auto-pilot", "config.yaml");
+
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(boardFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    updatedAt: "2026-03-29T00:00:00.000Z",
+    tasks: [
+      { id: "AP-041", title: "Budget guarded task", priority: "P1", state: "Backlog", failCount: 0, dependsOn: [] }
+    ]
+  }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(boardFile, "# Sprint Board\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n## Entries\n", "utf8");
+  fs.writeFileSync(humanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(configFile, "qualityGate:\n  budget:\n    run:\n      maxCyclesHard: 1\n", "utf8");
+
+  const previousCwd = process.cwd();
+  process.chdir(repoDir);
+  try {
+    const result = await runLoop({
+      maxCycles: 5,
+      maxParallel: 1,
+      parallel: false,
+      agentTemplate: "echo {taskId}",
+      dryRun: false,
+      singleCycle: false,
+      noCommit: true,
+      noColony: true,
+      trackTimeout: 1000,
+      json: true,
+      strict: false,
+      skipSprintReview: true,
+      stateFile,
+      boardFile,
+      journalFile,
+      pitfallsFile: path.join(repoDir, ".va-auto-pilot", "pitfalls.json"),
+      workDir: repoDir,
+      taskBaselines: new Map(),
+      sprintBoardLock: Promise.resolve(),
+      stateMutationLock: Promise.resolve(),
+      dispatch: async (_track, _template, logFile) => {
+        fs.mkdirSync(path.dirname(logFile), { recursive: true });
+        fs.writeFileSync(logFile, "budget loop dispatch failed\n", "utf8");
+        return { success: false, exitCode: 1, durationMs: 1, logFile };
+      }
+    });
+
+    assert.equal(result.cycles, 1);
+    assert.equal(result.results[0].action, "budget-stop");
+    assert.match(result.results[0].details, /hard cycle budget reached/);
+    assert.equal(result.results[0].budget.status, "stop");
+
+    const journal = fs.readFileSync(journalFile, "utf8");
+    assert.match(journal, /budget=stop/);
+    assert.match(journal, /stops=hard cycle budget reached/);
   } finally {
     process.chdir(previousCwd);
   }

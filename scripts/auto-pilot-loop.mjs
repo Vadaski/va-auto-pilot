@@ -50,6 +50,10 @@ import {
   buildDefaultPermissionPolicy,
   formatPermissionPolicyForPrompt,
 } from "./lib/permission-scope.mjs";
+import {
+  evaluateBudget,
+  normalizeBudgetConfig,
+} from "./lib/budget-guardrails.mjs";
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./lib/pilot-state.mjs";
@@ -2121,6 +2125,9 @@ async function appendCycleBoundaryEntry(cycle, result, pendingTasks, stopConditi
   if (result.commitHash) {
     parts.push(`commit=${result.commitHash}`);
   }
+  if (result.budget?.summary) {
+    parts.push(result.budget.summary);
+  }
 
   await journalEntry(
     result.task ?? { id: `cycle-${cycle}` },
@@ -2327,6 +2334,8 @@ function log(opts, message) {
 
 async function runLoop(opts) {
   const gateConfig = readQualityGateConfig();
+  const budgetPolicy = normalizeBudgetConfig(gateConfig.budget ?? gateConfig.runBudget ?? {});
+  const budgetStartedAtMs = Date.now();
 
   // 2. Init Colony bridge
   const bridge = new ColonyBridge({
@@ -2482,11 +2491,21 @@ async function runLoop(opts) {
         commitFiles: trackResults.flatMap((track) => track.commitFiles ?? []),
         steps: trackResults.flatMap((track) => track.steps ?? [])
       };
+      cycleResult.budget = evaluateBudget({
+        policy: budgetPolicy,
+        cycle,
+        startedAtMs: budgetStartedAtMs,
+        commandCount: cycleResult.steps.length,
+      });
 
       if (stopCondition.stop) {
         cycleResult.done = true;
         cycleResult.action = "stop-condition";
         cycleResult.details = stopCondition.reason;
+      } else if (cycleResult.budget.stop) {
+        cycleResult.done = true;
+        cycleResult.action = "budget-stop";
+        cycleResult.details = `Budget stop: ${cycleResult.budget.reason}`;
       } else if (pendingTasks <= 0) {
         const review = await handleSprintCompletionReview(opts);
         cycleResult.done = review.cleared;
@@ -2499,6 +2518,16 @@ async function runLoop(opts) {
       results.push(cycleResult);
 
       const last = results[results.length - 1];
+
+      if (last.stopCondition?.stop) {
+        log(opts, `\nLoop finished: ${last.stopCondition.reason}`);
+        break;
+      }
+
+      if (last.budget?.stop) {
+        log(opts, `\nLoop finished: ${last.details}`);
+        break;
+      }
 
       if (last.done) {
         break;
@@ -2516,11 +2545,6 @@ async function runLoop(opts) {
 
       if (last.pendingTasks <= 0) {
         log(opts, "\nLoop finished: No pending tasks remain.");
-        break;
-      }
-
-      if (last.stopCondition?.stop) {
-        log(opts, `\nLoop finished: ${last.stopCondition.reason}`);
         break;
       }
 

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T15:11:50.364Z",
+  "updatedAt": "2026-06-26T15:17:39.477Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2819,16 +2819,16 @@
       "id": "AP-093",
       "title": "Roadmap: implement read-only MCP resources before write tools",
       "priority": "P2",
-      "state": "Backlog",
+      "state": "Done",
       "owner": "",
       "source": "next-gen-harness-loop-roadmap",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T15:12:37.199Z",
+      "completedAt": "2026-06-26T15:17:39.477Z",
       "lastFailedAt": "",
       "failCount": 0,
-      "reason": "",
-      "verification": "",
+      "reason": "Starting read-only MCP resource adapter.",
+      "verification": "Read-only MCP resource layer landed: list/read APIs for sprint-state, sprint-summary, run-journal, pitfall-guide, and human-board; adapter contract docs added; unit coverage added. typecheck PASS; check:units PASS; check:all PASS.",
       "notes": "Roadmap order: MCP adapter follows stable CLI and protocol semantics.",
       "review": {
         "implementer": "",

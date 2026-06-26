@@ -131,6 +131,7 @@
 | AP-090 | Roadmap: add eval gate type to config and runner | 2026-06-26 | Eval gate type landed: evalCommand/evalGates runner support, parseEvalGateOutput pass/fail/ambiguous parser, ambiguous output blocks required evals, advisory evals continue, eval gate docs. typecheck PASS; check:all PASS. |
 | AP-091 | Roadmap: add budget guardrails and journal output | 2026-06-26 | Budget guardrails landed: run/task/token budget normalization, soft/hard evaluation, budget summaries in cycle journal, hard budget stop behavior. typecheck PASS; check:all PASS. |
 | AP-092 | Roadmap: map TaskUnit evidence fixtures to Auto-Pilot | 2026-06-26 | Protocol fixture mapping landed: TaskUnit-to-track fixture schema, completed/failed protocol fixtures, protocol fixture validator wired into check:all, and mapping docs. typecheck PASS; check:protocol-fixtures PASS; check:all PASS. |
+| AP-093 | Roadmap: implement read-only MCP resources before write tools | 2026-06-26 | Read-only MCP resource layer landed: list/read APIs for sprint-state, sprint-summary, run-journal, pitfall-guide, and human-board; adapter contract docs added; unit coverage added. typecheck PASS; check:units PASS; check:all PASS. |
 | AP-007 | Correct 'human-out-of-the-loop' framing to 'human-on-the-loop' across docs and website | 2026-02-23 | docs/human-on-the-loop.md created with updated framing; old file removed; README.md and README.zh.md references updated; all gates pass |
 | AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | 2026-03-29 | - |
 | AP-068 | orchestration: observe suggests replenish when backlog empty | 2026-05-19 | orchestration hardening: check:all + orchestrate-cli.yaml |
@@ -138,4 +139,4 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| P2 | AP-093 | Roadmap: implement read-only MCP resources before write tools | AP-092 | - | next-gen-harness-loop-roadmap |
+| - | - | - | - | - | - |

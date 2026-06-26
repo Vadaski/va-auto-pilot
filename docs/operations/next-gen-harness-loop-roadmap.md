@@ -246,7 +246,8 @@ immature behavior.
   See `docs/operations/budget-guardrails.md`.
 - `roadmap-protocol-fixtures`: map TaskUnit/evidence fixtures to Auto-Pilot.
   See `docs/operations/protocol-fixtures.md`.
-- `roadmap-mcp-adapter`: implement read-only MCP resources before write tools
+- `roadmap-mcp-adapter`: implement read-only MCP resources before write tools.
+  See `docs/operations/mcp-readonly-resources.md`.
 
 ## Definition Of Stronger
 

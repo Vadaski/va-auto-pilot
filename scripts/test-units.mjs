@@ -69,6 +69,11 @@ import {
   formatBudgetSummary,
   normalizeBudgetConfig,
 } from "./lib/budget-guardrails.mjs";
+import {
+  listReadOnlyMcpResources,
+  readAllReadOnlyMcpResources,
+  readReadOnlyMcpResource,
+} from "./lib/mcp-readonly-resources.mjs";
 import { withPilotFileLock, writeTextFileAtomicSync } from "./lib/pilot-state.mjs";
 
 // ---------------------------------------------------------------------------
@@ -939,6 +944,78 @@ test("budget-guardrails: formatBudgetSummary includes stops for journal output",
   });
   assert.match(summary, /budget=stop/);
   assert.match(summary, /stops=hard elapsed budget reached/);
+});
+
+test("mcp-readonly-resources: lists read-only resource descriptors", () => {
+  const resources = listReadOnlyMcpResources();
+  assert.ok(resources.some((resource) => resource.uri === "va-auto-pilot://sprint-state"));
+  assert.ok(resources.some((resource) => resource.uri === "va-auto-pilot://run-journal"));
+  assert.ok(resources.every((resource) => resource.metadata.access === "read-only"));
+});
+
+test("mcp-readonly-resources: reads computed sprint summary", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-mcp-summary-"));
+  fs.mkdirSync(path.join(repoDir, ".va-auto-pilot"), { recursive: true });
+  fs.writeFileSync(path.join(repoDir, ".va-auto-pilot", "sprint-state.json"), JSON.stringify({
+    version: 1,
+    projectPrefix: "AP",
+    updatedAt: "2026-06-26T00:00:00.000Z",
+    tasks: [
+      { id: "AP-001", title: "Done", priority: "P0", state: "Done", dependsOn: [] },
+      { id: "AP-002", title: "Next", priority: "P1", state: "Backlog", source: "roadmap", dependsOn: ["AP-001"] },
+      { id: "AP-003", title: "Blocked", priority: "P0", state: "Backlog", dependsOn: ["AP-999"] },
+    ],
+  }, null, 2) + "\n", "utf8");
+
+  const resource = readReadOnlyMcpResource("va-auto-pilot://sprint-summary", { workDir: repoDir });
+  const summary = JSON.parse(resource.text);
+  assert.equal(resource.mimeType, "application/json");
+  assert.equal(summary.counts.Done, 1);
+  assert.equal(summary.counts.Backlog, 2);
+  assert.equal(summary.nextTask.id, "AP-002");
+});
+
+test("mcp-readonly-resources: renders unresolved pitfall guide", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-mcp-pitfalls-"));
+  fs.mkdirSync(path.join(repoDir, ".va-auto-pilot"), { recursive: true });
+  fs.writeFileSync(path.join(repoDir, ".va-auto-pilot", "pitfalls.json"), JSON.stringify({
+    version: 1,
+    entries: [
+      {
+        id: "PF-001",
+        taskId: "AP-002",
+        failureType: "gate",
+        attempted: "npm test",
+        hypothesis: "missing fixture",
+        missingContext: "fixture docs",
+        resolvedAt: null,
+      },
+      {
+        id: "PF-002",
+        taskId: "AP-003",
+        failureType: "review",
+        attempted: "review",
+        hypothesis: "stale",
+        resolvedAt: "2026-06-26T00:00:00.000Z",
+      },
+    ],
+  }, null, 2) + "\n", "utf8");
+
+  const guide = readReadOnlyMcpResource("va-auto-pilot://pitfall-guide", { workDir: repoDir });
+  assert.equal(guide.mimeType, "text/markdown");
+  assert.match(guide.text, /Unresolved pitfalls: 1/);
+  assert.match(guide.text, /PF-001/);
+  assert.doesNotMatch(guide.text, /PF-002/);
+});
+
+test("mcp-readonly-resources: rejects unknown resources and can read all known resources", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-mcp-all-"));
+  assert.throws(
+    () => readReadOnlyMcpResource("va-auto-pilot://write-tool", { workDir: repoDir }),
+    /Unknown read-only MCP resource/
+  );
+  const resources = readAllReadOnlyMcpResources({ workDir: repoDir });
+  assert.equal(resources.length, listReadOnlyMcpResources().length);
 });
 
 test("finalizeDoneTaskCommit rolls a task back to Failed when git commit fails", async () => {

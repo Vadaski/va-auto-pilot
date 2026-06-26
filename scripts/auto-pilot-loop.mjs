@@ -539,7 +539,13 @@ function isRelevantPitfall(task, pitfall, taskTokens) {
 async function runGateSequence(gateConfig, opts) {
   const gates = [
     { name: "build", cmd: gateConfig.buildCommand },
-    { name: "review", cmd: gateConfig.reviewCommand },
+    {
+      name: "review",
+      cmd: gateConfig.reviewCommand,
+      required: gateConfig.reviewRequired !== false
+        && gateConfig.allowAdvisoryReview !== true
+        && gateConfig.review?.required !== false
+    },
     { name: "acceptance", cmd: gateConfig.acceptanceTestCommand },
     { name: "eval", cmd: gateConfig.evalCommand, type: "eval" },
     ...Array.isArray(gateConfig.evalGates)
@@ -898,6 +904,21 @@ async function runPitfallAwareReviewGate(gate, opts) {
     reviewRun = await executeReviewAttempt(prompts[attempt]);
     if (reviewRun.hardFailure) {
       const output = `review gate failed: ${reviewRun.failureReason}`;
+      if (gate.required === false) {
+        const advisoryOutput = [
+          "REVIEW STATUS: PASS",
+          `[WARNING] Review gate runner failed (${reviewRun.failureReason}); configured advisory review allowed this cycle.`
+        ].join("\n");
+        return {
+          passed: true,
+          gate: gate.name,
+          output: advisoryOutput,
+          exitCode: 0,
+          stdout: "",
+          stderr: ""
+        };
+      }
+
       return {
         passed: false,
         gate: gate.name,
@@ -941,22 +962,42 @@ async function runPitfallAwareReviewGate(gate, opts) {
     }
   }
 
-  log(opts, "  review gate output remained unstructured after retry; build passed, treating review as advisory");
-  const advisoryOutput = [
-    "REVIEW STATUS: PASS",
-    "[WARNING] Review gate output remained unstructured after retry; build passed, treating review as advisory this cycle.",
+  const output = [
+    "review gate failed: output remained unstructured after retry.",
     "",
     "Original review output:",
     reviewRun.output.trim() || "(empty output)"
   ].join("\n");
 
+  if (gate.required === false) {
+    log(opts, "  review gate output remained unstructured after retry; configured advisory, continuing");
+    const advisoryOutput = [
+      "REVIEW STATUS: PASS",
+      "[WARNING] Review gate output remained unstructured after retry; configured advisory review allowed this cycle.",
+      "",
+      "Original review output:",
+      reviewRun.output.trim() || "(empty output)"
+    ].join("\n");
+
+    return {
+      passed: true,
+      gate: gate.name,
+      output: advisoryOutput,
+      exitCode: 0,
+      stdout: reviewRun.output,
+      stderr: ""
+    };
+  }
+
+  log(opts, "  review gate output remained unstructured after retry; failing closed");
+
   return {
-    passed: true,
+    passed: false,
     gate: gate.name,
-    output: advisoryOutput,
-    exitCode: 0,
+    output,
+    exitCode: 1,
     stdout: reviewRun.output,
-    stderr: ""
+    stderr: output
   };
 }
 

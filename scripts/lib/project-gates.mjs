@@ -57,6 +57,17 @@ const NODE_SCRIPT_COMMAND_PATTERNS = {
   ]
 };
 
+const UNKNOWN_STACK_GATE_MESSAGE = [
+  "VA Auto-Pilot blocked: unknown project stack.",
+  "Configure .va-auto-pilot/config.yaml qualityGate commands before delegating work.",
+  "Use --allow-placeholder-gates only for scaffold experiments."
+].join(" ");
+
+function nodeMessageCommand(message, { exitCode = 0, stream = "stdout" } = {}) {
+  const target = stream === "stderr" ? "process.stderr" : "process.stdout";
+  return `node -e '${target}.write(\`${message}\\n\`);process.exit(${exitCode})'`;
+}
+
 function fileExists(rootDir, relativePath) {
   return fs.existsSync(path.join(rootDir, relativePath));
 }
@@ -278,9 +289,22 @@ export function inferProjectGateCommands(projectDir = process.cwd()) {
   return {
     stack: "unknown",
     packageManager: null,
-    buildCommand: "echo \"TODO: configure buildCommand in .va-auto-pilot/config.yaml\"",
-    testCommand: "echo \"TODO: configure acceptanceTestCommand in .va-auto-pilot/config.yaml\"",
-    acceptanceCommand: "echo \"TODO: configure acceptanceTestCommand in .va-auto-pilot/config.yaml\"",
+    buildCommand: nodeMessageCommand(UNKNOWN_STACK_GATE_MESSAGE, { exitCode: 1, stream: "stderr" }),
+    testCommand: nodeMessageCommand(UNKNOWN_STACK_GATE_MESSAGE, { exitCode: 1, stream: "stderr" }),
+    acceptanceCommand: nodeMessageCommand(UNKNOWN_STACK_GATE_MESSAGE, { exitCode: 1, stream: "stderr" }),
+    lintCommand: null,
+    typecheckCommand: null
+  };
+}
+
+export function placeholderProjectGateCommands() {
+  const message = "TODO: configure qualityGate commands in .va-auto-pilot/config.yaml";
+  return {
+    stack: "unknown",
+    packageManager: null,
+    buildCommand: nodeMessageCommand(message),
+    testCommand: nodeMessageCommand(message),
+    acceptanceCommand: nodeMessageCommand(message),
     lintCommand: null,
     typecheckCommand: null
   };

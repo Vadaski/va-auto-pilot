@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   inferProjectGateCommands,
+  placeholderProjectGateCommands,
   selectAcceptanceGateCommand,
   selectProjectTestCommand
 } from "../scripts/lib/project-gates.mjs";
@@ -102,6 +103,7 @@ Options (init):
   --build-cmd <command>         Build/quality gate command
   --review-cmd <command>        Code review command
   --test-cmd <command>          Acceptance test command
+  --allow-placeholder-gates     For unknown stacks, scaffold non-blocking TODO gates
   --domain-role <name>          3rd review role name
   --domain-prompt <prompt>      3rd review role prompt
   --debug-setup-endpoint <url>  Setup endpoint for test runner
@@ -149,7 +151,7 @@ function parseArgv(argv) {
       continue;
     }
 
-    if (token === "--force" || token === "--dry-run" || token === "--single-cycle" || token === "--no-commit" || token === "--no-colony" || token === "--json" || token === "--strict") {
+    if (token === "--force" || token === "--dry-run" || token === "--single-cycle" || token === "--no-commit" || token === "--no-colony" || token === "--json" || token === "--strict" || token === "--allow-placeholder-gates") {
       result.flags.add(token.slice(2));
       i += 1;
       continue;
@@ -275,8 +277,11 @@ function ensureRuntimeDependencies(targetDir, { dryRun }) {
   return { destination: packageJsonPath, dryRun: false };
 }
 
-function resolveContext(opts, targetDir) {
-  const inferredCommands = inferProjectGateCommands(targetDir);
+function resolveContext(opts, targetDir, flags = new Set()) {
+  const detectedCommands = inferProjectGateCommands(targetDir);
+  const inferredCommands = flags.has("allow-placeholder-gates") && detectedCommands.stack === "unknown"
+    ? placeholderProjectGateCommands()
+    : detectedCommands;
   const projectTestCommand = selectProjectTestCommand(inferredCommands);
   const acceptanceCommand = selectAcceptanceGateCommand(inferredCommands);
   const context = {
@@ -401,7 +406,7 @@ function runInit(parsed) {
   const force = parsed.flags.has("force");
   const dryRun = parsed.flags.has("dry-run");
   const targetDir = path.resolve(process.cwd(), parsed.targetDir);
-  const context = resolveContext(parsed.options, targetDir);
+  const context = resolveContext(parsed.options, targetDir, parsed.flags);
 
   if (!dryRun) {
     fs.mkdirSync(targetDir, { recursive: true });

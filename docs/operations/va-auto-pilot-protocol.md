@@ -321,7 +321,8 @@ node scripts/sprint-board.mjs pitfall --list --unresolved
 # delegate to sub-agent (see Delegation Prompt below)
 # Run project-specific quality gates (see Quality Gates section)
 # If .va-auto-pilot/config.yaml has a qualityGate section, run gates from there
-# Otherwise fall back to defaults based on project type detection
+# Otherwise fall back to defaults based on project type detection.
+# Unknown stacks fail closed until qualityGate commands are configured.
 # Example (TypeScript): npm run check:all && node scripts/sprint-board.mjs review
 # Example (Godot): godot --headless --script tests/validate_all_scripts.gd && node scripts/sprint-board.mjs review
 node scripts/sprint-board.mjs update --id AP-XXX --state "Done"
@@ -352,7 +353,7 @@ Quality gates are **pluggable** — each project defines its own gate commands. 
 
 ### Gate Configuration
 
-Projects declare their gates in `.va-auto-pilot/config.yaml` under `qualityGate` (or fall back to defaults):
+Projects declare their gates in `.va-auto-pilot/config.yaml` under `qualityGate` (or fall back to recognized stack defaults):
 
 ```yaml
 # .va-auto-pilot/config.yaml
@@ -374,6 +375,8 @@ gates:
     required: false
     description: "Fixture or rubric evaluation"
 ```
+
+Unknown stacks are fail-closed. The scaffolded commands must exit non-zero until the manager investigates the project and writes real `qualityGate` commands. `va-auto-pilot init --allow-placeholder-gates` exists only for scaffold experiments where non-blocking TODO gates are intentional.
 
 #### Example: TypeScript Project (default)
 
@@ -397,7 +400,8 @@ See [quality-gate-examples.md](./quality-gate-examples.md) for stack-specific ex
 1. If `.va-auto-pilot/config.yaml` has `qualityGate` → use it
 2. If `package.json` exists with `check:all` script → use TypeScript defaults
 3. If `project.godot` exists → use Godot defaults
-4. Otherwise → only `node scripts/sprint-board.mjs review`
+4. If another recognized stack exists (`Cargo.toml`, `go.mod`, `pyproject.toml`, etc.) → use that stack's defaults
+5. Otherwise → fail closed with a message requiring explicit `qualityGate` configuration before delegation
 
 ### Gate Semantics
 
@@ -424,6 +428,7 @@ Review findings policy:
 - style-only nits: optional, non-blocking
 
 This gate is **technology-agnostic** — codex can review any language.
+If the configured review runner times out, crashes, returns no output, or remains unstructured after retry, the review gate fails by default. Advisory review is opt-in only (`qualityGate.allowAdvisoryReview: true`, `qualityGate.reviewRequired: false`, or `qualityGate.review.required: false`) and must be treated as a conscious governance downgrade.
 
 #### Gate: Acceptance (optional)
 

@@ -312,6 +312,8 @@ Every implementation delegation must include:
 
 ## Quality Gates
 
+Quality gates are fail-closed. Recognized project stacks may use inferred defaults, but unknown stacks must configure real `.va-auto-pilot/config.yaml` `qualityGate` commands before delegation. `va-auto-pilot init --allow-placeholder-gates` is only for scaffold experiments where non-blocking TODO gates are intentional.
+
 ### Gate 1: Build and Static Quality
 
 ```bash
@@ -328,6 +330,8 @@ Review findings policy:
 
 - `CRITICAL` / `BUG` / `VIOLATION`: must fix and re-review
 - style-only nits: optional, non-blocking
+
+If the configured review runner times out, crashes, returns no output, or remains unstructured after retry, the review gate fails by default. Advisory review is opt-in only (`qualityGate.allowAdvisoryReview: true`, `qualityGate.reviewRequired: false`, or `qualityGate.review.required: false`) and must be treated as a conscious governance downgrade.
 
 ### Gate 3: Acceptance
 

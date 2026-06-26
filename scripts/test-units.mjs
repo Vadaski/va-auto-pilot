@@ -1358,6 +1358,16 @@ test("inferProjectGateCommands prefers behavioral e2e over distribution validati
   assert.equal(commands.releaseCommand, "npm run validate:distribution");
 });
 
+test("inferProjectGateCommands fails closed for unknown stacks", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-gates-unknown-"));
+
+  const commands = inferProjectGateCommands(repoDir);
+  assert.equal(commands.stack, "unknown");
+  assert.match(commands.buildCommand, /VA Auto-Pilot blocked: unknown project stack/);
+  assert.match(commands.buildCommand, /process\.exit\(1\)/);
+  assert.match(commands.acceptanceCommand, /process\.exit\(1\)/);
+});
+
 test("permission-scope: default policy uses task source as file boundary", () => {
   const policy = buildDefaultPermissionPolicy({
     source: "scripts/lib/permission-scope.mjs",
@@ -1631,6 +1641,7 @@ test("va-auto-pilot init creates a minimal package.json with runtime dependencie
   });
 
   const packageJson = JSON.parse(fs.readFileSync(path.join(repoDir, "package.json"), "utf8"));
+  const config = fs.readFileSync(path.join(repoDir, ".va-auto-pilot", "config.yaml"), "utf8");
   assert.equal(packageJson.private, true);
   assert.equal(packageJson.type, "module");
   assert.equal(packageJson.scripts["check:sprint"], "node ./scripts/sprint-board.mjs summary");
@@ -1638,6 +1649,28 @@ test("va-auto-pilot init creates a minimal package.json with runtime dependencie
   assert.equal(packageJson.scripts["check:all"], "npm run check:sprint && npm run validate:distribution");
   assert.match(packageJson.dependencies.tsx, /^\^?4\./);
   assert.match(packageJson.dependencies.yaml, /^\^?2\./);
+  assert.match(config, /VA Auto-Pilot blocked: unknown project stack/);
+  assert.match(config, /process\.exit\(1\)/);
+});
+
+test("va-auto-pilot init can explicitly scaffold placeholder gates for unknown stacks", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-init-placeholder-gates-"));
+
+  execFileSync(process.execPath, [
+    path.resolve("bin/va-auto-pilot.mjs"),
+    "init",
+    repoDir,
+    "--project-prefix",
+    "NOPKG",
+    "--allow-placeholder-gates"
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8"
+  });
+
+  const config = fs.readFileSync(path.join(repoDir, ".va-auto-pilot", "config.yaml"), "utf8");
+  assert.match(config, /TODO: configure qualityGate commands/);
+  assert.doesNotMatch(config, /process\.exit\(1\)/);
 });
 
 test("va-auto-pilot init renders prompt gates for non-node stacks", () => {
@@ -1779,7 +1812,35 @@ test("runGateSequence fails closed when codex-backed review gate times out witho
   assert.match(gateResult.output, /review gate failed: timeout/i);
 });
 
-test("runGateSequence retries once and advisory-passes on repeated unstructured codex review output", async () => {
+test("runGateSequence allows explicitly advisory review gate to pass runner hard failures", async () => {
+  const repoDir = createTempGitRepo({ "scripts/auto-pilot-loop.mjs": "before\n" });
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+  const workFile = path.join(repoDir, "scripts", "auto-pilot-loop.mjs");
+
+  fs.mkdirSync(path.dirname(pitfallsFile), { recursive: true });
+  fs.writeFileSync(pitfallsFile, JSON.stringify({ version: 1, entries: [] }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(workFile, "after\n", "utf8");
+
+  const gateResult = await runGateSequence(
+    { reviewCommand: "codex review --uncommitted", reviewRequired: false },
+    {
+      dryRun: false,
+      json: false,
+      workDir: repoDir,
+      pitfallsFile,
+      reviewGateRunner: async () => {
+        const error = new Error("Command timed out after 120000ms");
+        error.killed = true;
+        throw error;
+      }
+    }
+  );
+
+  assert.equal(gateResult.passed, true);
+  assert.equal(gateResult.gate, "");
+});
+
+test("runGateSequence retries once and fails closed on repeated unstructured codex review output", async () => {
   const repoDir = createTempGitRepo({ "scripts/auto-pilot-loop.mjs": "before\n" });
   const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
   const workFile = path.join(repoDir, "scripts", "auto-pilot-loop.mjs");
@@ -1791,6 +1852,38 @@ test("runGateSequence retries once and advisory-passes on repeated unstructured 
 
   const gateResult = await runGateSequence(
     { reviewCommand: "codex review --uncommitted" },
+    {
+      dryRun: false,
+      json: false,
+      workDir: repoDir,
+      pitfallsFile,
+      reviewGateRunner: async () => {
+        attempts += 1;
+        const error = new Error("rate limit");
+        error.stdout = "429 rate limit exceeded\nplease retry later\n";
+        throw error;
+      }
+    }
+  );
+
+  assert.equal(gateResult.passed, false);
+  assert.equal(gateResult.gate, "review");
+  assert.equal(attempts, 2);
+  assert.match(gateResult.output, /output remained unstructured after retry/i);
+});
+
+test("runGateSequence allows explicitly advisory review gate to pass repeated unstructured output", async () => {
+  const repoDir = createTempGitRepo({ "scripts/auto-pilot-loop.mjs": "before\n" });
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+  const workFile = path.join(repoDir, "scripts", "auto-pilot-loop.mjs");
+
+  fs.mkdirSync(path.dirname(pitfallsFile), { recursive: true });
+  fs.writeFileSync(pitfallsFile, JSON.stringify({ version: 1, entries: [] }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(workFile, "after\n", "utf8");
+  let attempts = 0;
+
+  const gateResult = await runGateSequence(
+    { reviewCommand: "codex review --uncommitted", allowAdvisoryReview: true },
     {
       dryRun: false,
       json: false,

@@ -2571,3 +2571,11 @@
 ## 2026-06-26T12:19:54.345Z - AP-087
 - Summary: Dispatch failed: exitCode=1
 ---
+
+## 2026-06-26T16:04:37.192Z - AP-087
+- Summary: Resolved pitfall PF-044. Suggested gate appended: claude-exec -> npm run typecheck
+- Signals:
+  - pitfall-resolved:PF-044
+  - adaptive-gate:claude-exec
+  - adaptive-gate-trigger:PF-044
+---

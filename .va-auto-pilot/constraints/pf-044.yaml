@@ -1,0 +1,33 @@
+id: ap-087-pf-044-dispatch
+type: auto-pilot-constraint-set
+payload:
+  domain: dispatch
+  tags:
+    - ap-087
+    - pf-044
+    - dispatch
+    - roadmap
+    - design
+    - observability
+    - event
+    - schema
+    - evidence
+  synthesis: 'Derived from AP-087 (Roadmap: design observability event schema and
+    evidence bundle): Dispatch failed: exitCode=1 | claude exec |
+    {"type":"result","subtype":"success","is_error":true,"api_error_status":401,"duration_ms":15605,"duration_api_ms":0,"num_turns":1,"result":"Failed
+    to authenticate. API Error: 401 Invalid authentication
+    credentials","stop_reason":"stop_sequence","session_id":"e3457d26-f2c7-4061-ad65-0924865959a0","total_cost_usd":0,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0,"server_tool_use":{"web_search_reque
+    Resolved via: Resolved by AP-096: provider auth, rate-limit, and
+    availability failures are classified explicitly; auth failures now get
+    credential-focused recovery guidance and unit coverage.'
+  constraints:
+    - type: prerequisite
+      statement: "Require resolved by AP-096: provider auth, rate-limit, and
+        availability failures are classified explicitly; auth failures now get
+        credential-focused recovery guidance and unit coverage before
+        proceeding"
+      confidence: 0.72
+      sourceFactorIds:
+        - PF-044
+  blindSpots:
+    - auto-generated-from-pitfall

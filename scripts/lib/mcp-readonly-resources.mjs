@@ -43,6 +43,14 @@ const RESOURCE_DEFINITIONS = [
     kind: "file",
     relativePath: "docs/todo/human-board.md",
   },
+  {
+    uri: "va-auto-pilot://orchestration-snapshot",
+    name: "Orchestration Snapshot",
+    description: "Latest observe snapshot with run phase, recommended actions, and executable next command previews.",
+    mimeType: "application/json",
+    kind: "file",
+    relativePath: ".va-auto-pilot/orchestration/snapshot.json",
+  },
 ];
 
 function resolveWorkDir(workDir = process.cwd()) {

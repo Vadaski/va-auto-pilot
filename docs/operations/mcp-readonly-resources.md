@@ -27,6 +27,7 @@ The module exports:
 | `va-auto-pilot://run-journal` | `text/markdown` | `docs/todo/run-journal.md` |
 | `va-auto-pilot://pitfall-guide` | `text/markdown` | Computed from unresolved `.va-auto-pilot/pitfalls.json` entries |
 | `va-auto-pilot://human-board` | `text/markdown` | `docs/todo/human-board.md` |
+| `va-auto-pilot://orchestration-snapshot` | `application/json` | `.va-auto-pilot/orchestration/snapshot.json` from `observe --json` |
 
 All descriptors carry `metadata.access = "read-only"`.
 
@@ -53,6 +54,11 @@ as the CLI. In particular:
 MCP clients that intend to dispatch must use the CLI authority path, not the
 preview field alone.
 
+`va-auto-pilot://orchestration-snapshot` exposes the latest observed run phase,
+recommended actions, and `nextCommands[]` previews. It is still a read-only
+projection: clients should refresh it through `node scripts/auto-pilot.mjs
+observe --json`, then execute authoritative CLI commands explicitly.
+
 ## Validation
 
 The read-only resource layer has a dedicated adapter-facing gate:
@@ -62,8 +68,8 @@ npm run check:mcp-resources
 ```
 
 The gate validates the descriptor set, read-only metadata, fixture payloads,
-summary dispatch-authority fields, pitfall filtering, and fail-closed behavior
-for unknown resource URIs.
+summary dispatch-authority fields, pitfall filtering, orchestration snapshot
+payload shape, and fail-closed behavior for unknown resource URIs.
 
 The core resource helpers are also covered by unit tests in
 `scripts/test-units.mjs`.

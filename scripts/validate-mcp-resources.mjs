@@ -22,6 +22,7 @@ const EXPECTED_URIS = [
   "va-auto-pilot://run-journal",
   "va-auto-pilot://pitfall-guide",
   "va-auto-pilot://human-board",
+  "va-auto-pilot://orchestration-snapshot",
 ];
 
 function writeFile(root, relativePath, text) {
@@ -71,6 +72,21 @@ function createProjectFixture() {
   }, null, 2) + "\n");
   writeFile(root, "docs/todo/run-journal.md", "# Run Journal\n\n- Fixture entry\n");
   writeFile(root, "docs/todo/human-board.md", "# Human Board\n\nNo active instructions.\n");
+  writeFile(root, ".va-auto-pilot/orchestration/snapshot.json", JSON.stringify({
+    schemaVersion: 1,
+    run: {
+      runId: "fixture-run",
+      phase: "awaiting-plan",
+    },
+    recommendedActions: ["Review the current plan."],
+    nextCommands: [
+      {
+        label: "Observe",
+        argv: ["observe", "--json"],
+        reason: "Refresh the read-only snapshot.",
+      },
+    ],
+  }, null, 2) + "\n");
   return root;
 }
 
@@ -110,6 +126,10 @@ function validateResourcePayloads(workDir) {
   assert.match(pitfallGuide, /Unresolved pitfalls: 1/);
   assert.match(pitfallGuide, /PF-001/);
   assert.doesNotMatch(pitfallGuide, /PF-002/);
+
+  const snapshot = JSON.parse(readReadOnlyMcpResource("va-auto-pilot://orchestration-snapshot", { workDir }).text);
+  assert.equal(snapshot.run?.runId, "fixture-run");
+  assert.equal(snapshot.nextCommands?.[0]?.argv?.[0], "observe");
 
   assert.throws(
     () => readReadOnlyMcpResource("va-auto-pilot://write-tool", { workDir }),

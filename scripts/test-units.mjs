@@ -975,6 +975,7 @@ test("mcp-readonly-resources: lists read-only resource descriptors", () => {
   const resources = listReadOnlyMcpResources();
   assert.ok(resources.some((resource) => resource.uri === "va-auto-pilot://sprint-state"));
   assert.ok(resources.some((resource) => resource.uri === "va-auto-pilot://run-journal"));
+  assert.ok(resources.some((resource) => resource.uri === "va-auto-pilot://orchestration-snapshot"));
   assert.ok(resources.every((resource) => resource.metadata.access === "read-only"));
 });
 
@@ -1033,6 +1034,40 @@ test("mcp-readonly-resources: renders unresolved pitfall guide", () => {
   assert.match(guide.text, /Unresolved pitfalls: 1/);
   assert.match(guide.text, /PF-001/);
   assert.doesNotMatch(guide.text, /PF-002/);
+});
+
+test("mcp-readonly-resources: reads orchestration snapshot resource", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-mcp-snapshot-"));
+  const snapshotDir = path.join(repoDir, ".va-auto-pilot", "orchestration");
+  fs.mkdirSync(snapshotDir, { recursive: true });
+  fs.writeFileSync(path.join(snapshotDir, "snapshot.json"), JSON.stringify({
+    schemaVersion: 1,
+    run: {
+      runId: "unit-run",
+      phase: "awaiting-commit-approval",
+    },
+    recommendedActions: ["Approve commit when evidence is sufficient."],
+    nextCommands: [
+      {
+        label: "Approve commit",
+        argv: ["orchestrate", "approve-commit", "--tasks", "AP-001"],
+        reason: "Commit approval is pending.",
+      },
+    ],
+  }, null, 2) + "\n", "utf8");
+
+  const snapshot = readReadOnlyMcpResource("va-auto-pilot://orchestration-snapshot", { workDir: repoDir });
+  assert.equal(snapshot.mimeType, "application/json");
+  const payload = JSON.parse(snapshot.text);
+  assert.equal(payload.run.runId, "unit-run");
+  assert.deepEqual(payload.nextCommands[0].argv, ["orchestrate", "approve-commit", "--tasks", "AP-001"]);
+});
+
+test("mcp-readonly-resources: missing orchestration snapshot returns empty JSON object", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-mcp-snapshot-missing-"));
+  const snapshot = readReadOnlyMcpResource("va-auto-pilot://orchestration-snapshot", { workDir: repoDir });
+  assert.equal(snapshot.mimeType, "application/json");
+  assert.deepEqual(JSON.parse(snapshot.text), {});
 });
 
 test("mcp-readonly-resources: rejects unknown resources and can read all known resources", () => {

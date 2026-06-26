@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T11:46:59.996Z",
+  "updatedAt": "2026-06-26T11:55:33.930Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2414,17 +2414,17 @@
       "id": "AP-080",
       "title": "Reopen P0: run cross-surface Harness + Loop positioning consistency synthesis after public cleanup",
       "priority": "P0",
-      "state": "Backlog",
-      "owner": "",
+      "state": "Done",
+      "owner": "codex",
       "source": "human-board: reopen harness loop sprint",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T11:51:42.856Z",
+      "completedAt": "2026-06-26T11:55:33.930Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
-      "notes": "Plan review adjustment: positioning rewrite should consume the narrative cleanup result to avoid conflicting README/website/protocol edits.; Updated after split: positioning synthesis depends on all public cleanup tasks.; Plan review adjustment: AP-080 is a consistency synthesis/check after public surfaces are cleaned, not a competing rewrite.",
+      "verification": "npm run check:all PASS; stale-expression rg PASS; remaining Codex/Claude mentions manually inspected as allowed examples/references.",
+      "notes": "Plan review adjustment: positioning rewrite should consume the narrative cleanup result to avoid conflicting README/website/protocol edits.; Updated after split: positioning synthesis depends on all public cleanup tasks.; Plan review adjustment: AP-080 is a consistency synthesis/check after public surfaces are cleaned, not a competing rewrite.; Started cross-surface positioning consistency synthesis after public cleanup.; Cross-surface positioning audit completed; README reviewer placeholder corrected.",
       "review": {
         "implementer": "",
         "security": "",
@@ -2433,9 +2433,9 @@
         "architect": ""
       },
       "testing": {
-        "flow": "",
-        "mustPassRate": "",
-        "shouldPassRate": ""
+        "flow": "public-positioning-consistency",
+        "mustPassRate": "100%",
+        "shouldPassRate": "100%"
       },
       "dependsOn": [
         "AP-084",

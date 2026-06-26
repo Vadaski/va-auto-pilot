@@ -2497,3 +2497,13 @@
   - stale-expression-clean
   - check-all-pass
 ---
+
+## 2026-06-26T11:55:34.022Z - AP-080
+- Summary: Added public positioning audit for reopen readiness, fixed shell-unsafe reviewer placeholder in README/README.zh, and extended narrative guardrails to prevent future <review-agent> drift.
+- Files: `docs/operations/public-positioning-audit.md`, `docs/operations/public-narrative-spec.md`, `README.md`, `README.zh.md`, `docs/todo/sprint.md`, `docs/todo/run-journal.md`, `.va-auto-pilot/sprint-state.json`
+- Signals:
+  - public-positioning-audit
+  - stale-expression-clean
+  - vendor-mentions-reviewed
+  - check-all-pass
+---

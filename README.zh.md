@@ -253,10 +253,11 @@ $va-auto-pilot
 - 强制门禁是并发轨道的同步屏障
 - 未通过门禁不得推进状态
 - 默认路径是模型原生并发工具调用
+- 将 `review-agent` 替换为你环境中配置的 reviewer 命令或包装器
 
 ```bash
 node scripts/sprint-board.mjs plan --json --max-parallel 3 > .va-auto-pilot/parallel-plan.json
-npm run check:all && <review-agent> review --uncommitted && npm run validate:distribution
+npm run check:all && review-agent review --uncommitted && npm run validate:distribution
 ```
 
 ---

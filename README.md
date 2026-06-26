@@ -241,10 +241,11 @@ No list of files. No sequence of steps. No prescribed approach. You define the d
 - Synchronization at mandatory quality gates
 - State promotion blocked until required gates pass
 - Default path is model-native parallel tool orchestration
+- Replace `review-agent` with your configured reviewer command or wrapper
 
 ```bash
 node scripts/sprint-board.mjs plan --json --max-parallel 3 > .va-auto-pilot/parallel-plan.json
-npm run check:all && <review-agent> review --uncommitted && npm run validate:distribution
+npm run check:all && review-agent review --uncommitted && npm run validate:distribution
 ```
 
 ---

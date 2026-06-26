@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T12:09:36.719Z",
+  "updatedAt": "2026-06-26T14:08:15.598Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2635,16 +2635,16 @@
       "id": "AP-087",
       "title": "Roadmap: design observability event schema and evidence bundle",
       "priority": "P1",
-      "state": "Backlog",
+      "state": "Done",
       "owner": "",
       "source": "next-gen-harness-loop-roadmap",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T12:19:22.155Z",
+      "completedAt": "2026-06-26T14:08:15.598Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
+      "verification": "Observability contract landed: event schema + evidence bundle spec, JSON schemas, validator, deterministic completed/failed examples, checkpoint observability pointer. check:observability PASS; observability unit tests PASS.",
       "notes": "",
       "review": {
         "implementer": "",

@@ -54,7 +54,7 @@ import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-pa
 import { suggestGateFromPitfall, suggestGatesFromPitfalls } from "./lib/adaptive-gates.mjs";
 import { collectConstraints, formatConstraintsForPrompt } from "./lib/constraint-bridge.mjs";
 import { inferProjectGateCommands, selectProjectTestCommand } from "./lib/project-gates.mjs";
-import { withPilotFileLock } from "./lib/pilot-state.mjs";
+import { withPilotFileLock, writeTextFileAtomicSync } from "./lib/pilot-state.mjs";
 
 // ---------------------------------------------------------------------------
 // Import pure functions from sprint-board via a thin re-export shim.
@@ -5129,6 +5129,156 @@ test("auto-pilot observe: writes snapshot.json", () => {
   const snapshot = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
   assert.ok(snapshot.run?.runId);
   assert.ok(Array.isArray(snapshot.recommendedActions));
+});
+
+// ---------------------------------------------------------------------------
+// Observability contract
+// ---------------------------------------------------------------------------
+import {
+  appendEventLog,
+  buildBundleManifest,
+  buildEvent,
+  hashText,
+  readEventLog,
+  redactBundle,
+  redactText,
+  validateBundleManifest,
+  validateEvent,
+} from "./lib/observability.mjs";
+
+test("observability: buildEvent produces a valid event", () => {
+  const event = buildEvent({
+    eventType: "task.gate",
+    runId: "run-1",
+    taskId: "AP-001",
+    phase: "running",
+    payload: { gateName: "build", passed: true },
+    provenance: { source: "auto-pilot-loop" },
+  });
+  const validation = validateEvent(event);
+  assert.equal(validation.ok, true, validation.errors.join("; "));
+  assert.equal(event.schemaVersion, 1);
+  assert.ok(event.eventId.startsWith("evt-"));
+  assert.ok(!Number.isNaN(Date.parse(event.timestamp)));
+});
+
+test("observability: validateEvent rejects unknown eventType", () => {
+  const event = buildEvent({
+    eventType: "task.unknown",
+    runId: "run-1",
+    payload: {},
+    provenance: { source: "auto-pilot-loop" },
+  });
+  event.eventType = "task.unknown";
+  const validation = validateEvent(event);
+  assert.equal(validation.ok, false);
+  assert.ok(validation.errors.some((e) => e.includes("eventType")));
+});
+
+test("observability: appendEventLog persists events across reads", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-obs-log-"));
+  const logFile = path.join(tmpDir, "events.jsonl");
+  const eventA = buildEvent({ eventType: "task.started", runId: "run-1", taskId: "AP-001", payload: {}, provenance: { source: "auto-pilot-loop" } });
+  const eventB = buildEvent({ eventType: "task.gate", runId: "run-1", taskId: "AP-001", payload: { gateName: "build", passed: true }, provenance: { source: "auto-pilot-loop" } });
+  await appendEventLog(logFile, eventA);
+  await appendEventLog(logFile, eventB);
+  const events = readEventLog(logFile);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].eventId, eventA.eventId);
+  assert.equal(events[1].eventId, eventB.eventId);
+});
+
+test("observability: redactText masks auth header", () => {
+  const result = redactText("Authorization: Bearer sk-secret-token");
+  assert.equal(result.applied, true);
+  assert.ok(!result.text.includes("sk-secret-token"));
+  assert.ok(result.text.includes("[REDACTED:auth-headers]"));
+});
+
+test("observability: redactBundle produces shareable copy", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-obs-redact-"));
+  const bundleDir = path.join(tmpDir, "bundle");
+  fs.mkdirSync(path.join(bundleDir, "artifacts"), { recursive: true });
+
+  const logContent = "Authorization: Bearer secret123\nPASS\n";
+  writeTextFileAtomicSync(path.join(bundleDir, "artifacts", "build-gate.log"), logContent);
+
+  const manifest = buildBundleManifest({
+    bundleType: "task",
+    runId: "run-1",
+    taskId: "AP-001",
+    state: "completed",
+    outcome: { state: "completed" },
+    artifacts: [
+      {
+        name: "build-gate.log",
+        path: "artifacts/build-gate.log",
+        kind: "log",
+        sizeBytes: Buffer.byteLength(logContent, "utf8"),
+        sha256: hashText(logContent),
+        redacted: false,
+      },
+    ],
+    gates: [{ name: "build", required: true, passed: true, exitCode: 0, durationMs: 1000, artifact: "artifacts/build-gate.log" }],
+  });
+  writeTextFileAtomicSync(path.join(bundleDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const { redactedDir, updatedManifest } = redactBundle(bundleDir);
+  assert.ok(fs.existsSync(path.join(redactedDir, "manifest.json")));
+  assert.equal(updatedManifest.redactedShareable, "redacted/manifest.json");
+
+  const redactedLog = fs.readFileSync(path.join(redactedDir, "artifacts", "build-gate.log"), "utf8");
+  assert.ok(!redactedLog.includes("secret123"));
+});
+
+test("observability: validateBundleManifest accepts valid manifest", () => {
+  const manifest = buildBundleManifest({
+    bundleType: "task",
+    runId: "run-1",
+    taskId: "AP-001",
+    state: "completed",
+    outcome: { state: "completed" },
+    gates: [{ name: "build", required: true, passed: true, exitCode: 0, durationMs: 1000 }],
+  });
+  const validation = validateBundleManifest(manifest);
+  assert.equal(validation.ok, true, validation.errors.join("; "));
+});
+
+test("observability: example bundles are valid", () => {
+  const examplesDir = path.join(process.cwd(), "docs", "operations", "observability-examples");
+  for (const name of ["completed-task", "failed-task"]) {
+    const manifest = JSON.parse(fs.readFileSync(path.join(examplesDir, name, "manifest.json"), "utf8"));
+    const validation = validateBundleManifest(manifest);
+    assert.equal(validation.ok, true, `${name}: ${validation.errors.join("; ")}`);
+    const events = readEventLog(path.join(examplesDir, name, manifest.eventsLog));
+    assert.ok(events.length > 0, `${name} should have events`);
+    for (const event of events) {
+      const eventValidation = validateEvent(event);
+      assert.equal(eventValidation.ok, true, `${name}: ${eventValidation.errors.join("; ")}`);
+    }
+  }
+});
+
+test("orchestration-state: buildCheckpoint carries observability contract", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-obs-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ tasks: [{ id: "AP-001", state: "Backlog" }] }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  const checkpoint = buildCheckpoint({
+    stateFile,
+    workDir: tmpDir,
+    approvedPlanId: "plan-1",
+    candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
+  });
+
+  assert.ok(checkpoint.observability, "checkpoint must include observability block");
+  assert.equal(checkpoint.observability.schemaVersion, 1);
+  assert.ok(checkpoint.observability.eventLogPath.includes("evidence/events.jsonl"));
+  assert.ok(checkpoint.observability.evidenceBundleDir.includes("evidence"));
 });
 
 // ---------------------------------------------------------------------------

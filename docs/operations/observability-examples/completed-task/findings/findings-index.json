@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "source": "task-review",
+  "artifact": "artifacts/review-report.json",
+  "generatedAt": "2026-06-26T05:32:00.000Z",
+  "summary": {
+    "critical": 0,
+    "warning": 1,
+    "suggestion": 1
+  },
+  "findings": [
+    {
+      "id": "F-087-1",
+      "severity": "warning",
+      "message": "Consider adding a JSON Schema test runner.",
+      "location": "scripts/lib/observability.mjs",
+      "disposition": "accepted",
+      "evidence": "review-report.json"
+    }
+  ]
+}

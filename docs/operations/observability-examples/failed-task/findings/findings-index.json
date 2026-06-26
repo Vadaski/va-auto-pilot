@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "source": "task-review",
+  "artifact": "artifacts/review-report.json",
+  "generatedAt": "2026-06-26T05:30:45.000Z",
+  "summary": {
+    "critical": 1,
+    "warning": 0,
+    "suggestion": 1
+  },
+  "findings": [
+    {
+      "id": "F-088-1",
+      "severity": "critical",
+      "message": "Checkpoint does not reference observability event log",
+      "location": "scripts/lib/orchestration-state.mjs",
+      "disposition": "open",
+      "evidence": "build-gate.log"
+    },
+    {
+      "id": "F-088-2",
+      "severity": "suggestion",
+      "message": "Add a dedicated redaction rule for fake tokens in examples",
+      "location": "scripts/generate-observability-examples.mjs",
+      "disposition": "accepted",
+      "evidence": "redacted manifest"
+    }
+  ]
+}

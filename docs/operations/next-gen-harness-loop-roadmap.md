@@ -20,6 +20,10 @@ loop.
 
 Goal: make each agent run inspectable after the fact.
 
+Contract: see [`observability-spec.md`](./observability-spec.md) for the AP-087
+event schema, evidence bundle layout, redaction rules, restart-survival
+semantics, failed-gate timeline, and review finding index.
+
 Why this is Harness:
 
 The harness defines what evidence is collected around execution. Observability

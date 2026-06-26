@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vadaski.github.io/va-auto-pilot/schemas/evidence-bundle.schema.json",
+  "title": "VA Auto-Pilot Evidence Bundle Manifest",
+  "description": "Manifest describing an evidence bundle for a run or task.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "bundleId",
+    "bundleType",
+    "runId",
+    "state",
+    "outcome",
+    "createdAt",
+    "updatedAt",
+    "timeline",
+    "artifacts",
+    "gates",
+    "eventsLog",
+    "redactedShareable"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Bundle manifest schema version."
+    },
+    "bundleId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique bundle identifier."
+    },
+    "bundleType": {
+      "type": "string",
+      "enum": ["task", "run"],
+      "description": "Bundle scope."
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "taskId": {
+      "type": "string",
+      "description": "Required for task bundles."
+    },
+    "state": {
+      "type": "string",
+      "enum": ["open", "completed", "failed", "abandoned"]
+    },
+    "outcome": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["completed", "failed", "abandoned"]
+        },
+        "commitHash": { "type": "string" },
+        "firstFailingGate": { "type": "string" },
+        "failureType": { "type": "string" },
+        "recoveryDecision": { "type": "string" }
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["at", "phase", "eventId", "note"],
+        "properties": {
+          "at": { "type": "string", "format": "date-time" },
+          "phase": { "type": "string" },
+          "eventId": { "type": "string" },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "path", "kind", "sizeBytes", "sha256", "redacted"],
+        "properties": {
+          "name": { "type": "string" },
+          "path": { "type": "string" },
+          "kind": { "type": "string" },
+          "sizeBytes": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string" },
+          "redacted": { "type": "boolean" }
+        }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "required", "passed", "exitCode", "durationMs"],
+        "properties": {
+          "name": { "type": "string" },
+          "required": { "type": "boolean" },
+          "passed": { "type": "boolean" },
+          "exitCode": { "type": "integer" },
+          "durationMs": { "type": "integer", "minimum": 0 },
+          "artifact": { "type": "string" }
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "required": ["findingsIndexArtifact", "criticalCount", "warningCount"],
+      "properties": {
+        "findingsIndexArtifact": { "type": "string" },
+        "criticalCount": { "type": "integer", "minimum": 0 },
+        "warningCount": { "type": "integer", "minimum": 0 },
+        "disposition": { "type": "string" }
+      }
+    },
+    "eventsLog": { "type": "string" },
+    "redactedShareable": { "type": "string" }
+  },
+  "additionalProperties": false
+}

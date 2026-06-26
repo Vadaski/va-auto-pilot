@@ -1,0 +1,12 @@
+{
+  "perspective": "protocol adopter",
+  "summary": "no CRITICAL findings",
+  "critical": [],
+  "warning": [
+    "Consider adding a JSON Schema test runner."
+  ],
+  "pass": [
+    "Event envelope is stable",
+    "Bundle layout is deterministic"
+  ]
+}

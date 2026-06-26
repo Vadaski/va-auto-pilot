@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 
 import { readHumanBoardInstructions, resolveHumanBoardPath } from "./human-board.mjs";
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./pilot-state.mjs";
+import { observabilityPaths, OBSERVABILITY_SCHEMA_VERSION } from "./observability.mjs";
 
 export const ORCHESTRATION_SCHEMA_VERSION = 1;
 
@@ -149,6 +150,7 @@ export function computeGitHead(workDir) {
 }
 
 export function buildCheckpoint({ stateFile, workDir, approvedPlanId, candidatePlan }) {
+  const obsPaths = observabilityPaths(workDir);
   return {
     schemaVersion: ORCHESTRATION_SCHEMA_VERSION,
     approvedPlanId,
@@ -157,6 +159,12 @@ export function buildCheckpoint({ stateFile, workDir, approvedPlanId, candidateP
     humanBoardHash: computeHumanBoardHash(stateFile),
     gitHead: computeGitHead(workDir),
     createdAt: new Date().toISOString(),
+    observability: {
+      schemaVersion: OBSERVABILITY_SCHEMA_VERSION,
+      eventLogPath: obsPaths.eventsLog,
+      evidenceBundleDir: obsPaths.bundlesDir,
+      redactedShareableDir: obsPaths.redactedShareableDir,
+    },
   };
 }
 

@@ -2548,3 +2548,26 @@
   - roadmap-backlog-seeded
   - next-task-ap-087
 ---
+
+## 2026-06-26T12:19:08.280Z - plan-review
+- Summary: plan-review passed planHash=408cd03b13a8cc5f8da96252bb1ae8b96ee648cff9bf206946450d36bb54051d critical=0 warning=6
+- Signals:
+  - plan-review:408cd03b13a8cc5f8da96252bb1ae8b96ee648cff9bf206946450d36bb54051d
+---
+
+## 2026-06-26T12:19:54.181Z - AP-087
+- Summary: Pitfall PF-044 recorded. Suggested new gate: claude-exec -> npm run typecheck
+- Signals:
+  - pitfall:PF-044
+---
+
+## 2026-06-26T12:19:54.262Z - AP-087
+- Summary: Failure classified: type=dispatch | severity=transient | pattern=timeout | failCount=1 | strategy=retry-immediately | reason=Failure looks transient and remains under the retry threshold.
+- Signals:
+  - failure:dispatch
+  - strategy:retry-immediately
+---
+
+## 2026-06-26T12:19:54.345Z - AP-087
+- Summary: Dispatch failed: exitCode=1
+---

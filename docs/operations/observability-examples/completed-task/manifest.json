@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "bundleId": "bnd-example-completed-task",
+  "bundleType": "task",
+  "runId": "run-2026-06-26T05-30-00-000Z-abc12345",
+  "taskId": "AP-087",
+  "state": "completed",
+  "outcome": {
+    "state": "completed",
+    "commitHash": "a1b2c3d4"
+  },
+  "createdAt": "2026-06-26T05:30:00.000Z",
+  "updatedAt": "2026-06-26T05:32:15.000Z",
+  "timeline": [
+    {
+      "at": "2026-06-26T05:30:00.000Z",
+      "phase": "running",
+      "eventId": "evt-example-ap-087-000-task-started",
+      "note": "task started"
+    },
+    {
+      "at": "2026-06-26T05:30:05.000Z",
+      "phase": "running",
+      "eventId": "evt-example-ap-087-005-task-command",
+      "note": "ran build command"
+    },
+    {
+      "at": "2026-06-26T05:30:10.000Z",
+      "phase": "running",
+      "eventId": "evt-example-ap-087-010-task-gate",
+      "note": "build gate passed"
+    },
+    {
+      "at": "2026-06-26T05:32:00.000Z",
+      "phase": "running",
+      "eventId": "evt-example-ap-087-120-task-review",
+      "note": "review completed"
+    },
+    {
+      "at": "2026-06-26T05:32:05.000Z",
+      "phase": "running",
+      "eventId": "evt-example-ap-087-125-task-gate",
+      "note": "review gate passed"
+    },
+    {
+      "at": "2026-06-26T05:32:10.000Z",
+      "phase": "awaiting-commit-approval",
+      "eventId": "evt-example-ap-087-130-task-completed",
+      "note": "task completed"
+    },
+    {
+      "at": "2026-06-26T05:32:15.000Z",
+      "phase": "committed",
+      "eventId": "evt-example-ap-087-135-commit",
+      "note": "commit made"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "build-gate.log",
+      "path": "artifacts/build-gate.log",
+      "kind": "log",
+      "sizeBytes": 151,
+      "sha256": "a6b70342f0afa2f7de360cc01b57cc9291ef6f10f560fb647d9ec37c267d27ac",
+      "redacted": false
+    },
+    {
+      "name": "review-report.json",
+      "path": "artifacts/review-report.json",
+      "kind": "json",
+      "sizeBytes": 250,
+      "sha256": "2f27b4f911f10125edcaa2c36b3b9d7b83533ed33f97a0befb15b7ce9a33c66f",
+      "redacted": false
+    },
+    {
+      "name": "diff.patch",
+      "path": "artifacts/diff.patch",
+      "kind": "patch",
+      "sizeBytes": 130,
+      "sha256": "763e2e333e774417813fc07f9425e8d90d1d260ef75f3ee2c9d3520a356d3e87",
+      "redacted": false
+    }
+  ],
+  "gates": [
+    {
+      "name": "build",
+      "required": true,
+      "passed": true,
+      "exitCode": 0,
+      "durationMs": 4200,
+      "artifact": "artifacts/build-gate.log"
+    },
+    {
+      "name": "review",
+      "required": true,
+      "passed": true,
+      "exitCode": 0,
+      "durationMs": 1200,
+      "artifact": "artifacts/review-report.json"
+    }
+  ],
+  "review": {
+    "findingsIndexArtifact": "findings/findings-index.json",
+    "criticalCount": 0,
+    "warningCount": 1,
+    "disposition": "accepted"
+  },
+  "eventsLog": "events.jsonl",
+  "redactedShareable": "redacted/manifest.json"
+}

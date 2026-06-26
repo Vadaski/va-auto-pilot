@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vadaski.github.io/va-auto-pilot/schemas/observability-event.schema.json",
+  "title": "VA Auto-Pilot Observability Event",
+  "description": "Envelope for a single event in the observability event log.",
+  "type": "object",
+  "required": ["schemaVersion", "eventType", "eventId", "runId", "timestamp", "payload", "provenance", "redaction"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Event envelope schema version."
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "run.lifecycle",
+        "plan.reviewed",
+        "plan.approved",
+        "checkpoint.stale",
+        "dispatch.queued",
+        "task.started",
+        "task.command",
+        "task.gate",
+        "task.review",
+        "task.completed",
+        "task.failed",
+        "intervention",
+        "commit",
+        "journal",
+        "run.closed"
+      ],
+      "description": "Registered event type."
+    },
+    "eventId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique event identifier."
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Parent orchestration run id."
+    },
+    "taskId": {
+      "type": "string",
+      "description": "Task identifier for task-scoped events."
+    },
+    "phase": {
+      "type": "string",
+      "description": "Run phase at event emission time."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC event timestamp."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Type-specific payload."
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["auto-pilot-orchestrate", "auto-pilot-loop", "worker", "manual"]
+        },
+        "host": { "type": "string" },
+        "pid": { "type": "integer" }
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "required": ["applied"],
+      "properties": {
+        "applied": { "type": "boolean" },
+        "rules": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "fieldsRemoved": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

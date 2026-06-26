@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "bundleId": "bnd-example-failed-task-redacted",
+  "bundleType": "task",
+  "runId": "run-2026-06-26T05-30-00-000Z-abc12345",
+  "taskId": "AP-088",
+  "state": "failed",
+  "outcome": {
+    "state": "failed",
+    "firstFailingGate": "build",
+    "failureType": "gate",
+    "recoveryDecision": "escalate"
+  },
+  "createdAt": "2026-06-26T05:30:00.000Z",
+  "updatedAt": "2026-06-26T05:30:15.000Z",
+  "timeline": [
+    {
+      "at": "2026-06-26T05:30:00.000Z",
+      "phase": "running",
+      "eventId": "evt-example-ap-088-000-task-started",
+      "note": "task started"
+    },
+    {
+      "at": "2026-06-26T05:30:05.000Z",
+      "phase": "running",
+      "eventId": "evt-example-ap-088-005-task-command",
+      "note": "ran build command"
+    },
+    {
+      "at": "2026-06-26T05:30:10.000Z",
+      "phase": "running",
+      "eventId": "evt-example-ap-088-010-task-gate",
+      "note": "build gate failed"
+    },
+    {
+      "at": "2026-06-26T05:30:12.000Z",
+      "phase": "running",
+      "eventId": "evt-example-ap-088-012-task-failed",
+      "note": "task failed; escalate"
+    },
+    {
+      "at": "2026-06-26T05:30:15.000Z",
+      "phase": "running",
+      "eventId": "evt-example-ap-088-015-intervention",
+      "note": "manager halted run"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "build-gate.log",
+      "path": "artifacts/build-gate.log",
+      "kind": "log",
+      "sizeBytes": 205,
+      "sha256": "9d36d42fc8fe28f270ff2c96d5246e4f78a3131ceec1133fc3ec2845e98cce50",
+      "redacted": true
+    }
+  ],
+  "gates": [
+    {
+      "name": "build",
+      "required": true,
+      "passed": false,
+      "exitCode": 1,
+      "durationMs": 1800,
+      "artifact": "artifacts/build-gate.log"
+    }
+  ],
+  "review": {
+    "findingsIndexArtifact": "findings/findings-index.json",
+    "criticalCount": 1,
+    "warningCount": 0,
+    "disposition": "open"
+  },
+  "eventsLog": "events.jsonl",
+  "redactedShareable": "manifest.json"
+}

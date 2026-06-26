@@ -5,6 +5,13 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 const root = process.cwd();
+const packageJsonPath = path.join(root, "package.json");
+const packageJson = fs.existsSync(packageJsonPath)
+  ? JSON.parse(fs.readFileSync(packageJsonPath, "utf8"))
+  : null;
+const isSourcePackage = packageJson?.name === "va-auto-pilot"
+  && fs.existsSync(path.join(root, "skills/va-auto-pilot/SKILL.md"))
+  && fs.existsSync(path.join(root, "templates/.va-auto-pilot/config.yaml"));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -33,43 +40,159 @@ function readJson(relative) {
   }
 }
 
+function validatePackContents() {
+  const result = spawnSync("npm", ["pack", "--dry-run", "--json"], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: 30_000
+  });
+
+  if (result.status !== 0) {
+    fail(`npm pack --dry-run --json failed with exit ${result.status}: ${String(result.stderr ?? "").slice(0, 500)}`);
+    return;
+  }
+
+  let packInfo;
+  try {
+    const parsed = JSON.parse(result.stdout);
+    packInfo = Array.isArray(parsed) ? parsed[0] : parsed;
+  } catch (error) {
+    fail(`Cannot parse npm pack JSON output: ${error.message}`);
+    return;
+  }
+
+  const files = Array.isArray(packInfo?.files)
+    ? packInfo.files.map((file) => String(file.path ?? ""))
+    : [];
+  const fileSet = new Set(files);
+  const requiredPackedFiles = [
+    "bin/va-auto-pilot.mjs",
+    "scripts/auto-pilot-loop.mjs",
+    "scripts/sprint-board.mjs",
+    "scripts/lib/sprint-utils.mjs",
+    "templates/.va-auto-pilot/config.yaml",
+    "templates/docs/operations/start-va-auto-pilot-prompt.md",
+    "templates/docs/operations/va-auto-pilot-protocol.md",
+    "skills/va-auto-pilot/SKILL.md",
+    "docs/operations/va-auto-pilot-protocol.md",
+    "README.md",
+    "README.zh.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "LICENSE",
+    "package.json"
+  ];
+  const forbiddenPrefixes = [
+    ".git/",
+    ".github/",
+    ".claude/",
+    ".docstore/",
+    ".va-auto-pilot/",
+    ".va-conductor/",
+    "coverage/",
+    "node_modules/",
+    "e2e/",
+    "website/",
+    "archive/",
+    "conductor/",
+    "decisions/",
+    "designs/",
+    "docs/todo/",
+    "docs/research/"
+  ];
+  const forbiddenSuffixes = [".tgz", ".DS_Store"];
+
+  for (const required of requiredPackedFiles) {
+    if (!fileSet.has(required)) {
+      fail(`Packed artifact missing required file: ${required}`);
+    }
+  }
+
+  for (const file of files) {
+    if (forbiddenPrefixes.some((prefix) => file.startsWith(prefix))
+      || forbiddenSuffixes.some((suffix) => file.endsWith(suffix))) {
+      fail(`Packed artifact includes forbidden file: ${file}`);
+    }
+  }
+
+  const unpackedSize = Number(packInfo?.unpackedSize ?? 0);
+  if (unpackedSize > 2_000_000) {
+    fail(`Packed artifact is too large: unpackedSize=${unpackedSize} bytes`);
+  }
+}
+
+function validateProjectInstall() {
+  const requiredProjectFiles = [
+    ".va-auto-pilot/config.yaml",
+    ".va-auto-pilot/sprint-state.json",
+    ".va-auto-pilot/pitfalls.json",
+    "docs/operations/start-va-auto-pilot-prompt.md",
+    "docs/operations/va-auto-pilot-protocol.md",
+    "docs/todo/sprint.md",
+    "docs/todo/human-board.md",
+    "docs/todo/run-journal.md",
+    "scripts/auto-pilot.mjs",
+    "scripts/auto-pilot-loop.mjs",
+    "scripts/sprint-board.mjs",
+    "scripts/lib/sprint-utils.mjs",
+    "package.json"
+  ];
+
+  for (const relative of requiredProjectFiles) {
+    checkFile(relative);
+  }
+
+  const targetPackageJson = readJson("package.json");
+  const dependencies = targetPackageJson?.dependencies ?? {};
+  const devDependencies = targetPackageJson?.devDependencies ?? {};
+  for (const dependency of ["tsx", "yaml"]) {
+    if (!dependencies[dependency] && !devDependencies[dependency]) {
+      fail(`package.json missing runtime dependency: ${dependency}`);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 1. Required file presence
 // ---------------------------------------------------------------------------
 
-const requiredFiles = [
-  "website/index.html",
-  "website/styles.css",
-  "website/app.js",
-  ".va-auto-pilot/sprint-state.json",
-  "skills/va-auto-pilot/SKILL.md",
-  "skills/va-auto-pilot/claude-command.md",
-  "scripts/sprint-board.mjs",
-  "scripts/auto-pilot.mjs",
-  "scripts/auto-pilot-orchestrate.mjs",
-  "scripts/auto-pilot-observe.mjs",
-  "scripts/auto-pilot-intervene.mjs",
-  "scripts/lib/orchestration-state.mjs",
-  "scripts/lib/orchestration-cli.mjs",
-  "scripts/va-parallel-runner.mjs",
-  "scripts/lib/sprint-utils.mjs",
-  "docs/todo/run-journal.md",
-  "templates/.va-auto-pilot/sprint-state.json",
-  "templates/.va-auto-pilot/pitfalls.json",
-  "templates/docs/todo/run-journal.md",
-  ".github/workflows/deploy-website.yml",
-  "docs/operations/va-auto-pilot-protocol.md"
-];
+if (!isSourcePackage) {
+  validateProjectInstall();
+} else {
+  const requiredFiles = [
+    "website/index.html",
+    "website/styles.css",
+    "website/app.js",
+    ".va-auto-pilot/sprint-state.json",
+    "skills/va-auto-pilot/SKILL.md",
+    "skills/va-auto-pilot/claude-command.md",
+    "scripts/sprint-board.mjs",
+    "scripts/auto-pilot.mjs",
+    "scripts/auto-pilot-orchestrate.mjs",
+    "scripts/auto-pilot-observe.mjs",
+    "scripts/auto-pilot-intervene.mjs",
+    "scripts/lib/orchestration-state.mjs",
+    "scripts/lib/orchestration-cli.mjs",
+    "scripts/va-parallel-runner.mjs",
+    "scripts/lib/sprint-utils.mjs",
+    "docs/todo/run-journal.md",
+    "templates/.va-auto-pilot/sprint-state.json",
+    "templates/.va-auto-pilot/pitfalls.json",
+    "templates/docs/todo/run-journal.md",
+    ".github/workflows/deploy-website.yml",
+    "docs/operations/va-auto-pilot-protocol.md"
+  ];
 
-for (const relative of requiredFiles) {
-  checkFile(relative);
+  for (const relative of requiredFiles) {
+    checkFile(relative);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // 2. website/index.html token checks
 // ---------------------------------------------------------------------------
 
-if (fs.existsSync(path.join(root, "website/index.html"))) {
+if (isSourcePackage && fs.existsSync(path.join(root, "website/index.html"))) {
   const html = fs.readFileSync(path.join(root, "website/index.html"), "utf8");
   const checks = [
     { token: 'meta name="github-owner"', label: "github-owner meta" },
@@ -90,7 +213,7 @@ if (fs.existsSync(path.join(root, "website/index.html"))) {
 // 3. SKILL.md name check
 // ---------------------------------------------------------------------------
 
-if (fs.existsSync(path.join(root, "skills/va-auto-pilot/SKILL.md"))) {
+if (isSourcePackage && fs.existsSync(path.join(root, "skills/va-auto-pilot/SKILL.md"))) {
   const skill = fs.readFileSync(path.join(root, "skills/va-auto-pilot/SKILL.md"), "utf8");
   if (!skill.includes("name: va-auto-pilot")) {
     fail("skills/va-auto-pilot/SKILL.md missing expected skill name");
@@ -141,9 +264,11 @@ if (stateData !== null) {
 }
 
 // Also validate the template sprint-state.json.
-const templateState = readJson("templates/.va-auto-pilot/sprint-state.json");
-if (templateState !== null && !Array.isArray(templateState.tasks)) {
-  fail("templates/.va-auto-pilot/sprint-state.json: 'tasks' must be an array");
+if (isSourcePackage) {
+  const templateState = readJson("templates/.va-auto-pilot/sprint-state.json");
+  if (templateState !== null && !Array.isArray(templateState.tasks)) {
+    fail("templates/.va-auto-pilot/sprint-state.json: 'tasks' must be an array");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +287,14 @@ if (fs.existsSync(sprintBoardPath)) {
       `CLI smoke test failed: 'node scripts/sprint-board.mjs --help' exited ${result.status}.\n  stderr: ${String(result.stderr ?? "").slice(0, 200)}`
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// 6. npm publish artifact validation
+// ---------------------------------------------------------------------------
+
+if (isSourcePackage) {
+  validatePackContents();
 }
 
 // ---------------------------------------------------------------------------

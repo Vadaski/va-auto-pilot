@@ -206,7 +206,7 @@ VA Auto-Pilot 不是 human-out-of-the-loop。
 Harness 层负责让 agent 在一个可靠环境里做事：
 
 - `.va-auto-pilot/constraints/`：项目约束库
-- `.va-auto-pilot/quality-gates.yaml`：质量门禁配置
+- `.va-auto-pilot/config.yaml`：质量门禁配置
 - `docs/todo/run-journal.md`：运行日志
 - pitfall guide：失败知识沉淀
 - review parser：把审查发现转成可执行阻断

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-05-19T16:50:51.214Z",
+  "updatedAt": "2026-06-26T11:02:26.266Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -877,7 +877,7 @@
     },
     {
       "id": "AP-031",
-      "title": "自适应质量门：pitfall → suggest gate + 自动写入 quality-gates.yaml + 跨项目 gate 继承",
+      "title": "自适应质量门：pitfall → suggest gate + 更新 config.yaml qualityGate + 跨项目 gate 继承",
       "priority": "P2",
       "state": "Done",
       "owner": "",
@@ -2192,6 +2192,151 @@
       "failCount": 0,
       "reason": "",
       "verification": "Sprint5 plan-review gate landed; check:all PASS",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-073",
+      "title": "P0 release: npm package must exclude internal artifacts and validate packed contents",
+      "priority": "P0",
+      "state": "Done",
+      "owner": "",
+      "source": "open-source dogfood audit",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "2026-06-26T11:02:12.422Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "npm pack dry-run validates allowlisted artifact: 93 files, ~1MB unpacked, no internal dirs; npm run validate:distribution passes",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-074",
+      "title": "P0 release: remove author-machine absolute paths from CLI flow tests",
+      "priority": "P0",
+      "state": "Done",
+      "owner": "",
+      "source": "codex audit",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "2026-06-26T11:02:12.446Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "npm run check:cli-flows passes with pitfall-cli.yaml using repo-relative paths",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-075",
+      "title": "P1 release: generated scaffold must be independently runnable with required yaml dependency",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "codex audit",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "2026-06-26T11:02:26.266Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Tarball install test: npm install va-auto-pilot-0.2.0.tgz, npx va-auto-pilot init project, npm install, node scripts/validate-distribution.mjs all pass",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-076",
+      "title": "P1 release: acceptance gate inference must prefer behavioral e2e/smoke over distribution validation",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "codex audit",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "2026-06-26T11:02:12.503Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "check:units covers acceptance gate priority preferring check:e2e over validate:distribution; npm run check:all passes",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-077",
+      "title": "P1 release: public docs and skill commands must include review-plan and consistent install story",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "agent audit",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "2026-06-26T11:02:12.606Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Public docs and skill commands use review-plan and public-first install paths; npm run check:all and check:e2e pass",
       "notes": "",
       "review": {
         "implementer": "",

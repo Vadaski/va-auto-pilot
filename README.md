@@ -72,6 +72,15 @@ VA Auto-Pilot is a **sprint execution framework** — it runs the autonomous eng
 
 VA Auto-Pilot was the first adapter built for va-agent-protocol. You can use Auto-Pilot standalone or as a managed agent inside the protocol's orchestrator.
 
+## Harness + Loop Engineering
+
+In current industry language, VA Auto-Pilot is a **Loop Engineering** system built on a **Harness Engineering** reliability layer.
+
+- **Harness**: constraints, skills, CLI tools, quality gates, adversarial review, pitfall memory, and deterministic feedback around the model.
+- **Loop**: sprint state, manager/worker dispatch, plan review, parallel tracks, recovery strategy, auto-commit, and next-cycle selection.
+
+The loop keeps work moving. The harness prevents that motion from amplifying mistakes.
+
 ---
 
 ## Core Intellectual Contributions

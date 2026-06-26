@@ -10,6 +10,8 @@ Read `docs/operations/va-auto-pilot-protocol.md` — section **Orchestrated Exec
 node scripts/auto-pilot.mjs orchestrate init --manager-surface <cursor|claude|codex>
 node scripts/auto-pilot.mjs orchestrate plan --max-parallel 3
 node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs orchestrate review-plan
+node scripts/auto-pilot.mjs observe --json
 node scripts/auto-pilot.mjs orchestrate approve-plan          # required
 node scripts/auto-pilot.mjs orchestrate dispatch
 node scripts/auto-pilot.mjs observe --json
@@ -27,7 +29,8 @@ Strategic intent: `docs/todo/human-board.md`.
 
 ## Hard rules
 
-- Explicit **approve-plan** before dispatch; explicit **approve-commit** before commit.
+- Explicit **review-plan** then **approve-plan** before dispatch; explicit **approve-commit** before commit.
+- If plan review reports CRITICAL findings, adjust backlog and re-run plan + review-plan before dispatch.
 - Human-board unchecked Instructions block dispatch.
 - Never skip quality gates on real commits.
 - Do not prescribe implementation steps to workers — objective + constraints + gates only.

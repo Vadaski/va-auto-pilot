@@ -16,14 +16,14 @@ const NODE_SCRIPT_PRIORITIES = {
     "spec"
   ],
   acceptance: [
-    "validate:distribution",
     "test:e2e",
     "check:e2e",
     "e2e",
     "acceptance",
     "check:acceptance",
     "smoke",
-    "check:smoke"
+    "check:smoke",
+    "validate:distribution"
   ],
   lint: ["lint", "lint:ci", "format:check", "check:format"],
   typecheck: ["typecheck", "type-check", "check:types", "check:typecheck"]
@@ -187,6 +187,9 @@ function inferNodeGateCommands(rootDir, packageJson) {
   const acceptanceCommand = acceptanceScript
     ? scriptCommand(packageManager, acceptanceScript)
     : (testCommand ?? buildCommand);
+  const releaseCommand = scripts["validate:distribution"]
+    ? scriptCommand(packageManager, "validate:distribution")
+    : null;
   const lintCommand = lintScript ? scriptCommand(packageManager, lintScript) : null;
   const typecheckCommand = typecheckScript ? scriptCommand(packageManager, typecheckScript) : null;
 
@@ -196,6 +199,7 @@ function inferNodeGateCommands(rootDir, packageJson) {
     buildCommand,
     testCommand,
     acceptanceCommand,
+    releaseCommand,
     lintCommand,
     typecheckCommand
   };

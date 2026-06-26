@@ -1,6 +1,6 @@
 # Sprint Board
 
-> Last updated: 2026-05-19 by VA Auto-Pilot
+> Last updated: 2026-06-26 by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:
@@ -51,6 +51,8 @@
 | AP-039 | Fix fail-open sprint-board review: git errors suppressed, FAIL status does not cause non-zero exit | 2026-04-04 | Codex fix: sprint-board review now exits non-zero on FAIL/AMBIGUOUS. Git errors warn to stderr. 6 new regression tests. 219 tests pass. |
 | AP-040 | Sprint 2-bis: refactor enforce-staged = runDoctorOnSnapshot(stagedConfig, stagedIndex) + checkStagedDiff, resolving B14/B15/B16 | 2026-04-14 | Sprint 2-bis refactor: enforce-staged=runDoctorOnSnapshot+checkStagedDiff; 43/43 mode tests including B14/B15/B16 regression cases; committed 98fe458 (loop misclassified as review-fail due to codex review unstructured output) |
 | AP-046 | auto-pilot infra: review gate must tolerate unstructured codex output (retry/log/pass when tests+build pass) — current fail-closed causes true-positive tasks to be misclassified | 2026-04-14 | Done in dogfood round 3, committed 2c9d086. See commit body for details. |
+| AP-073 | P0 release: npm package must exclude internal artifacts and validate packed contents | 2026-06-26 | npm pack dry-run validates allowlisted artifact: 93 files, ~1MB unpacked, no internal dirs; npm run validate:distribution passes |
+| AP-074 | P0 release: remove author-machine absolute paths from CLI flow tests | 2026-06-26 | npm run check:cli-flows passes with pitfall-cli.yaml using repo-relative paths |
 | AP-001 | Upgrade multi-perspective review to dynamic perspective selection | 2026-02-23 | Two cross-reviews (adversarial + protocol designer), 6 CRITICALs resolved, templates synced |
 | AP-003 | Add sprint-board.mjs add command to create tasks via CLI without hand-editing JSON | 2026-02-23 | add command implemented: auto-ID (AP-NNN), validation, depends-on, regex-safe prefix; printHelp updated; templates mirrored; all gates pass |
 | AP-004 | Add unit test suite for sprint-board.mjs pure functions | 2026-02-23 | 41/41 unit tests pass via node:test; check:units added to check:all; all gates pass |
@@ -90,12 +92,15 @@
 | AP-069 | Sprint5 P1: human-board Plan Review Gate standing instruction | 2026-05-19 | Sprint5 plan-review gate landed; check:all PASS |
 | AP-070 | Sprint5 P1: protocol+skill Plan Review Gate (review-plan before approve-plan) | 2026-05-19 | Sprint5 plan-review gate landed; check:all PASS |
 | AP-071 | Sprint5 P1: orchestrate review-plan CLI + planHash binding + approve gate | 2026-05-19 | Sprint5 plan-review gate landed; check:all PASS |
+| AP-075 | P1 release: generated scaffold must be independently runnable with required yaml dependency | 2026-06-26 | Tarball install test: npm install va-auto-pilot-0.2.0.tgz, npx va-auto-pilot init project, npm install, node scripts/validate-distribution.mjs all pass |
+| AP-076 | P1 release: acceptance gate inference must prefer behavioral e2e/smoke over distribution validation | 2026-06-26 | check:units covers acceptance gate priority preferring check:e2e over validate:distribution; npm run check:all passes |
+| AP-077 | P1 release: public docs and skill commands must include review-plan and consistent install story | 2026-06-26 | Public docs and skill commands use review-plan and public-first install paths; npm run check:all and check:e2e pass |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
 | AP-023 | va-anima reflect: 去重（多 tag 条目在 reflect 中重复出现） | 2026-03-25 | fix: 三项记忆系统缺陷修复 commit 1b4eba2 — reflect 去重已修复，213 tests pass |
 | AP-024 | va-anima autoRecall: 双语 tag/triggerConditions 支持（中文 context 无法命中英文 trigger） | 2026-03-25 | fix: 三项记忆系统缺陷修复 commit 1b4eba2 — autoRecall 双语支持已修复，213 tests pass |
-| AP-031 | 自适应质量门：pitfall → suggest gate + 自动写入 quality-gates.yaml + 跨项目 gate 继承 | 2026-03-29 | - |
+| AP-031 | 自适应质量门：pitfall → suggest gate + 更新 config.yaml qualityGate + 跨项目 gate 继承 | 2026-03-29 | - |
 | AP-032 | 默认并行执行：auto-pilot-loop 从单任务循环改为任务池循环，plan 命令输出自动执行 | 2026-03-29 | - |
 | AP-036 | Sprint 5 Task 3: Move stack-specific quality gate examples out of protocol | 2026-04-04 | 5 stack-specific example sections extracted to docs/operations/quality-gate-examples.md. Protocol reduced 767→647 lines (-120). Templates synced. Commit 6dabc54. |
 | AP-037 | Sprint 5 Task 4: Inject unresolved pitfalls into evaluator review context | 2026-04-04 | sprint-board review command auto-injects stakeholder perspective + unresolved pitfalls. 9 unit tests covering perspective selection, pitfall formatting, prompt construction, full review flow. Protocol updated. Commit dc83411. |

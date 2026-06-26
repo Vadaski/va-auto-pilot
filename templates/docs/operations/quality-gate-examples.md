@@ -5,7 +5,7 @@ Stack-specific examples live here so the main protocol can stay focused on gate 
 ## Example: Godot Project
 
 ```yaml
-# .va-auto-pilot/quality-gates.yaml (Godot)
+# .va-auto-pilot/config.yaml qualityGate section (Godot)
 gates:
   build:
     command: "godot --headless --script tests/validate_all_scripts.gd"

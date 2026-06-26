@@ -320,7 +320,7 @@ node scripts/sprint-board.mjs update --id AP-XXX --state "In Progress"
 node scripts/sprint-board.mjs pitfall --list --unresolved
 # delegate to sub-agent (see Delegation Prompt below)
 # Run project-specific quality gates (see Quality Gates section)
-# If .va-auto-pilot/quality-gates.yaml exists, run gates from there
+# If .va-auto-pilot/config.yaml has a qualityGate section, run gates from there
 # Otherwise fall back to defaults based on project type detection
 # Example (TypeScript): npm run check:all && node scripts/sprint-board.mjs review
 # Example (Godot): godot --headless --script tests/validate_all_scripts.gd && node scripts/sprint-board.mjs review
@@ -352,10 +352,10 @@ Quality gates are **pluggable** — each project defines its own gate commands. 
 
 ### Gate Configuration
 
-Projects declare their gates in `.va-auto-pilot/quality-gates.yaml` (or fall back to defaults):
+Projects declare their gates in `.va-auto-pilot/config.yaml` under `qualityGate` (or fall back to defaults):
 
 ```yaml
-# .va-auto-pilot/quality-gates.yaml
+# .va-auto-pilot/config.yaml
 gates:
   build:
     command: "npm run check:all"          # TypeScript default
@@ -390,7 +390,7 @@ See [quality-gate-examples.md](./quality-gate-examples.md) for stack-specific ex
 
 ### Gate Resolution
 
-1. If `.va-auto-pilot/quality-gates.yaml` exists → use it
+1. If `.va-auto-pilot/config.yaml` has `qualityGate` → use it
 2. If `package.json` exists with `check:all` script → use TypeScript defaults
 3. If `project.godot` exists → use Godot defaults
 4. Otherwise → only `node scripts/sprint-board.mjs review`
@@ -454,7 +454,7 @@ Quality gates are not only configured — they are **discovered, created, and re
 
 #### Trigger 1: Unknown Technology Stack (Setup Phase)
 
-When the manager encounters a project with no `quality-gates.yaml` and no recognized project files, it must **investigate before delegating**:
+When the manager encounters a project with no configured `qualityGate` and no recognized project files, it must **investigate before delegating**:
 
 ```
 1. Scan project root for build system indicators:
@@ -462,7 +462,7 @@ When the manager encounters a project with no `quality-gates.yaml` and no recogn
 2. Read README/CONTRIBUTING for build instructions
 3. Ask: "What command verifies this project compiles without errors?"
 4. Ask: "What command runs tests?"
-5. Create .va-auto-pilot/quality-gates.yaml with discovered gates
+5. Update `.va-auto-pilot/config.yaml` with discovered `qualityGate` commands
 6. Record reasoning in run-journal.md
 ```
 
@@ -492,7 +492,7 @@ When a task fails due to a bug category not caught by existing gates, the manage
 3. Record in pitfall + run-journal:
    pitfall: "GDScript .get() returns Variant → Godot 4.6 treats as error"
    resolution: "Added build gate: validate_all_scripts.gd"
-   learning: "quality-gates.yaml updated with new gate"
+   learning: "config.yaml qualityGate updated with new gate"
 ```
 
 #### Trigger 3: Manager Judgment (Proactive)
@@ -524,10 +524,10 @@ Discovery → Creation → Validation → Refinement → Retirement
 
 #### Cross-Project Gate Inheritance
 
-When a manager starts a new project of a known type, it should check if similar projects have quality-gates.yaml and inherit proven gates:
+When a manager starts a new project of a known type, it should check if similar projects have proven `qualityGate` settings and inherit them:
 
 ```
-New Godot project → check existing Godot projects for quality-gates.yaml
+New Godot project → check existing Godot projects for qualityGate settings
   → Inherit: validate_all_scripts.gd + runtime stability + asset integrity
   → Skip: project-specific acceptance tests
 ```

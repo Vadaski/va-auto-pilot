@@ -36,9 +36,7 @@ If `skill-installer` is unavailable in your environment, use GitHub-source insta
 tmp="$(mktemp -d)"
 git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
 node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
-
-# required by VA Auto-Pilot runtime scripts
-npm install yaml
+npm install
 rm -rf "$tmp"
 ```
 

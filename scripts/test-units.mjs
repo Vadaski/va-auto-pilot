@@ -1045,7 +1045,26 @@ test("inferProjectGateCommands detects nonstandard package.json test scripts", (
   assert.equal(commands.buildCommand, "npm run check:all");
   assert.equal(commands.testCommand, "npm run check:units");
   assert.equal(commands.acceptanceCommand, "npm run validate:distribution");
+  assert.equal(commands.releaseCommand, "npm run validate:distribution");
   assert.equal(selectProjectTestCommand(commands), "npm run check:units");
+});
+
+test("inferProjectGateCommands prefers behavioral e2e over distribution validation for acceptance", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-gates-node-e2e-"));
+  fs.writeFileSync(path.join(repoDir, "package.json"), JSON.stringify({
+    name: "fixture",
+    scripts: {
+      "check:all": "npm run check:units && npm run validate:distribution",
+      "check:units": "node ./scripts/test-units.mjs",
+      "check:e2e": "node e2e/run-e2e.mjs --all",
+      "validate:distribution": "node ./scripts/validate-distribution.mjs"
+    }
+  }, null, 2));
+
+  const commands = inferProjectGateCommands(repoDir);
+  assert.equal(commands.testCommand, "npm run check:units");
+  assert.equal(commands.acceptanceCommand, "npm run check:e2e");
+  assert.equal(commands.releaseCommand, "npm run validate:distribution");
 });
 
 test("suggestGateFromPitfall maps gate pitfall into required suggestion", () => {
@@ -1239,12 +1258,36 @@ test("va-auto-pilot init renders prompt gates from target package.json scripts",
 
   const config = fs.readFileSync(path.join(repoDir, ".va-auto-pilot", "config.yaml"), "utf8");
   const prompt = fs.readFileSync(path.join(repoDir, "docs", "operations", "start-va-auto-pilot-prompt.md"), "utf8");
+  const packageJson = JSON.parse(fs.readFileSync(path.join(repoDir, "package.json"), "utf8"));
 
   assert.match(config, /buildCommand: "pnpm run check:all"/);
   assert.match(config, /acceptanceTestCommand: "pnpm run test:unit"/);
+  assert.match(packageJson.dependencies.tsx, /^\^?4\./);
+  assert.match(packageJson.dependencies.yaml, /^\^?2\./);
   assert.match(prompt, /Run quality gate: `pnpm run check:all`\./);
   assert.match(prompt, /Run project test command: `pnpm run test:unit`\./);
   assert.match(prompt, /Run acceptance gate: `pnpm run test:unit`\./);
+});
+
+test("va-auto-pilot init creates a minimal package.json with runtime dependencies when absent", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-init-no-package-"));
+
+  execFileSync(process.execPath, [
+    path.resolve("bin/va-auto-pilot.mjs"),
+    "init",
+    repoDir,
+    "--project-prefix",
+    "NOPKG"
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8"
+  });
+
+  const packageJson = JSON.parse(fs.readFileSync(path.join(repoDir, "package.json"), "utf8"));
+  assert.equal(packageJson.private, true);
+  assert.equal(packageJson.type, "module");
+  assert.match(packageJson.dependencies.tsx, /^\^?4\./);
+  assert.match(packageJson.dependencies.yaml, /^\^?2\./);
 });
 
 test("va-auto-pilot init renders prompt gates for non-node stacks", () => {

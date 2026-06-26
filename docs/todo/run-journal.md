@@ -19,7 +19,7 @@
 - Primary Task: AP-001
 - Tracks: AP-001:TIMEOUT
 - Files:
-  - `/Users/vadaski/vadaski/Code/auto-pilot/.va-auto-pilot/parallel-runs/AP-001.log`
+  - `.va-auto-pilot/parallel-runs/AP-001.log`
 - Note: exit-0 moves task to Review; manager agent must still run multi-perspective review and acceptance gates.
 ---
 
@@ -28,7 +28,7 @@
 - Primary Task: AP-001
 - Tracks: AP-001:TIMEOUT
 - Files:
-  - `/Users/vadaski/vadaski/Code/auto-pilot/.va-auto-pilot/parallel-runs/AP-001.log`
+  - `.va-auto-pilot/parallel-runs/AP-001.log`
 - Note: exit-0 moves task to Review; manager agent must still run multi-perspective review and acceptance gates.
 ---
 

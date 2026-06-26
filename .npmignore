@@ -1,20 +1,30 @@
 # Artifacts
 *.tgz
+coverage/
+dist/
 
 # Development / CI
 .claude/
 .va-auto-pilot/
+.docstore/
+.va-conductor/
 .github/
 node_modules/
+archive/
+conductor/
+decisions/
+designs/
 
 # Website
 website/
 
+# Test harnesses and generated results
+e2e/
+smoke-tests/
+
 # Docs not shipped
 docs/todo/
-docs/articles/
-docs/comparisons/
-docs/human-on-the-loop.md
+docs/research/
 
 # Editor / OS
 .DS_Store

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - ManagedDocStore SDK + WAL + single-handle contract (Sprint 1–3)
-- Mode-aware enforcement (`legacy | mixed | strict`) + init/doctor lifecycle
+- Mode-aware enforcement (`legacy | mixed | managed`) + init/doctor lifecycle
 - Human-board parser strictness: only checkbox bullets count as instructions
 - Layered journal view (`sprint-board journal --view`)
 - Adaptive gates, parallel execution, sprint completion review

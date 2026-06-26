@@ -31,7 +31,7 @@ const DEFAULTS = {
   SPRINT_STATE_FILE: ".va-auto-pilot/sprint-state.json",
   SPRINT_BOARD_FILE: "docs/todo/sprint.md",
   RUN_JOURNAL_FILE: "docs/todo/run-journal.md",
-  BUILD_COMMAND: "pnpm run check:all",
+  BUILD_COMMAND: "npm run check:all",
   REVIEW_COMMAND: "codex review --uncommitted",
   TEST_COMMAND: "npx tsx scripts/test-runner.ts --flow test-flows/{feature}.yaml",
   DOMAIN_ROLE_NAME: "Domain Expert",
@@ -40,6 +40,11 @@ const DEFAULTS = {
   DEBUG_SETUP_ENDPOINT: "/api/debug/setup",
   DEBUG_CHAT_ENDPOINT: "/api/debug/chat",
   TEST_RESULTS_DIR: "docs/quality/query-tests/results"
+};
+
+const RUNTIME_DEPENDENCIES = {
+  tsx: packageJson.dependencies?.tsx ?? "^4.22.4",
+  yaml: packageJson.dependencies?.yaml ?? "^2.8.3"
 };
 
 // ---------------------------------------------------------------------------
@@ -110,7 +115,7 @@ Options (shared):
 Examples:
   va-auto-pilot init .
   va-auto-pilot init /tmp/project --project-prefix VERA
-  va-auto-pilot init . --dry-run --build-cmd "pnpm run check:all"
+  va-auto-pilot init . --dry-run --build-cmd "npm run check:all"
   va-auto-pilot upgrade .
   va-auto-pilot upgrade . --dry-run
   va-auto-pilot upgrade . --force
@@ -198,6 +203,57 @@ function applyTemplate(raw, context) {
     output = output.replaceAll(`{{${key}}}`, value);
   }
   return output;
+}
+
+function readTargetPackageJson(packageJsonPath) {
+  if (!fs.existsSync(packageJsonPath)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (error) {
+    throw new Error(`Cannot parse existing package.json at ${packageJsonPath}: ${error.message}`);
+  }
+}
+
+function ensureRuntimeDependencies(targetDir, { dryRun }) {
+  const packageJsonPath = path.join(targetDir, "package.json");
+  const existing = readTargetPackageJson(packageJsonPath);
+  const targetPackage = existing ?? {
+    name: path.basename(path.resolve(targetDir)) || "va-auto-pilot-project",
+    private: true,
+    type: "module"
+  };
+  const dependencies = targetPackage.dependencies && typeof targetPackage.dependencies === "object"
+    ? { ...targetPackage.dependencies }
+    : {};
+  const devDependencies = targetPackage.devDependencies && typeof targetPackage.devDependencies === "object"
+    ? targetPackage.devDependencies
+    : {};
+
+  let changed = !existing;
+  for (const [name, version] of Object.entries(RUNTIME_DEPENDENCIES)) {
+    if (dependencies[name] || devDependencies[name]) {
+      continue;
+    }
+    dependencies[name] = version;
+    changed = true;
+  }
+
+  if (!changed) {
+    return null;
+  }
+
+  targetPackage.dependencies = dependencies;
+  if (dryRun) {
+    return { destination: packageJsonPath, dryRun: true };
+  }
+
+  fs.mkdirSync(path.dirname(packageJsonPath), { recursive: true });
+  fs.writeFileSync(packageJsonPath, JSON.stringify(targetPackage, null, 2) + "\n", "utf8");
+  return { destination: packageJsonPath, dryRun: false };
 }
 
 function resolveContext(opts, targetDir) {
@@ -333,6 +389,10 @@ function runInit(parsed) {
   }
 
   const written = writeTemplateFiles(targetDir, context, { force, dryRun });
+  const dependencyFile = ensureRuntimeDependencies(targetDir, { dryRun });
+  if (dependencyFile) {
+    written.push(dependencyFile);
+  }
 
   // Write version tracking file.
   const versionInfo = buildVersionInfo();
@@ -356,9 +416,10 @@ function runInit(parsed) {
       `2. Render board with node scripts/sprint-board.mjs render --state-file ${context.SPRINT_STATE_FILE} --board-file ${context.SPRINT_BOARD_FILE}`
     );
     console.log("3. Add human instructions in docs/todo/human-board.md");
-    console.log("4. Run your first acceptance flow with scripts/test-runner.ts");
+    console.log("4. Run npm install if package dependencies changed");
+    console.log("5. Run your first acceptance flow with scripts/test-runner.ts");
     console.log(
-      "5. Start a new agent session and run the decision loop in docs/operations/va-auto-pilot-protocol.md"
+      "6. Start a new agent session and run the decision loop in docs/operations/va-auto-pilot-protocol.md"
     );
   }
 }

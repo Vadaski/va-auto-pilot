@@ -6,7 +6,7 @@
 > - IS: Sprint 管理（看板状态机）、任务委派（CLI-driven delegation）、并行执行（va-parallel-runner）、质量门控（build/review/acceptance）、失败复盘（pitfall guide）、多视角 Review、战略分解（Strategic Decomposition）、Colony 桥接（ColonyBridge）
 > - IS NOT: 任务调度协议（用 va-agent-protocol）、任务分解（用 va-wish-engine）、看板中枢（用 va-hub）、具体工具实现（用 va-tool-*）
 
-**Version**: `0.1.1`
+**Version**: `0.2.0`
 **Node requirement**: `>=20`
 **Main scripts**: `sprint-board.mjs`, `va-parallel-runner.mjs`, `smoke-test-runner.mjs`
 

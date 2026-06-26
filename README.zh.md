@@ -90,6 +90,15 @@ VA Auto-Pilot 是一个**冲刺执行框架**——它运行自治工程闭环�
 
 VA Auto-Pilot 是为 va-agent-protocol 构建的第一个适配器。你可以独立使用 Auto-Pilot，也可以在协议编排器内将它作为被管理的 Agent。
 
+## Harness + Loop Engineering
+
+用现在行业里的语言说，VA Auto-Pilot 是一个以 **Loop Engineering** 为骨架、以 **Harness Engineering** 为可靠性层的系统。
+
+- **Harness**：围绕模型的约束、Skill、CLI 工具、质量门禁、对抗审查、陷阱记忆和确定性反馈。
+- **Loop**：冲刺状态、manager/worker 分派、计划审查、并行轨道、恢复策略、自动提交和下一轮选择。
+
+Loop 负责让工作持续推进；Harness 负责防止这种推进把错误自动放大。
+
 ---
 
 ## 核心设计贡献
@@ -168,6 +177,48 @@ rm -rf "$tmp"
 ```bash
 node scripts/sprint-board.mjs render
 ```
+
+---
+
+## Managed DocStore
+
+VA Auto-Pilot 可以通过 `ManagedDocStore` 管理设计、决策和流程文档。仓库存在 `.docstore/*` 时，托管文档必须通过 DocStore CLI 或 SDK 写入，不要手改 `.docstore/INDEX.json` 或托管路径。
+
+### 初始化 / 修复
+
+```bash
+node ./scripts/doc-store-cli.mjs init
+node ./scripts/doc-store-cli.mjs init --force --mode=mixed --managed-roots=.docstore/designs,.docstore/decisions,.docstore/process
+```
+
+- `init` 可重复运行；健康状态下会转为 `doctor`。
+- 修改 `mode` 或 `managedRoots` 时使用 `--force`，保留已有 journal、archive 和 extension 状态。
+- 如果 `doctor` 报 pending journal recovery 或 config/index drift，通过 `init` 或 ManagedDocStore API 修复。
+
+### 纳管旧文档
+
+```bash
+node ./scripts/doc-store-cli.mjs adopt docs/designs/doc-store-api-draft.md --kind=design --title="DocStore API Draft"
+```
+
+`adopt` 会把已有文件迁入 `.docstore/`，在 git worktree 中优先使用 `git mv` 保留历史。
+
+### 安装 hook
+
+```bash
+node ./scripts/doc-store-cli.mjs install-hook
+node ./scripts/doc-store-cli.mjs uninstall-hook
+```
+
+`install-hook` 幂等；如已有 `.git/hooks/pre-commit`，DocStore 会保存并串联执行。
+
+### 模式
+
+- `legacy` — 兼容模式，不强制托管路径。
+- `mixed` — 仅配置的 `.docstore/*` roots 强制通过 DocStore 写入。
+- `managed` — 配置的托管 roots 全严格；除非 staged `INDEX.json` 与 artifact 变更匹配，否则拒绝手改。
+
+当前仓库使用 `mixed` 模式，托管 `.docstore/designs`、`.docstore/decisions` 和 `.docstore/process`。
 
 ---
 

@@ -4,9 +4,35 @@
   "description": "CLI-first autonomous multi-agent engineering loop for any codebase",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vadaski/va-auto-pilot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Vadaski/va-auto-pilot/issues"
+  },
+  "homepage": "https://github.com/Vadaski/va-auto-pilot#readme",
   "bin": {
     "va-auto-pilot": "bin/va-auto-pilot.mjs"
   },
+  "files": [
+    "bin/",
+    "scripts/",
+    "templates/",
+    "skills/",
+    "test-flows/",
+    "docs/operations/",
+    "docs/articles/reopen-va-auto-pilot-harness-loop.zh.md",
+    "docs/articles/va-auto-pilot-why-this-is-the-future.zh.md",
+    "docs/comparisons/",
+    "docs/human-on-the-loop.md",
+    "README.md",
+    "README.zh.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -33,7 +59,8 @@
     "doc-store:enforce-staged": "node ./scripts/doc-store-cli.mjs enforce-staged"
   },
   "dependencies": {
-    "yaml": "^2.8.1"
+    "tsx": "^4.22.4",
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

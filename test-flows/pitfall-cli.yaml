@@ -132,6 +132,7 @@ flows:
       - "-lc"
       - |
         set -euo pipefail
+        repo="$PWD"
         tmpdir="$(mktemp -d)"
         mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
         git -C "$tmpdir" init -q
@@ -184,7 +185,7 @@ flows:
         git -C "$tmpdir" commit -m "chore(test): init" >/dev/null
         (
           cd "$tmpdir"
-          node /Users/vadaski/vadaski/Code/va-auto-pilot/scripts/sprint-board.mjs pitfall --resolve PF-010 --resolution "made build gate permanent" --pitfalls-file "$tmpdir/.va-auto-pilot/pitfalls.json" --journal-file "$tmpdir/docs/todo/run-journal.md"
+          node "$repo/scripts/sprint-board.mjs" pitfall --resolve PF-010 --resolution "made build gate permanent" --pitfalls-file "$tmpdir/.va-auto-pilot/pitfalls.json" --journal-file "$tmpdir/docs/todo/run-journal.md"
         )
         cat "$tmpdir/.va-auto-pilot/config.yaml"
         printf '\n---\n'
@@ -252,6 +253,7 @@ flows:
       - "-lc"
       - |
         set -euo pipefail
+        repo="$PWD"
         tmpdir="$(mktemp -d)"
         pitfalls="$tmpdir/pitfalls.json"
         cat > "$tmpdir/package.json" <<'EOF'
@@ -283,7 +285,7 @@ flows:
         EOF
         (
           cd "$tmpdir"
-          node /Users/vadaski/vadaski/Code/va-auto-pilot/scripts/sprint-board.mjs suggest-gate --pitfalls-file "$pitfalls"
+          node "$repo/scripts/sprint-board.mjs" suggest-gate --pitfalls-file "$pitfalls"
         )
     assert:
       must:
@@ -300,6 +302,7 @@ flows:
       - "-lc"
       - |
         set -euo pipefail
+        repo="$PWD"
         tmpdir="$(mktemp -d)"
         cat > "$tmpdir/package.json" <<'EOF'
         {
@@ -330,7 +333,7 @@ flows:
         EOF
         (
           cd "$tmpdir"
-          node /Users/vadaski/vadaski/Code/va-auto-pilot/scripts/sprint-board.mjs suggest-gate --pitfalls-file "$tmpdir/pitfalls.json"
+          node "$repo/scripts/sprint-board.mjs" suggest-gate --pitfalls-file "$tmpdir/pitfalls.json"
         )
     assert:
       must:
@@ -347,6 +350,7 @@ flows:
       - "-lc"
       - |
         set -euo pipefail
+        repo="$PWD"
         tmpdir="$(mktemp -d)"
         cat > "$tmpdir/package.json" <<'EOF'
         {
@@ -377,7 +381,7 @@ flows:
         EOF
         (
           cd "$tmpdir"
-          node /Users/vadaski/vadaski/Code/va-auto-pilot/scripts/sprint-board.mjs suggest-gate --pitfalls-file "$tmpdir/pitfalls.json"
+          node "$repo/scripts/sprint-board.mjs" suggest-gate --pitfalls-file "$tmpdir/pitfalls.json"
         )
     assert:
       must:
@@ -394,6 +398,7 @@ flows:
       - "-lc"
       - |
         set -euo pipefail
+        repo="$PWD"
         project_dir="$(mktemp -d)"
         outside_dir="$(mktemp -d)"
         mkdir -p "$project_dir/.va-auto-pilot"
@@ -423,7 +428,7 @@ flows:
         EOF
         (
           cd "$outside_dir"
-          node /Users/vadaski/vadaski/Code/va-auto-pilot/scripts/sprint-board.mjs suggest-gate --pitfalls-file "$project_dir/.va-auto-pilot/pitfalls.json"
+          node "$repo/scripts/sprint-board.mjs" suggest-gate --pitfalls-file "$project_dir/.va-auto-pilot/pitfalls.json"
         )
     assert:
       must:

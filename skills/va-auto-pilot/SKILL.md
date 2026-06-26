@@ -20,23 +20,32 @@ Use this skill when the user asks to:
 ## Workflow
 
 1. Confirm target repository root (default: current directory).
-2. Install scaffold from your local va-auto-pilot source checkout (no remote clone — source-install mode):
+2. Install scaffold. Prefer the published package when available:
 
 ```bash
-# Assumes va-auto-pilot is checked out locally. Set VA_AUTO_PILOT_ROOT or edit the path.
-: "${VA_AUTO_PILOT_ROOT:=$HOME/vadaski/Code/va-auto-pilot}"
-node "$VA_AUTO_PILOT_ROOT/bin/va-auto-pilot.mjs" init <target-dir>
+npx va-auto-pilot init <target-dir>
 cd <target-dir>
-npm install yaml
+npm install
 ```
 
-The Claude Code skill at `~/.claude/skills/auto-pilot` is a symlink to `$VA_AUTO_PILOT_ROOT/skills/va-auto-pilot/` — edits in the repo take effect immediately with no re-install.
+If the npm package is not available yet, install from GitHub source:
+
+```bash
+tmp="$(mktemp -d)"
+git clone --depth 1 https://github.com/Vadaski/va-auto-pilot "$tmp/va-auto-pilot"
+node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init <target-dir>
+cd <target-dir>
+npm install
+rm -rf "$tmp"
+```
+
+Maintainers working inside the source checkout may set `VA_AUTO_PILOT_ROOT` and run `node "$VA_AUTO_PILOT_ROOT/bin/va-auto-pilot.mjs" init <target-dir>`.
 
 3. Read and align these files:
 
 - `.va-auto-pilot/config.yaml`
 - `.va-auto-pilot/sprint-state.json`
-- `.va-auto-pilot/quality-gates.yaml` — project-specific gates
+- `.va-auto-pilot/config.yaml` `qualityGate` section — project-specific gates
 - `.va-auto-pilot/constraints/` — typed constraint library (YAML)
 - `docs/todo/sprint.md`
 - `docs/todo/human-board.md`
@@ -56,7 +65,7 @@ Gates are NOT hardcoded. Auto-detect by project type:
 | go.mod | Go | go build ./... && go test ./... |
 | Unknown | Any | Investigate + create gates BEFORE delegating |
 
-Adaptive: `node scripts/sprint-board.mjs suggest-gate` reads unresolved pitfalls and outputs YAML gate suggestions. Human confirms before writing to quality-gates.yaml.
+Adaptive: `node scripts/sprint-board.mjs suggest-gate` reads unresolved pitfalls and outputs YAML gate suggestions. Human confirms before writing to `.va-auto-pilot/config.yaml`.
 
 5. Start orchestrated mode (interactive — session agent is the manager):
 
@@ -114,7 +123,7 @@ Unattended only: `node scripts/auto-pilot-loop.mjs --max-cycles 50` or `orchestr
 
 ### Adaptive Quality Gates
 - `node scripts/sprint-board.mjs suggest-gate` — outputs YAML gate suggestions from unresolved pitfalls
-- Does NOT auto-write quality-gates.yaml (human confirms)
+- Does NOT auto-write `.va-auto-pilot/config.yaml` gate changes without an explicit command/human confirmation.
 - Pitfall-to-gate suggestions are journaled after failure recording
 
 ### Managed DocStore
@@ -137,7 +146,7 @@ Typed YAML constraints under `.va-auto-pilot/constraints/` (dispatch, review-gat
 ## Quality Gate Protocol
 
 Before every commit:
-1. Read .va-auto-pilot/quality-gates.yaml
+1. Read `.va-auto-pilot/config.yaml` `qualityGate`
 2. Run every required gate
 3. Fail → fix → re-run (never commit with failing gates)
 4. New failure pattern → add new gate + record pitfall + run suggest-gate

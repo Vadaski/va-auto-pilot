@@ -58,4 +58,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Note
 
-- Requires Claude Opus 4.6 / GPT-5.3-codex class models for reliable autonomous operation.
+- Requires frontier coding model capability for reliable autonomous operation.

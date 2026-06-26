@@ -23,7 +23,7 @@ const I18N = {
     "hero.title": "Set a goal, the model finds the path.",
     "hero.lead":
       "VA Auto-Pilot is a CLI-first autonomous multi-agent engineering loop. Define objective, constraints, and acceptance criteria — the framework runs planning, parallel execution, adversarial review, and deterministic gates. Built on va-agent-protocol, the universal task protocol that wraps any CLI agent into a composable unit.",
-    "hero.signal1": "Requires Claude Opus 4.6 or gpt-5.3-codex class models",
+    "hero.signal1": "Requires frontier coding model capability",
     "hero.signal2": "Goal in -> audit-traceable commit out",
     "hero.signal3": "Works standalone or as a managed agent inside va-agent-protocol",
 
@@ -53,7 +53,7 @@ const I18N = {
       "Testing and review are structural states, not optional rituals. Progress is blocked until gates pass.",
     "philosophy.card3.title": "Model progress should compound into org leverage.",
     "philosophy.card3.body":
-      "As Opus 4.6 / gpt-5.3-codex capability improves, the same protocol yields better delivery without rewriting process.",
+      "As frontier coding model capability improves, the same protocol yields better delivery without rewriting process.",
 
     "loop.eyebrow": "Governed Execution",
     "loop.title": "Operational states your team can trust",
@@ -85,10 +85,10 @@ const I18N = {
     "compare.title": "Best when you own delivery outcomes, not just code generation",
     "compare.va.title": "This fits your team if",
     "compare.va.body":
-      "You lead teams shipping production systems, run Opus 4.6 / gpt-5.3-codex class models, and need auditability, release gates, and reliable merge readiness. Unlike MCP (model-to-tool) or A2A (agent-to-agent messaging), VA Auto-Pilot is a full execution loop with governed state transitions and deterministic quality gates.",
+      "You lead teams shipping production systems, run frontier coding models, and need auditability, release gates, and reliable merge readiness. Unlike MCP (model-to-tool) or A2A (agent-to-agent messaging), VA Auto-Pilot is a full execution loop with governed state transitions and deterministic quality gates.",
     "compare.notfor.title": "This likely does not fit if",
     "compare.notfor.body":
-      "You need full manual control of implementation steps, prefer zero-ceremony iteration, or run below Opus 4.6 / gpt-5.3-codex class capability.",
+      "You need full manual control of implementation steps, prefer zero-ceremony iteration, or run below frontier coding model capability.",
     "compare.link": "Read full comparison",
 
     "credits.eyebrow": "Credits",
@@ -128,7 +128,7 @@ const I18N = {
     "hero.title": "设定目标，模型自行寻路。",
     "hero.lead":
       "VA Auto-Pilot 是 CLI 优先的自主多智能体工程闭环。定义目标、约束和验收标准——框架自动执行规划、并行推进、对抗审查和确定性门禁。基于 va-agent-protocol（通用任务协议）构建，可将任何 CLI Agent 封装为可组合单元。",
-    "hero.signal1": "要求 Claude Opus 4.6 或 gpt-5.3-codex 级模型",
+    "hero.signal1": "要求前沿级编程模型能力",
     "hero.signal2": "目标输入 -> 可审计提交输出",
     "hero.signal3": "可独立运行，也可作为 va-agent-protocol 编排下的托管 Agent",
 
@@ -158,7 +158,7 @@ const I18N = {
       "测试与审查是硬状态，不是可选流程；门禁不过，状态不推进。",
     "philosophy.card3.title": "模型进步应直接转化为组织杠杆。",
     "philosophy.card3.body":
-      "随着 Opus 4.6 / gpt-5.3-codex 能力提升，同一协议可持续提升结果质量，无需重写流程。",
+      "随着前沿级编程模型能力提升，同一协议可持续提升结果质量，无需重写流程。",
 
     "loop.eyebrow": "治理化执行",
     "loop.title": "团队可以信任的五个状态",
@@ -190,10 +190,10 @@ const I18N = {
     "compare.title": "当你对交付结果负责时，它最有价值",
     "compare.va.title": "适合你的团队，如果",
     "compare.va.body":
-      "你在负责生产级系统交付，使用 Opus 4.6 / gpt-5.3-codex 级模型，并且需要可审计、可门禁、可稳定合并的执行闭环。与 MCP（模型到工具）或 A2A（Agent 间消息传递）不同，VA Auto-Pilot 是具备治理化状态转换和确定性质量门禁的完整执行闭环。",
+      "你在负责生产级系统交付，使用前沿级编程模型，并且需要可审计、可门禁、可稳定合并的执行闭环。与 MCP（模型到工具）或 A2A（Agent 间消息传递）不同，VA Auto-Pilot 是具备治理化状态转换和确定性质量门禁的完整执行闭环。",
     "compare.notfor.title": "大概率不适合，如果",
     "compare.notfor.body":
-      "你必须人工控制每个实现步骤、追求零仪式试错，或当前模型能力低于 Opus 4.6 / gpt-5.3-codex 等级。",
+      "你必须人工控制每个实现步骤、追求零仪式试错，或当前模型能力低于前沿级编程模型能力。",
     "compare.link": "阅读完整对比",
 
     "credits.eyebrow": "作者与致谢",

@@ -64,7 +64,8 @@
 
 - [x] **README.zh.md 同步**：英文 README 已大改版（加了 Protocol Comparison 对比表、Why Frontier Models Need This、Relationship to va-agent-protocol、扩展 Roadmap），中文版完全没跟上。同步所有新增章节到 README.zh.md，保持中文 README 与英文结构一致。
 
-- [x] **.npmignore 优化**：当前 npm publish 把 `.claude/settings.local.json`、`.va-auto-pilot/sprint-state.json`、`.va-auto-pilot/parallel-runs/`、`.github/` 等内部文件全发了出去。完善 .npmignore，只保留 `bin/`、`scripts/`、`templates/`、`skills/`、`test-flows/`、`docs/operations/`、`README.md`、`LICENSE`、`CONTRIBUTING.md`、`package.json`。发布 0.1.1 修复。
+- [x] **.npmignore 优化**：历史 npm publish 曾把 `.claude/settings.local.json`、`.va-auto-pilot/sprint-state.json`、`.va-auto-pilot/parallel-runs/`、`.github/` 等内部文件发出去。当前通过 package `files` 白名单与 packed-artifact validation 防止回归。
+> Processed 2026-06-26: Superseded by package `files` allowlist and packed-artifact validation. Current package excludes internal state, root test flows, source-only tests, coverage, and local conductor artifacts.
 
 - [x] **CHANGELOG.md 创建**：项目没有 CHANGELOG。创建 CHANGELOG.md，补录 v0.1.0 的主要功能（sprint execution loop、CLI quality gates、pitfall compounding、adversarial review、upgrade command、62 tests）。使用 Keep a Changelog 格式。
 

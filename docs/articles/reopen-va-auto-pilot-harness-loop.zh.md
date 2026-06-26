@@ -321,4 +321,4 @@ VA Auto-Pilot 是一个答案，但不是最终答案。
 - [Loop Engineering](https://addyosmani.com/blog/loop-engineering/)
 - [Improving Deep Agents with harness engineering](https://www.langchain.com/blog/improving-deep-agents-with-harness-engineering)
 - [human on the loop](../human-on-the-loop.md)
-- [VA Auto-Pilot：为什么这是面向 Opus 4.6 / gpt-5.3-codex 时代的工程未来](./va-auto-pilot-why-this-is-the-future.zh.md)
+- [VA Auto-Pilot：为什么这是面向前沿级编程模型时代的工程未来](./va-auto-pilot-why-this-is-the-future.zh.md)

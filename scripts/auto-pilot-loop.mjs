@@ -1266,7 +1266,7 @@ async function commitPaths(header, files, opts) {
   await git([
     "commit",
     "-m", header,
-    "-m", "Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "-m", "Co-Authored-By: Claude <noreply@anthropic.com>",
     "--only",
     "--",
     ...stagedFiles

@@ -28,6 +28,7 @@ Session agents (Cursor / Claude Code) act as **Manager**; the CLI is **Executor*
 node scripts/auto-pilot.mjs orchestrate init --manager-surface cursor
 node scripts/auto-pilot.mjs observe --json
 node scripts/auto-pilot.mjs orchestrate plan
+node scripts/auto-pilot.mjs orchestrate review-plan
 node scripts/auto-pilot.mjs orchestrate approve-plan
 node scripts/auto-pilot.mjs orchestrate dispatch
 node scripts/auto-pilot.mjs orchestrate await-workers
@@ -48,7 +49,7 @@ For va-auto-pilot itself (TypeScript):
 npm run build && npm run lint && npm run check:units
 ```
 
-For target projects, gates are defined in `.va-auto-pilot/quality-gates.yaml` or auto-detected:
+For target projects, gates are defined in `.va-auto-pilot/config.yaml` under `qualityGate` or auto-detected:
 - `package.json` → `npm run check:all`
 - `project.godot` → `godot --headless --script tests/validate_all_scripts.gd`
 - `Cargo.toml` → `cargo check && cargo test`
@@ -79,5 +80,5 @@ For target projects, gates are defined in `.va-auto-pilot/quality-gates.yaml` or
 
 type: feat | fix | refactor | docs | test | chore
 
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```

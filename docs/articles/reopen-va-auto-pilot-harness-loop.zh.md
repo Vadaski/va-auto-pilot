@@ -1,4 +1,4 @@
-# 是时候重新开源 VA Auto-Pilot 了
+# 超越时代两个版本，是时候重新开源 VA Auto-Pilot 了
 
 四个月前，我开源过一次 VA Auto-Pilot。
 

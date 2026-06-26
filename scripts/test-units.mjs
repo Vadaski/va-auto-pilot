@@ -972,6 +972,8 @@ test("mcp-readonly-resources: reads computed sprint summary", () => {
   assert.equal(resource.mimeType, "application/json");
   assert.equal(summary.counts.Done, 1);
   assert.equal(summary.counts.Backlog, 2);
+  assert.equal(summary.nextTaskSource, "state-derived-not-dispatch-authority");
+  assert.match(summary.dispatchAuthority, /sprint-board\.mjs next --json --strict/);
   assert.equal(summary.nextTask.id, "AP-002");
 });
 

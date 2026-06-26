@@ -23,7 +23,7 @@ The module exports:
 | URI | MIME type | Source |
 | --- | --- | --- |
 | `va-auto-pilot://sprint-state` | `application/json` | `.va-auto-pilot/sprint-state.json` |
-| `va-auto-pilot://sprint-summary` | `application/json` | Computed from sprint state |
+| `va-auto-pilot://sprint-summary` | `application/json` | State-derived counts and next-task preview |
 | `va-auto-pilot://run-journal` | `text/markdown` | `docs/todo/run-journal.md` |
 | `va-auto-pilot://pitfall-guide` | `text/markdown` | Computed from unresolved `.va-auto-pilot/pitfalls.json` entries |
 | `va-auto-pilot://human-board` | `text/markdown` | `docs/todo/human-board.md` |
@@ -46,6 +46,12 @@ as the CLI. In particular:
 - no direct mutation of human-board or tactical directives
 - no bypass around plan review, stale checkpoint detection, or permission scope
 - no adapter-specific state that can drift from CLI state
+
+`va-auto-pilot://sprint-summary` is a read-only state preview. It includes
+`nextTaskSource = "state-derived-not-dispatch-authority"` and
+`dispatchAuthority = "node scripts/sprint-board.mjs next --json --strict"`.
+MCP clients that intend to dispatch must use the CLI authority path, not the
+preview field alone.
 
 ## Validation
 

@@ -15,7 +15,7 @@ const RESOURCE_DEFINITIONS = [
   {
     uri: "va-auto-pilot://sprint-summary",
     name: "Sprint Summary",
-    description: "Computed sprint counts and next actionable task.",
+    description: "State-derived sprint counts and next-task preview. CLI next remains dispatch authority.",
     mimeType: "application/json",
     kind: "computed-summary",
   },
@@ -112,6 +112,8 @@ function buildSprintSummary(workDir) {
     projectPrefix: state.projectPrefix ?? "",
     updatedAt: state.updatedAt ?? "",
     counts,
+    nextTaskSource: "state-derived-not-dispatch-authority",
+    dispatchAuthority: "node scripts/sprint-board.mjs next --json --strict",
     nextTask: nextTask
       ? {
           id: nextTask.id,

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "protocol-fixture-completed-task",
+  "protocol": "va-agent-protocol",
+  "taskUnit": {
+    "id": "AP-087",
+    "objective": "Roadmap: design observability event schema and evidence bundle",
+    "acceptanceCriteria": [
+      "check:observability PASS",
+      "observability unit tests PASS"
+    ],
+    "constraints": [
+      "Roadmap order: observability is the first reliability substrate."
+    ],
+    "context": {
+      "codebaseRoot": "/workspace/va-auto-pilot"
+    },
+    "priority": "P2",
+    "metadata": {
+      "qualityGates": [
+        "check:observability",
+        "check:units"
+      ],
+      "source": "next-gen-harness-loop-roadmap"
+    }
+  },
+  "autoPilot": {
+    "state": "completed",
+    "track": {
+      "taskId": "AP-087",
+      "title": "Roadmap: design observability event schema and evidence bundle",
+      "verification": [
+        "check:observability PASS",
+        "observability unit tests PASS"
+      ],
+      "notes": "Roadmap order: observability is the first reliability substrate.",
+      "priority": "P2",
+      "qualityGates": [
+        "check:observability",
+        "check:units"
+      ],
+      "metadata": {
+        "source": "next-gen-harness-loop-roadmap"
+      }
+    }
+  },
+  "evidence": {
+    "manifest": "../observability-examples/completed-task/manifest.json",
+    "eventLog": "../observability-examples/completed-task/events.jsonl",
+    "outcomeState": "completed",
+    "requiredGatesPassed": true,
+    "requiredEvents": [
+      "task.started",
+      "task.gate",
+      "task.review",
+      "task.completed",
+      "commit"
+    ]
+  }
+}

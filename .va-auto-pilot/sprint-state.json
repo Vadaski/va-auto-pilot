@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T14:50:24.817Z",
+  "updatedAt": "2026-06-26T15:11:50.364Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2788,16 +2788,16 @@
       "id": "AP-092",
       "title": "Roadmap: map TaskUnit evidence fixtures to Auto-Pilot",
       "priority": "P2",
-      "state": "Backlog",
+      "state": "Done",
       "owner": "",
       "source": "next-gen-harness-loop-roadmap",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T15:02:17.434Z",
+      "completedAt": "2026-06-26T15:11:50.364Z",
       "lastFailedAt": "",
       "failCount": 0,
-      "reason": "",
-      "verification": "",
+      "reason": "Starting TaskUnit evidence fixture mapping.",
+      "verification": "Protocol fixture mapping landed: TaskUnit-to-track fixture schema, completed/failed protocol fixtures, protocol fixture validator wired into check:all, and mapping docs. typecheck PASS; check:protocol-fixtures PASS; check:all PASS.",
       "notes": "Roadmap order: protocol fixtures follow budget/evidence semantics.",
       "review": {
         "implementer": "",

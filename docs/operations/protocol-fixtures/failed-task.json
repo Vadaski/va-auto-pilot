@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "protocol-fixture-failed-task",
+  "protocol": "va-agent-protocol",
+  "taskUnit": {
+    "id": "AP-088",
+    "objective": "Roadmap: define governance checkpoints and stale approval invalidation",
+    "acceptanceCriteria": [
+      "governance checkpoint tests PASS",
+      "stale approval invalidation is recorded"
+    ],
+    "constraints": [
+      "Roadmap order: governance follows observability evidence."
+    ],
+    "context": {
+      "codebaseRoot": "/workspace/va-auto-pilot"
+    },
+    "priority": "P2",
+    "dependsOn": [
+      "AP-087"
+    ],
+    "metadata": {
+      "qualityGates": [
+        "check:units",
+        "check:all"
+      ],
+      "source": "next-gen-harness-loop-roadmap"
+    }
+  },
+  "autoPilot": {
+    "state": "failed",
+    "track": {
+      "taskId": "AP-088",
+      "title": "Roadmap: define governance checkpoints and stale approval invalidation",
+      "verification": [
+        "governance checkpoint tests PASS",
+        "stale approval invalidation is recorded"
+      ],
+      "notes": "Roadmap order: governance follows observability evidence.",
+      "priority": "P2",
+      "dependsOn": [
+        "AP-087"
+      ],
+      "qualityGates": [
+        "check:units",
+        "check:all"
+      ],
+      "metadata": {
+        "source": "next-gen-harness-loop-roadmap"
+      }
+    }
+  },
+  "evidence": {
+    "manifest": "../observability-examples/failed-task/manifest.json",
+    "eventLog": "../observability-examples/failed-task/events.jsonl",
+    "outcomeState": "failed",
+    "firstFailingGate": "build",
+    "requiredGatesPassed": false,
+    "requiredEvents": [
+      "task.started",
+      "task.gate",
+      "task.failed"
+    ]
+  }
+}

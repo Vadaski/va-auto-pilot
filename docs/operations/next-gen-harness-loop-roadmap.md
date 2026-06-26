@@ -244,7 +244,8 @@ immature behavior.
   `docs/operations/eval-gates.md`.
 - `roadmap-budget-guardrails`: add soft/hard budget policy and journal output.
   See `docs/operations/budget-guardrails.md`.
-- `roadmap-protocol-fixtures`: map TaskUnit/evidence fixtures to Auto-Pilot
+- `roadmap-protocol-fixtures`: map TaskUnit/evidence fixtures to Auto-Pilot.
+  See `docs/operations/protocol-fixtures.md`.
 - `roadmap-mcp-adapter`: implement read-only MCP resources before write tools
 
 ## Definition Of Stronger

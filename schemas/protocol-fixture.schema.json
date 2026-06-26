@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vadaski.github.io/va-auto-pilot/schemas/protocol-fixture.schema.json",
+  "title": "VA Auto-Pilot Protocol Fixture",
+  "description": "Fixture that maps a va-agent-protocol TaskUnit to Auto-Pilot track input and evidence bundle output.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "fixtureId",
+    "protocol",
+    "taskUnit",
+    "autoPilot",
+    "evidence"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "fixtureId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "protocol": {
+      "type": "string",
+      "const": "va-agent-protocol"
+    },
+    "taskUnit": {
+      "type": "object",
+      "required": ["id", "objective", "acceptanceCriteria", "constraints", "context"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "objective": { "type": "string", "minLength": 1 },
+        "acceptanceCriteria": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "constraints": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "context": {
+          "type": "object",
+          "required": ["codebaseRoot"],
+          "properties": {
+            "codebaseRoot": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": true
+        },
+        "priority": { "type": "string" },
+        "dependsOn": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "autoPilot": {
+      "type": "object",
+      "required": ["track"],
+      "properties": {
+        "track": {
+          "type": "object",
+          "required": ["taskId"],
+          "additionalProperties": true
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "manifest",
+        "eventLog",
+        "outcomeState",
+        "requiredEvents"
+      ],
+      "properties": {
+        "manifest": { "type": "string", "minLength": 1 },
+        "eventLog": { "type": "string", "minLength": 1 },
+        "outcomeState": { "type": "string", "enum": ["completed", "failed", "abandoned"] },
+        "firstFailingGate": { "type": "string" },
+        "requiredEvents": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "requiredGatesPassed": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

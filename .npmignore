@@ -20,11 +20,9 @@ website/
 
 # Test harnesses and generated results
 e2e/
-smoke-tests/
 
 # Docs not shipped
 docs/todo/
-docs/research/
 
 # Editor / OS
 .DS_Store

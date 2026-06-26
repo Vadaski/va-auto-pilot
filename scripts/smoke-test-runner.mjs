@@ -7,7 +7,7 @@
  * and outputs a JSON GateResult to stdout.
  *
  * Usage:
- *   node scripts/smoke-test-runner.mjs --config smoke-tests/example.yaml \
+ *   node scripts/smoke-test-runner.mjs --config templates/test-flows/feature-smoke.yaml \
  *     [--screenshot-dir .va-auto-pilot/screenshots] [--timeout 30000]
  *
  * Exit code 0 = all steps passed, 1 = any failure.

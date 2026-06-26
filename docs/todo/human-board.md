@@ -148,7 +148,9 @@
 
 ## Feedback (to fold into next cycle)
 - npm publish 时 tarball 含 53 个文件、340KB，偏大。优化 .npmignore 后应显著缩小。
+> Processed 2026-06-26: AP-073/AP-078 complete. Switched to package `files` allowlist, added packed-artifact validation, excluded internal artifacts/source-only tests/root CLI flows. Current npm dry-run: 80 files, 171.8KB package, 655.8KB unpacked; tarball install smoke passes.
 - va-auto-pilot 和 va-agent-protocol 的关系需要在两个 README 和 website 中都讲清楚，避免用户困惑。
+> Processed 2026-06-26: README.md, README.zh.md, and website hero/meta/compare copy now state VA Auto-Pilot as the sprint execution loop and va-agent-protocol as the universal task protocol; README also maps current Harness + Loop Engineering language.
 
 ## Direction (long-term)
 - va-auto-pilot 是 sprint execution engine，va-agent-protocol 是 universal task protocol。两者互补。

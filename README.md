@@ -18,7 +18,7 @@
 │ (impl)   │ (impl)   │ (review) │                     │
 ├──────────┴──────────┴──────────┴─────────────────────┤
 │          CLI Quality Gates (deterministic)            │
-│  typecheck · lint · test · codex-review · acceptance  │
+│  typecheck · lint · test · review · acceptance        │
 ├──────────────────────────────────────────────────────┤
 │         Pitfall Guide (failure knowledge compounds)   │
 └──────────────────────────────────────────────────────┘
@@ -34,13 +34,13 @@ npx va-auto-pilot init .
 
 ## The Design Bet
 
-Most agent frameworks are built to compensate for model weakness — they break tasks into small steps, prescribe exactly what the model should do, and constrain autonomy to keep weak models on track.
+Most agent frameworks are built to reduce autonomy: they break tasks into small steps, prescribe exactly what the model should do, and keep the agent close to a human-maintained script.
 
 VA Auto-Pilot makes the opposite bet.
 
-**This framework is built for the strongest models, by design.** It sets a goal, states constraints, and specifies acceptance criteria — then trusts the model to find the path. There are no step-by-step instructions to follow. There is no role list to pick from. There is only: here is what must be true when you are done.
+**This framework is built for capable coding agents, by design.** It sets a goal, states constraints, and specifies acceptance criteria — then lets the agent find the path. There are no step-by-step instructions to follow. There is no role list to pick from. There is only: here is what must be true when you are done.
 
-If you use a weak model, it will fail. Not because the framework is broken — because you are using the wrong tool. This is intentional. A framework that scales down to weak models must design for weakness. This one designs for strength. As frontier models get more capable, the framework gets better with no changes required.
+Long autonomous loops require strong planning, tool-use, and verification behavior. Smaller models can still participate in bounded tracks, but the full loop assumes frontier-grade execution quality.
 
 That is the bet.
 
@@ -68,9 +68,11 @@ That is the bet.
 
 ## Relationship to va-agent-protocol
 
-VA Auto-Pilot is a **sprint execution framework** — it runs the autonomous engineering loop. [va-agent-protocol](https://github.com/Vadaski/va-agent-protocol) is the **universal task protocol** — the standardized contract that wraps any CLI agent (including VA Auto-Pilot) into a composable unit.
+VA Auto-Pilot is a **sprint execution engine** — it runs the autonomous engineering loop. [va-agent-protocol](https://github.com/Vadaski/va-agent-protocol) is the **universal task protocol** — the standardized contract that wraps any CLI agent into a composable unit.
 
-VA Auto-Pilot was the first adapter built for va-agent-protocol. You can use Auto-Pilot standalone or as a managed agent inside the protocol's orchestrator.
+VA Auto-Pilot can run standalone. It can also operate as a reference engine / managed agent for va-agent-protocol. The protocol is the task contract; Auto-Pilot is one execution engine that satisfies it.
+
+MCP and A2A are complementary connection layers. VA Auto-Pilot sits above connection and messaging: it governs how long-running engineering work is decomposed, executed, reviewed, recovered, and accepted.
 
 ## Harness + Loop Engineering
 
@@ -128,7 +130,7 @@ The pitfall guide captures structured failure metadata — not just error string
 - You want an execution loop that gets better as models improve
 
 **Do not use it when:**
-- You are running a mid-tier or weak model — the framework will not compensate
+- You cannot provide an agent with strong planning, tool-use, and verification behavior
 - You want to control every implementation step
 - Your task is small and bounded — a single well-written prompt is faster
 - You want minimal ceremony — this framework has protocol; the value is in the guarantees
@@ -253,7 +255,7 @@ npm run check:all && codex review --uncommitted && npm run validate:distribution
 # npm
 npm i -g va-auto-pilot
 
-# Claude Code
+# Agent integration example: Claude Code
 mkdir -p .claude/commands
 curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/va-auto-pilot/claude-command.md \
   -o .claude/commands/va-auto-pilot.md
@@ -284,6 +286,7 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 ## Documentation
 
 - Protocol: `docs/operations/va-auto-pilot-protocol.md`
+- Public narrative spec: `docs/operations/public-narrative-spec.md`
 - Start prompt: `docs/operations/start-va-auto-pilot-prompt.md`
 - Distribution: `docs/operations/distribute-skill.md`
 - Vision article: `docs/human-on-the-loop.md`
@@ -312,8 +315,9 @@ npm run validate:distribution
 
 ## Credits
 
-- Co-creators: **Vadaski**, **Codex**, **Claude**
-- Acknowledgements: **Vera project**
+Created by **Vadaski**. Developed with assistance from frontier coding agents and validated through VA Auto-Pilot's own engineering loop.
+
+Acknowledgements: **Vera project**
 
 ## License
 

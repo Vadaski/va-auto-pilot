@@ -2467,3 +2467,13 @@
   - sustainable-decomposition
   - check-all-pass
 ---
+
+## 2026-06-26T11:36:50.898Z - AP-084
+- Summary: README.md and README.zh.md cleaned for public Harness + Loop positioning; remaining stale-expression inventory is now website and long-form docs/protocol.
+- Files: `README.md`, `README.zh.md`, `docs/operations/public-narrative-spec.md`, `docs/todo/sprint.md`, `.va-auto-pilot/sprint-state.json`
+- Signals:
+  - readme-positioning-clean
+  - agent-neutral-credits
+  - protocol-layer-clarified
+  - check-all-pass
+---

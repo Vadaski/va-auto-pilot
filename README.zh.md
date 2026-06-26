@@ -18,7 +18,7 @@
 │ (实现)   │ (实现)   │ (审查)   │                     │
 ├──────────┴──────────┴──────────┴─────────────────────┤
 │         CLI 质量门禁（确定性）                          │
-│  typecheck · lint · test · codex-review · acceptance  │
+│  typecheck · lint · test · review · acceptance        │
 ├──────────────────────────────────────────────────────┤
 │        陷阱指南（失败知识会复利）                        │
 └──────────────────────────────────────────────────────┘
@@ -32,33 +32,31 @@ npx va-auto-pilot init .
 
 ---
 
-## 协议对比
+## 它在 Agent Stack 里的位置
 
-VA Auto-Pilot 与 MCP 和 A2A 的关系是**互补**，而非竞争：
+VA Auto-Pilot 不是另一个连接协议，也不是 MCP/A2A 的竞争者。它位于连接和消息之上，治理长链路工程任务如何被拆解、执行、审查、恢复和验收。
 
-| 维度 | MCP (Anthropic) | A2A (Google) | VA Auto-Pilot |
-|------|----------------|-------------|---------------|
-| **定位** | 工具级上下文 | Agent 发现 + 协调 | 长任务执行 + 证据验证 |
-| **任务类型** | 短同步工具调用 | 发现 + 路由 | 长任务 + 自动拓扑 + 调度器 |
-| **时间模型** | 同步 | 异步 (push) | 异步 (polling; v0.2 push) |
-| **验证机制** | 返回值 = 结果 | 弱 | CLI 门禁 + 模型评估 + 陷阱 |
-| **编排** | 无 | 基础路由 | 拓扑排序 + 能力匹配 + 并发控制 |
-| **失败学习** | 无 | 无 | 陷阱复利 |
-| **互操作** | — | MCP 兼容 | 与 MCP/A2A 互补 |
+```text
+Model / CLI Agent
+  -> Harness：工具、约束、记忆、审查、门禁、权限
+  -> Loop：状态机、计划、委派、恢复、提交、下一任务
+  -> Task Protocol：va-agent-protocol 可组合任务契约
+  -> Connectors：MCP、A2A、本地 CLI、CI、包管理器、外部工具
+```
 
-> **一句话** — MCP 把模型连接到工具。A2A 把 Agent 连接到 Agent。VA Auto-Pilot 确保事情真正做对。
+> **一句话** — MCP/A2A 解决如何连接；VA Auto-Pilot 解决连接之后如何可靠完成长任务。
 
 ---
 
 ## 这个框架在押什么赌注
 
-大多数 Agent 框架是为弥补模型能力不足而设计的——把任务拆成细碎的步骤，精确规定模型该做什么，用强约束把能力弱的模型圈在可控范围内。
+大多数 Agent 框架会降低自治度：把任务拆成细碎步骤，精确规定模型该做什么，让 Agent 贴着人类维护的脚本走。
 
 VA Auto-Pilot 押的是反向的赌注。
 
-**这个框架生来就是为最强模型而建。** 它给出目标、约束和验收标准，然后把路径完全交给模型。没有要遵循的步骤清单，没有要扮演的角色列表，只有：这件事做完之后必须满足哪些条件。
+**这个框架生来就是为强编程 Agent 而建。** 它给出目标、约束和验收标准，然后把路径交给 Agent。没有要遵循的步骤清单，没有要扮演的角色列表，只有：这件事做完之后必须满足哪些条件。
 
-如果你用的是能力较弱的模型，它会失败。不是框架有问题，是你用错了工具。这是有意为之的设计。一个要适配弱模型的框架，必须为弱点做设计。而这个框架为强度做设计。随着前沿模型越来越强，这个框架会变得越来越好，不需要任何改写。
+长链路自治闭环需要强规划、强工具使用和稳定验证能力。较小模型仍然可以参与边界清晰的子任务，但完整闭环默认需要前沿级执行质量。
 
 这就是这个赌注。
 
@@ -86,9 +84,11 @@ VA Auto-Pilot 押的是反向的赌注。
 
 ## 与 va-agent-protocol 的关系
 
-VA Auto-Pilot 是一个**冲刺执行框架**——它运行自治工程闭环。[va-agent-protocol](https://github.com/Vadaski/va-agent-protocol) 是**通用任务协议**——将任何 CLI Agent（包括 VA Auto-Pilot）包装成可组合单元的标准化契约。
+VA Auto-Pilot 是一个**冲刺执行引擎**——它运行自治工程闭环。[va-agent-protocol](https://github.com/Vadaski/va-agent-protocol) 是**通用任务协议**——将任何 CLI Agent 包装成可组合单元的标准化契约。
 
-VA Auto-Pilot 是为 va-agent-protocol 构建的第一个适配器。你可以独立使用 Auto-Pilot，也可以在协议编排器内将它作为被管理的 Agent。
+VA Auto-Pilot 可以独立运行，也可以作为 va-agent-protocol 的 reference engine / managed agent。协议是任务契约，Auto-Pilot 是满足这个契约的一种执行引擎。
+
+MCP 和 A2A 是互补的连接层。VA Auto-Pilot 位于连接和消息之上：它治理长链路工程任务如何被拆解、执行、审查、恢复和验收。
 
 ## Harness + Loop Engineering
 
@@ -146,7 +146,7 @@ VA Auto-Pilot 采用不同的模型。在任何评审开始之前，管理 Agent
 - 你希望有一个随模型进步而变强的执行闭环
 
 **不适合使用的场景：**
-- 你用的是中等或较弱的模型——框架不会替你补能力
+- 你无法提供具备强规划、工具使用和验证行为的 Agent
 - 你想控制每一个实现步骤
 - 你的任务小而明确——一个写得好的单条提示词更快
 - 你希望流程轻量——这个框架有协议开销，价值在于保证质量
@@ -267,7 +267,7 @@ npm run check:all && codex review --uncommitted && npm run validate:distribution
 # npm
 npm i -g va-auto-pilot
 
-# Claude Code
+# Agent 集成示例：Claude Code
 mkdir -p .claude/commands
 curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/va-auto-pilot/claude-command.md \
   -o .claude/commands/va-auto-pilot.md
@@ -300,6 +300,7 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 - 重新开源：`docs/articles/reopen-va-auto-pilot-harness-loop.zh.md`
 - 理念文章：`docs/articles/va-auto-pilot-why-this-is-the-future.zh.md`
 - 协议：`docs/operations/va-auto-pilot-protocol.md`
+- 公共叙事规范：`docs/operations/public-narrative-spec.md`
 - 启动提示：`docs/operations/start-va-auto-pilot-prompt.md`
 - 分发说明：`docs/operations/distribute-skill.md`
 - 理念文章：`docs/human-on-the-loop.md`
@@ -328,8 +329,9 @@ npm run validate:distribution
 
 ## 作者与致谢
 
-- 共创作者：**Vadaski**、**Codex**、**Claude**
-- 致谢：**Vera 项目**
+由 **Vadaski** 创建，在前沿级编程 Agent 协助下开发，并通过 VA Auto-Pilot 自身工程闭环验证。
+
+致谢：**Vera 项目**
 
 ## 许可证
 

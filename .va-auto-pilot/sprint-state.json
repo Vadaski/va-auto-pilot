@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T11:33:41.292Z",
+  "updatedAt": "2026-06-26T11:36:50.806Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2540,28 +2540,28 @@
       "id": "AP-084",
       "title": "Reopen P0: clean README.md and README.zh.md stale positioning, vendor binding, and protocol-layer confusion",
       "priority": "P0",
-      "state": "Backlog",
-      "owner": "",
+      "state": "Done",
+      "owner": "codex",
       "source": "plan-review: split AP-079",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T11:33:54.178Z",
+      "completedAt": "2026-06-26T11:36:50.806Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
-      "notes": "Consumes canonical narrative spec.",
+      "verification": "README stale positioning cleaned: removed weak-model gatekeeping wording, removed Codex/Claude co-creator ownership, replaced protocol comparison table with layer model, clarified standalone + va-agent-protocol reference engine relationship. npm run check:all PASS; validate:distribution PASS.",
+      "notes": "Consumes canonical narrative spec.; Started README/README.zh cleanup against docs/operations/public-narrative-spec.md.",
       "review": {
-        "implementer": "",
+        "implementer": "README.md and README.zh.md cleaned against public narrative spec.",
         "security": "",
         "qa": "",
         "domain": "",
-        "architect": ""
+        "architect": "README now presents VA Auto-Pilot as standalone sprint execution engine plus va-agent-protocol reference engine, with MCP/A2A as complementary connection layers."
       },
       "testing": {
-        "flow": "",
-        "mustPassRate": "",
-        "shouldPassRate": ""
+        "flow": "readme-narrative-cleanup",
+        "mustPassRate": "100%",
+        "shouldPassRate": "100%"
       },
       "dependsOn": [
         "AP-079"

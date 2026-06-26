@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T12:08:22.429Z",
+  "updatedAt": "2026-06-26T12:09:36.719Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2629,6 +2629,221 @@
       "dependsOn": [
         "AP-079",
         "AP-084"
+      ]
+    },
+    {
+      "id": "AP-087",
+      "title": "Roadmap: design observability event schema and evidence bundle",
+      "priority": "P1",
+      "state": "Backlog",
+      "owner": "",
+      "source": "next-gen-harness-loop-roadmap",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-088",
+      "title": "Roadmap: define governance checkpoints and stale approval invalidation",
+      "priority": "P1",
+      "state": "Backlog",
+      "owner": "",
+      "source": "next-gen-harness-loop-roadmap",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Roadmap order: governance follows observability evidence.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-087"
+      ]
+    },
+    {
+      "id": "AP-089",
+      "title": "Roadmap: define file command network permission scope schema",
+      "priority": "P1",
+      "state": "Backlog",
+      "owner": "",
+      "source": "next-gen-harness-loop-roadmap",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Roadmap order: permission scope follows governance checkpoints.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-088"
+      ]
+    },
+    {
+      "id": "AP-090",
+      "title": "Roadmap: add eval gate type to config and runner",
+      "priority": "P2",
+      "state": "Backlog",
+      "owner": "",
+      "source": "next-gen-harness-loop-roadmap",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Roadmap order: eval gates follow permission scope.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-089"
+      ]
+    },
+    {
+      "id": "AP-091",
+      "title": "Roadmap: add budget guardrails and journal output",
+      "priority": "P2",
+      "state": "Backlog",
+      "owner": "",
+      "source": "next-gen-harness-loop-roadmap",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Roadmap order: budget guardrails follow eval gate semantics.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-090"
+      ]
+    },
+    {
+      "id": "AP-092",
+      "title": "Roadmap: map TaskUnit evidence fixtures to Auto-Pilot",
+      "priority": "P2",
+      "state": "Backlog",
+      "owner": "",
+      "source": "next-gen-harness-loop-roadmap",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Roadmap order: protocol fixtures follow budget/evidence semantics.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-091"
+      ]
+    },
+    {
+      "id": "AP-093",
+      "title": "Roadmap: implement read-only MCP resources before write tools",
+      "priority": "P2",
+      "state": "Backlog",
+      "owner": "",
+      "source": "next-gen-harness-loop-roadmap",
+      "createdAt": "2026-06-26",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Roadmap order: MCP adapter follows stable CLI and protocol semantics.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-092"
       ]
     }
   ],

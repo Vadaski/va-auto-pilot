@@ -132,4 +132,10 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| - | - | - | - | - | - |
+| P1 | AP-087 | Roadmap: design observability event schema and evidence bundle | - | - | next-gen-harness-loop-roadmap |
+| P1 | AP-088 | Roadmap: define governance checkpoints and stale approval invalidation | AP-087 | - | next-gen-harness-loop-roadmap |
+| P1 | AP-089 | Roadmap: define file command network permission scope schema | AP-088 | - | next-gen-harness-loop-roadmap |
+| P2 | AP-090 | Roadmap: add eval gate type to config and runner | AP-089 | - | next-gen-harness-loop-roadmap |
+| P2 | AP-091 | Roadmap: add budget guardrails and journal output | AP-090 | - | next-gen-harness-loop-roadmap |
+| P2 | AP-092 | Roadmap: map TaskUnit evidence fixtures to Auto-Pilot | AP-091 | - | next-gen-harness-loop-roadmap |
+| P2 | AP-093 | Roadmap: implement read-only MCP resources before write tools | AP-092 | - | next-gen-harness-loop-roadmap |

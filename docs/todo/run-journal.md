@@ -2539,3 +2539,12 @@
   - mcp-adapter
   - check-all-pass
 ---
+
+## 2026-06-26T12:10:02.199Z - AP-083
+- Summary: Seeded the next-generation roadmap into executable backlog tasks AP-087 through AP-093, ordered from observability evidence to governance, permissions, evals, budgets, protocol fixtures, and MCP adapter.
+- Files: `docs/todo/sprint.md`, `.va-auto-pilot/sprint-state.json`, `docs/todo/run-journal.md`
+- Signals:
+  - sustainable-decomposition
+  - roadmap-backlog-seeded
+  - next-task-ap-087
+---

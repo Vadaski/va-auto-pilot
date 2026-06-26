@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T15:37:02.492Z",
+  "updatedAt": "2026-06-26T15:42:25.102Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2861,6 +2861,35 @@
       "reason": "",
       "verification": "npm run typecheck; npm run check:mcp-resources; npm run validate:distribution; npm run check:all",
       "notes": "Implementing standalone MCP read-only resource validation gate.; Added standalone adapter-facing validation for read-only MCP resource descriptors and payloads.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-095",
+      "title": "Project review: add executable next commands to observe snapshots",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "project-review:cursor-agent",
+      "createdAt": "2026-06-26",
+      "startedAt": "2026-06-26T15:38:44.115Z",
+      "completedAt": "2026-06-26T15:42:25.102Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "npm run typecheck; npm run check:units; npm run check:all",
+      "notes": "Adding structured executable nextCommands to observe snapshot output.; observe snapshot now includes structured executable nextCommands alongside recommendedActions.",
       "review": {
         "implementer": "",
         "security": "",

@@ -43,7 +43,7 @@ When you work in a capable CLI agent surface (for example Claude Code, Cursor, o
 | `.va-auto-pilot/orchestration/run.json` | Active run phase, approved plan id, approved commit tasks |
 | `.va-auto-pilot/orchestration/tracks.json` | Per-track execution status |
 | `.va-auto-pilot/orchestration/checkpoint.json` | Snapshot at last `approve-plan` (invalidates dispatch if stale) |
-| `.va-auto-pilot/orchestration/snapshot.json` | Read-only aggregate for `observe --json` |
+| `.va-auto-pilot/orchestration/snapshot.json` | Read-only aggregate for `observe --json`, including `recommendedActions` text and executable `nextCommands[].argv` suggestions |
 
 ### Approval gates (mandatory in orchestrated mode)
 

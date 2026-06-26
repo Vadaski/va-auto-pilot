@@ -83,6 +83,14 @@ export async function refreshSnapshot(opts) {
       pendingTasks,
       anomalies,
     }),
+    nextCommands: buildNextCommands({
+      run,
+      stopCondition,
+      uncheckedBoard,
+      directives,
+      pendingTasks,
+      anomalies,
+    }),
   };
 
   await writeSnapshot(opts.workDir, snapshot);
@@ -192,6 +200,102 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
       break;
   }
   return actions;
+}
+
+function command(label, args, reason) {
+  return {
+    label,
+    argv: ["node", "scripts/auto-pilot.mjs", ...args],
+    reason,
+  };
+}
+
+function sprintCommand(label, args, reason) {
+  return {
+    label,
+    argv: ["node", "scripts/sprint-board.mjs", ...args],
+    reason,
+  };
+}
+
+function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies }) {
+  const commands = [];
+
+  if (anomalies?.some((a) => a.code === "STALE_RUN_PHASE")) {
+    commands.push(command("Close stale run", ["orchestrate", "close"], "Run phase is stale after sprint work settled."));
+  }
+  if (uncheckedBoard.length > 0) {
+    commands.push({
+      label: "Review human-board instructions",
+      argv: ["$EDITOR", "docs/todo/human-board.md"],
+      reason: "Unchecked human-board instructions may affect dispatch decisions.",
+    });
+  }
+  if (hasHaltDirective(directives)) {
+    commands.push(command("Observe halt directive", ["observe", "--json"], "A halt directive is active; clear or supersede it before continuing."));
+  }
+  if (stopCondition.stop) {
+    commands.push(command("Replan after stop", ["orchestrate", "plan"], "Sprint stop condition is active and needs a fresh plan or human intervention."));
+  }
+
+  if (!run || isTerminalRunPhase(run.phase)) {
+    commands.push(command("Start run", ["orchestrate", "init"], run ? "Current run is terminal." : "No active orchestration run exists."));
+    if (pendingTasks > 0) {
+      commands.push(command("Plan next cycle", ["orchestrate", "plan"], "Pending sprint tasks are available."));
+    } else {
+      commands.push(sprintCommand(
+        "Add backlog task",
+        ["add", "--title", "<task title>", "--priority", "P1", "--source", "human"],
+        "No pending sprint tasks are available."
+      ));
+    }
+    return commands;
+  }
+
+  if (pendingTasks === 0 && ["initialized", "cycle-closed"].includes(run.phase)) {
+    commands.push(sprintCommand(
+      "Add backlog task",
+      ["add", "--title", "<task title>", "--priority", "P1", "--source", "human"],
+      "The run is ready, but backlog is empty."
+    ));
+  }
+
+  switch (run.phase) {
+    case "initialized":
+    case "cycle-closed":
+      commands.push(command("Plan next cycle", ["orchestrate", "plan"], "Run is ready for planning."));
+      break;
+    case "awaiting-plan-approval":
+      commands.push(command("Review plan", ["orchestrate", "review-plan"], "Plan approval requires a review first."));
+      commands.push(command("Approve plan", ["orchestrate", "approve-plan"], "Use after plan review passes."));
+      break;
+    case "plan-reviewed":
+      commands.push(command("Approve plan", ["orchestrate", "approve-plan"], "Plan review is complete."));
+      break;
+    case "plan-approved":
+      commands.push(command("Dispatch workers", ["orchestrate", "dispatch"], "Approved plan is ready to dispatch."));
+      break;
+    case "dispatch-queued":
+      commands.push(command("Await workers", ["orchestrate", "await-workers"], "Workers have been queued."));
+      break;
+    case "dry-run-preview":
+      commands.push(command("Run workers", ["orchestrate", "await-workers"], "Dry-run preview is ready for real execution."));
+      commands.push(command("Close preview", ["orchestrate", "close"], "Close the preview without executing workers."));
+      break;
+    case "awaiting-commit-approval":
+      commands.push(command("Approve commit", ["orchestrate", "approve-commit", "--tasks", "<ids>"], "Completed worker results need commit approval."));
+      break;
+    case "commit-approved":
+      commands.push(command("Commit results", ["orchestrate", "commit"], "Commit approval has been granted."));
+      break;
+    case "committed":
+      commands.push(command("Write journal", ["orchestrate", "journal"], "Committed work needs journal closure."));
+      break;
+    default:
+      break;
+  }
+
+  return commands;
 }
 
 export async function runObserve(argv) {

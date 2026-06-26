@@ -5558,6 +5558,12 @@ test("auto-pilot observe: writes snapshot.json", () => {
   const snapshot = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
   assert.ok(snapshot.run?.runId);
   assert.ok(Array.isArray(snapshot.recommendedActions));
+  assert.ok(Array.isArray(snapshot.nextCommands));
+  assert.ok(snapshot.nextCommands.some((item) =>
+    JSON.stringify(item.argv) === JSON.stringify(["node", "scripts/auto-pilot.mjs", "orchestrate", "plan"])
+  ));
+  const payload = JSON.parse(observe.stdout);
+  assert.deepEqual(payload.snapshot.nextCommands, snapshot.nextCommands);
 });
 
 // ---------------------------------------------------------------------------

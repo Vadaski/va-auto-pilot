@@ -4898,6 +4898,22 @@ test("resolveDispatchFailureGate falls back to parsing gate id from failure text
   assert.equal(gateId, "lint");
 });
 
+test("resolveDispatchFailureGate ignores literal undefined gate IDs", () => {
+  const gateId = resolveDispatchFailureGate({
+    evidence: {
+      failureDetail: {
+        attempted: 'Codex completed but gate "undefined" failed',
+        hypothesis: "Gate check failed"
+      },
+      gateResults: [
+        { gate: "undefined", passed: false, output: "legacy telemetry bug" }
+      ]
+    }
+  });
+
+  assert.equal(gateId, "");
+});
+
 test("ColonyBridge: dispatchViaSpawn handles command failure (exit code != 0)", async () => {
   const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-fail-"));

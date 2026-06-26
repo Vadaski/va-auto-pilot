@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T15:55:13.965Z",
+  "updatedAt": "2026-06-26T15:59:09.777Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -2966,17 +2966,17 @@
       "id": "AP-098",
       "title": "Research follow-up: fix gate name propagation in fix-and-retest paths",
       "priority": "P2",
-      "state": "Backlog",
+      "state": "Done",
       "owner": "",
       "source": "kimi-research:harness-loop",
       "createdAt": "2026-06-26",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-06-26T15:55:52.190Z",
+      "completedAt": "2026-06-26T15:59:09.777Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
-      "notes": "",
+      "verification": "npm run typecheck; npm run check:units; npm run check:all",
+      "notes": "Existing fix-and-retest gate propagation is present; adding explicit regression guard for literal undefined gate IDs.; Added explicit regression guard that literal undefined gate telemetry is ignored instead of propagated.",
       "review": {
         "implementer": "",
         "security": "",

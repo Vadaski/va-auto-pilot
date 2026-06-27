@@ -43,6 +43,8 @@ const DEFAULTS = {
   TEST_RESULTS_DIR: "docs/quality/query-tests/results"
 };
 
+const DEMO_GATE_COMMAND = "npm run check:demo";
+
 const RUNTIME_DEPENDENCIES = {
   tsx: packageJson.dependencies?.tsx ?? "^4.22.4",
   yaml: packageJson.dependencies?.yaml ?? "^2.8.3"
@@ -104,6 +106,7 @@ Options (init):
   --review-cmd <command>        Code review command
   --test-cmd <command>          Acceptance test command
   --allow-placeholder-gates     For unknown stacks, scaffold non-blocking TODO gates
+  --demo                        Add a tiny runnable Node demo with real gates
   --domain-role <name>          3rd review role name
   --domain-prompt <prompt>      3rd review role prompt
   --debug-setup-endpoint <url>  Setup endpoint for test runner
@@ -151,7 +154,7 @@ function parseArgv(argv) {
       continue;
     }
 
-    if (token === "--force" || token === "--dry-run" || token === "--single-cycle" || token === "--no-commit" || token === "--no-colony" || token === "--json" || token === "--strict" || token === "--allow-placeholder-gates") {
+    if (token === "--force" || token === "--dry-run" || token === "--single-cycle" || token === "--no-commit" || token === "--no-colony" || token === "--json" || token === "--strict" || token === "--allow-placeholder-gates" || token === "--demo") {
       result.flags.add(token.slice(2));
       i += 1;
       continue;
@@ -220,7 +223,7 @@ function readTargetPackageJson(packageJsonPath) {
   }
 }
 
-function ensureRuntimeDependencies(targetDir, { dryRun }) {
+function ensureRuntimeDependencies(targetDir, { dryRun, demo = false }) {
   const packageJsonPath = path.join(targetDir, "package.json");
   const existing = readTargetPackageJson(packageJsonPath);
   const targetPackage = existing ?? {
@@ -241,6 +244,9 @@ function ensureRuntimeDependencies(targetDir, { dryRun }) {
     "check:sprint": "node ./scripts/sprint-board.mjs summary",
     "validate:distribution": "node ./scripts/validate-distribution.mjs"
   };
+  if (demo) {
+    scaffoldScripts["check:demo"] = "node ./scripts/demo-smoke.mjs";
+  }
 
   let changed = !existing;
   for (const [name, version] of Object.entries(RUNTIME_DEPENDENCIES)) {
@@ -258,7 +264,9 @@ function ensureRuntimeDependencies(targetDir, { dryRun }) {
     changed = true;
   }
   if (typeof scripts["check:all"] !== "string" || !scripts["check:all"].trim()) {
-    scripts["check:all"] = "npm run check:sprint && npm run validate:distribution";
+    scripts["check:all"] = demo
+      ? "npm run check:demo && npm run check:sprint && npm run validate:distribution"
+      : "npm run check:sprint && npm run validate:distribution";
     changed = true;
   }
 
@@ -279,9 +287,20 @@ function ensureRuntimeDependencies(targetDir, { dryRun }) {
 
 function resolveContext(opts, targetDir, flags = new Set()) {
   const detectedCommands = inferProjectGateCommands(targetDir);
-  const inferredCommands = flags.has("allow-placeholder-gates") && detectedCommands.stack === "unknown"
-    ? placeholderProjectGateCommands()
-    : detectedCommands;
+  let inferredCommands = detectedCommands;
+  if (flags.has("demo")) {
+    inferredCommands = {
+      stack: "demo",
+      packageManager: "npm",
+      buildCommand: DEMO_GATE_COMMAND,
+      testCommand: DEMO_GATE_COMMAND,
+      acceptanceCommand: DEMO_GATE_COMMAND,
+      lintCommand: null,
+      typecheckCommand: null
+    };
+  } else if (flags.has("allow-placeholder-gates") && detectedCommands.stack === "unknown") {
+    inferredCommands = placeholderProjectGateCommands();
+  }
   const projectTestCommand = selectProjectTestCommand(inferredCommands);
   const acceptanceCommand = selectAcceptanceGateCommand(inferredCommands);
   const context = {
@@ -402,9 +421,70 @@ function writeTemplateFiles(targetDir, context, { force, dryRun }) {
   return written;
 }
 
+function writeDemoFiles(targetDir, { force, dryRun }) {
+  const files = [
+    {
+      relativePath: "src/onboarding-target.mjs",
+      content: [
+        "export function scoreActivation(metrics) {",
+        "  const completed = Number(metrics.completedTasks ?? 0);",
+        "  const failed = Number(metrics.failedGates ?? 0);",
+        "  const reviewed = metrics.planReviewed === true ? 1 : 0;",
+        "  return Math.max(0, completed * 10 + reviewed * 5 - failed * 7);",
+        "}",
+        "",
+        "export function summarizeActivation(metrics) {",
+        "  const score = scoreActivation(metrics);",
+        "  return {",
+        "    score,",
+        "    ready: score >= 15",
+        "  };",
+        "}",
+        ""
+      ].join("\n")
+    },
+    {
+      relativePath: "scripts/demo-smoke.mjs",
+      content: [
+        "import assert from \"node:assert/strict\";",
+        "import { summarizeActivation } from \"../src/onboarding-target.mjs\";",
+        "",
+        "const result = summarizeActivation({",
+        "  completedTasks: 1,",
+        "  failedGates: 0,",
+        "  planReviewed: true",
+        "});",
+        "",
+        "assert.deepEqual(result, { score: 15, ready: true });",
+        "console.log(\"demo smoke passed\");",
+        ""
+      ].join("\n")
+    }
+  ];
+  const written = [];
+
+  for (const file of files) {
+    const destination = path.join(targetDir, file.relativePath);
+    if (fs.existsSync(destination) && !force) {
+      throw new Error(
+        `Refusing to overwrite existing file: ${destination}. Use --force to overwrite.`
+      );
+    }
+
+    if (!dryRun) {
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.writeFileSync(destination, file.content, "utf8");
+    }
+    written.push({ destination, dryRun });
+  }
+
+  return written;
+}
+
 function runInit(parsed) {
   const force = parsed.flags.has("force");
   const dryRun = parsed.flags.has("dry-run");
+  const demo = parsed.flags.has("demo");
   const targetDir = path.resolve(process.cwd(), parsed.targetDir);
   const context = resolveContext(parsed.options, targetDir, parsed.flags);
 
@@ -413,7 +493,10 @@ function runInit(parsed) {
   }
 
   const written = writeTemplateFiles(targetDir, context, { force, dryRun });
-  const dependencyFile = ensureRuntimeDependencies(targetDir, { dryRun });
+  if (demo) {
+    written.push(...writeDemoFiles(targetDir, { force, dryRun }));
+  }
+  const dependencyFile = ensureRuntimeDependencies(targetDir, { dryRun, demo });
   if (dependencyFile) {
     written.push(dependencyFile);
   }
@@ -439,12 +522,18 @@ function runInit(parsed) {
     console.log(
       `2. Render board with node scripts/sprint-board.mjs render --state-file ${context.SPRINT_STATE_FILE} --board-file ${context.SPRINT_BOARD_FILE}`
     );
-    console.log("3. Add human instructions in docs/todo/human-board.md");
-    console.log("4. Run npm install if package dependencies changed");
-    console.log("5. Run your first acceptance flow with scripts/test-runner.ts");
-    console.log(
-      "6. Start a new agent session and run the decision loop in docs/operations/va-auto-pilot-protocol.md"
-    );
+    if (demo) {
+      console.log("3. Run npm install");
+      console.log(`4. Run ${DEMO_GATE_COMMAND}`);
+      console.log("5. Start orchestrated mode with node scripts/auto-pilot.mjs orchestrate init");
+    } else {
+      console.log("3. Add human instructions in docs/todo/human-board.md");
+      console.log("4. Run npm install if package dependencies changed");
+      console.log("5. Run your first acceptance flow with scripts/test-runner.ts");
+      console.log(
+        "6. Start a new agent session and run the decision loop in docs/operations/va-auto-pilot-protocol.md"
+      );
+    }
   }
 }
 

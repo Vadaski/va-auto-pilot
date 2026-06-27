@@ -27,8 +27,13 @@
 ### Try it now
 
 ```bash
-npx va-auto-pilot init .
+npx va-auto-pilot init ./auto-pilot-demo --demo
+cd ./auto-pilot-demo
+npm install
+npm run check:demo
 ```
+
+Use `npx va-auto-pilot init .` when adding the loop to an existing repository.
 
 ---
 

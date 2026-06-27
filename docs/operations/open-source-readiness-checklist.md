@@ -56,6 +56,15 @@ npm i -g va-auto-pilot
 npx va-auto-pilot init .
 ```
 
+- [x] runnable demo bootstrap path is visible:
+
+```bash
+npx va-auto-pilot init ./auto-pilot-demo --demo
+cd ./auto-pilot-demo
+npm install
+npm run check:demo
+```
+
 - [x] GitHub-source bootstrap path is documented:
 
 ```bash
@@ -83,12 +92,12 @@ Run these from a clean temporary repository:
 
 ```bash
 tmp="$(mktemp -d)"
-mkdir -p "$tmp/adopter"
-cd "$tmp/adopter"
-npm init -y
-npx va-auto-pilot init .
+cd "$tmp"
+npx va-auto-pilot init ./adopter --demo
+cd ./adopter
 npm install
 node scripts/sprint-board.mjs summary
+npm run check:demo
 npm run validate:distribution
 ```
 
@@ -99,6 +108,7 @@ Success criteria:
 - [x] `docs/todo/sprint.md` exists.
 - [x] `docs/todo/human-board.md` exists.
 - [x] `scripts/sprint-board.mjs` exists and prints a summary.
+- [x] `npm run check:demo` passes.
 - [x] `npm run validate:distribution` passes.
 
 ## 4. First-Run Success

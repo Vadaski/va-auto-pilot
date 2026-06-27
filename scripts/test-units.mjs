@@ -1653,6 +1653,48 @@ test("va-auto-pilot init creates a minimal package.json with runtime dependencie
   assert.match(config, /process\.exit\(1\)/);
 });
 
+test("va-auto-pilot init --demo creates a runnable first-run sample", () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-init-demo-"));
+  fs.writeFileSync(path.join(repoDir, "package.json"), JSON.stringify({
+    name: "typeless-fixture",
+    scripts: {}
+  }, null, 2));
+
+  execFileSync(process.execPath, [
+    path.resolve("bin/va-auto-pilot.mjs"),
+    "init",
+    repoDir,
+    "--project-prefix",
+    "DEMO",
+    "--demo"
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8"
+  });
+
+  const packageJson = JSON.parse(fs.readFileSync(path.join(repoDir, "package.json"), "utf8"));
+  const config = fs.readFileSync(path.join(repoDir, ".va-auto-pilot", "config.yaml"), "utf8");
+  const smokePath = path.join(repoDir, "scripts", "demo-smoke.mjs");
+  const targetPath = path.join(repoDir, "src", "onboarding-target.mjs");
+
+  assert.equal(packageJson.scripts["check:demo"], "node ./scripts/demo-smoke.mjs");
+  assert.equal(packageJson.scripts["check:all"], "npm run check:demo && npm run check:sprint && npm run validate:distribution");
+  assert.match(config, /buildCommand: "npm run check:demo"/);
+  assert.match(config, /acceptanceTestCommand: "npm run check:demo"/);
+  assert.ok(fs.existsSync(smokePath), "demo smoke script should exist");
+  assert.ok(fs.existsSync(targetPath), "demo target module should exist");
+
+  assert.equal(packageJson.type, undefined);
+
+  const result = spawnSync(process.execPath, [smokePath], {
+    cwd: repoDir,
+    encoding: "utf8"
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /demo smoke passed/);
+  assert.doesNotMatch(result.stderr, /MODULE_TYPELESS_PACKAGE_JSON/);
+});
+
 test("va-auto-pilot init can explicitly scaffold placeholder gates for unknown stacks", () => {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-init-placeholder-gates-"));
 

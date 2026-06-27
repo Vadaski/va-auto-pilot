@@ -27,8 +27,13 @@
 ### 立即体验
 
 ```bash
-npx va-auto-pilot init .
+npx va-auto-pilot init ./auto-pilot-demo --demo
+cd ./auto-pilot-demo
+npm install
+npm run check:demo
 ```
+
+如果要接入已有仓库，使用 `npx va-auto-pilot init .`。
 
 ---
 

@@ -293,27 +293,27 @@ function buildAnomalies({ run, trackList, state, pendingTasks, stopCondition }) 
 function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies }) {
   const actions = [];
   if (!run) {
-    actions.push("orchestrate init");
+    actions.push("start agent run");
     if (uncheckedBoard.length > 0) {
       actions.push("process human intent from cockpit");
     } else if (pendingTasks === 0) {
-      actions.push("capture goal: auto-pilot goal --text \"...\"");
+      actions.push("capture next goal from human");
     }
     return actions;
   }
   if (isTerminalRunPhase(run.phase)) {
-    actions.push("orchestrate init");
+    actions.push("start next agent run");
     if (pendingTasks > 0) {
-      actions.push("orchestrate plan");
+      actions.push("plan next agent cycle");
     } else if (uncheckedBoard.length > 0) {
       actions.push("process human intent from cockpit");
     } else {
-      actions.push("capture goal: auto-pilot goal --text \"...\"");
+      actions.push("capture next goal from human");
     }
     return actions;
   }
   if (anomalies?.some((a) => a.code === "STALE_RUN_PHASE")) {
-    actions.push("orchestrate close");
+    actions.push("close stale run state");
   }
   if (uncheckedBoard.length > 0) {
     actions.push("process human intent from cockpit");
@@ -325,37 +325,37 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
     actions.push("intervene replan or capture updated intent before continue");
   }
   if (pendingTasks === 0 && uncheckedBoard.length === 0 && ["initialized", "cycle-closed"].includes(run.phase)) {
-    actions.push("capture goal: auto-pilot goal --text \"...\"");
+    actions.push("capture next goal from human");
   }
   switch (run.phase) {
     case "initialized":
     case "cycle-closed":
-      actions.push("orchestrate plan");
+      actions.push("plan next agent cycle");
       break;
     case "awaiting-plan-approval":
-      actions.push("orchestrate review-plan");
-      actions.push("orchestrate approve-plan");
+      actions.push("review plan before approval");
+      actions.push("approve plan if risk is acceptable");
       break;
     case "plan-reviewed":
-      actions.push("orchestrate approve-plan");
+      actions.push("approve reviewed plan if risk is acceptable");
       break;
     case "plan-approved":
-      actions.push("orchestrate dispatch");
+      actions.push("dispatch approved agent work");
       break;
     case "dispatch-queued":
-      actions.push("orchestrate await-workers");
+      actions.push("wait for agent work to settle");
       break;
     case "dry-run-preview":
-      actions.push("orchestrate await-workers (without --dry-run) or orchestrate close");
+      actions.push("run previewed agent work or close the preview");
       break;
     case "awaiting-commit-approval":
-      actions.push("orchestrate approve-commit --tasks <ids>");
+      actions.push("approve completion evidence if trustworthy");
       break;
     case "commit-approved":
-      actions.push("orchestrate commit");
+      actions.push("commit approved results");
       break;
     case "committed":
-      actions.push("orchestrate journal");
+      actions.push("summarize committed cycle");
       break;
     default:
       break;

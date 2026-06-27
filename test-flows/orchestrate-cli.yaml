@@ -165,7 +165,8 @@ flows:
         echo -e '# Human Board\n\n## Instructions\n' > "$tmpdir/docs/todo/human-board.md"
         repo="$(cd "$ROOT" && pwd)"
         cd "$tmpdir"
-        node "$repo/scripts/auto-pilot.mjs" observe --json | grep -q 'goal --text'
+        node "$repo/scripts/auto-pilot.mjs" observe --json \
+          | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); const a=j.snapshot?.recommendedActions ?? []; const c=j.snapshot?.nextCommands ?? []; process.exit(a.includes('capture next goal from human') && a.every(x=>!x.includes('orchestrate')) && c.some(x=>Array.isArray(x.argv) && x.argv.includes('goal') && x.argv.includes('--text')) ? 0 : 1)"
     env:
       ROOT: "."
     assert:

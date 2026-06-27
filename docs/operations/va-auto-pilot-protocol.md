@@ -44,6 +44,8 @@ overrides without requiring the human to edit internal files directly.
 Cockpit evidence must be shown through `humanJudgment.evidence.summary`, which
 compresses journal memory into recent completions, failures, gates, and critical
 decisions.
+`recommendedActions` must stay semantic and human-readable; executable phase
+commands belong in `nextCommands[].argv` for the session agent.
 
 ### Roles
 

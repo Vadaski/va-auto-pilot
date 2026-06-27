@@ -13,13 +13,14 @@
 4. `.va-auto-pilot/sprint-state.json` is the machine task source of truth.
 5. `docs/todo/sprint.md` is a generated board view (`node scripts/sprint-board.mjs render`).
 6. `docs/todo/run-journal.md` is append-only execution memory; show humans `cockpit.humanJudgment.evidence.summary`, not raw journal entries.
-7. `docs/todo/human-board.md` is an internal projection of human intent and always overrides automatic decisions.
-8. Execute one primary task per cycle; optional parallel tracks are allowed when independent.
-9. Goal-first delegation: define objective + constraints + acceptance. Do not prescribe implementation steps.
-10. CLI-first execution: prefer deterministic commands over manual operations.
-11. Frontier model first: use the strongest available model for high-impact tasks.
-12. Closed-loop quality is mandatory: build -> review -> acceptance -> commit.
-13. Perspectives emerge from constraints and anchors — never from fixed role lists. Wrong perspectives mean wrong anchors; change both.
+7. `recommendedActions` are semantic prompts; executable phase commands belong in `nextCommands[].argv` for the session agent.
+8. `docs/todo/human-board.md` is an internal projection of human intent and always overrides automatic decisions.
+9. Execute one primary task per cycle; optional parallel tracks are allowed when independent.
+10. Goal-first delegation: define objective + constraints + acceptance. Do not prescribe implementation steps.
+11. CLI-first execution: prefer deterministic commands over manual operations.
+12. Frontier model first: use the strongest available model for high-impact tasks.
+13. Closed-loop quality is mandatory: build -> review -> acceptance -> commit.
+14. Perspectives emerge from constraints and anchors — never from fixed role lists. Wrong perspectives mean wrong anchors; change both.
 
 ---
 

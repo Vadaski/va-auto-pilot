@@ -6006,6 +6006,8 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
   assert.ok(evidence.summary.decisions.some((item) => item.includes("accepted risk")));
   assert.ok(evidence.signals.some((item) => item.includes("Dispatch failed")));
   assert.ok(evidence.signals.some((item) => item.includes("review gate PASS")));
+  assert.ok(payload.cockpit.recommendedActions.every((item) => !item.includes("orchestrate")));
+  assert.ok(payload.cockpit.nextCommands.some((item) => item.argv.includes("orchestrate")));
   assert.ok(!Object.hasOwn(payload, "snapshot"));
 });
 

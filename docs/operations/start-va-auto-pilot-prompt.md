@@ -22,6 +22,15 @@ node scripts/auto-pilot.mjs orchestrate commit
 node scripts/auto-pilot.mjs orchestrate journal
 ```
 
+If a long run was interrupted or state looks stale, run:
+
+```bash
+node scripts/auto-pilot.mjs orchestrate recover --json
+```
+
+Apply only conservative recovery mutations with `--apply` after inspecting the
+plan.
+
 Tactical changes: `node scripts/auto-pilot.mjs intervene ...` → `.va-auto-pilot/orchestration/directives.json` (not human-board).
 
 Strategic intent: `docs/todo/human-board.md`.
@@ -34,6 +43,7 @@ Strategic intent: `docs/todo/human-board.md`.
 - Never skip quality gates on real commits.
 - Do not prescribe implementation steps to workers — objective + constraints + gates only.
 - Read memory via `node scripts/sprint-board.mjs journal --view`.
+- Use `orchestrate recover --json` before resuming after crashes, stale checkpoints, or ambiguous worker state.
 
 ## Unattended (CI only)
 

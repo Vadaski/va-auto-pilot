@@ -69,10 +69,24 @@ node scripts/auto-pilot.mjs observe --json
 node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-001
 node scripts/auto-pilot.mjs orchestrate commit
 node scripts/auto-pilot.mjs orchestrate journal
+node scripts/auto-pilot.mjs orchestrate recover --json     # diagnose stale/crashed run state
 node scripts/auto-pilot.mjs orchestrate close
 ```
 
 Between steps the manager may run `intervene` (writes `directives.json`) or update `human-board.md`. If checkpoint is stale after board edits, run `approve-plan` again before `dispatch`.
+
+### Recovery / Resume
+
+Use `node scripts/auto-pilot.mjs orchestrate recover --json` after an interrupted
+or ambiguous long run. The command diagnoses stale checkpoints, dead executor
+locks, dead or expired running tracks, halted runs, and run phases that no
+longer match sprint state. It returns issues, conservative mutations, and
+executable next commands.
+
+`recover` is read-mostly by default. Add `--apply` only when the proposed
+mutations are acceptable; it can clear dead executor locks, settle stale tracks,
+return a stale approved plan to plan-review/approval, or close a run that has no
+pending sprint work. It does not dispatch workers, approve plans, or commit code.
 
 ### Unattended mode (CI / overnight only)
 

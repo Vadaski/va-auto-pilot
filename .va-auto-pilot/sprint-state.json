@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-26T16:04:00.504Z",
+  "updatedAt": "2026-06-27T00:17:32.188Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -3006,6 +3006,35 @@
       "reason": "",
       "verification": "npm run typecheck; npm run check:mcp-resources; npm run check:units; npm run check:all",
       "notes": "Expose observe snapshot through read-only MCP resources; implementation and tests in progress.; Added va-auto-pilot://orchestration-snapshot read-only resource with unit and adapter-facing validation coverage.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-100",
+      "title": "Long-run robustness: recovery, budget usage, and compressed journal context",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "human: long-cycle robustness",
+      "createdAt": "2026-06-27",
+      "startedAt": "",
+      "completedAt": "2026-06-27T00:17:32.188Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "Added orchestrate recover diagnostics/apply path, worker log usage extraction for budget summaries, capped journal active-signal view, docs/help updates, and regression coverage. Verified with node scripts/test-units.mjs and npm run check:all.",
+      "notes": "",
       "review": {
         "implementer": "",
         "security": "",

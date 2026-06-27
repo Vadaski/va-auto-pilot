@@ -282,6 +282,7 @@ node scripts/auto-pilot.mjs orchestrate init --manager-surface generic-cli-agent
 node scripts/auto-pilot.mjs orchestrate plan
 node scripts/auto-pilot.mjs orchestrate review-plan
 node scripts/auto-pilot.mjs orchestrate approve-plan
+node scripts/auto-pilot.mjs orchestrate recover --json   # 诊断中断/过期运行状态
 
 # Agent 集成示例：Claude Code command
 mkdir -p .claude/commands

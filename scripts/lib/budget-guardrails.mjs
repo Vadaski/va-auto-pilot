@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 export const BUDGET_SCHEMA_VERSION = 1;
 
 /**
@@ -115,4 +117,110 @@ export function formatBudgetSummary({ status, cycle, elapsedMs, commandCount, wa
     parts.push(`stops=${stops.join("; ")}`);
   }
   return parts.join(" | ");
+}
+
+function addNumber(target, key, value) {
+  const number = Number(value);
+  if (Number.isFinite(number) && number > 0) {
+    target[key] = (target[key] ?? 0) + number;
+  }
+}
+
+function collectUsageFromObject(value, usage) {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  if (value.usage && typeof value.usage === "object") {
+    collectUsageFromObject(value.usage, usage);
+  }
+
+  addNumber(usage, "inputTokens", value.input_tokens ?? value.inputTokens ?? value.prompt_tokens ?? value.promptTokens);
+  addNumber(usage, "outputTokens", value.output_tokens ?? value.outputTokens ?? value.completion_tokens ?? value.completionTokens);
+  addNumber(usage, "cacheCreationInputTokens", value.cache_creation_input_tokens ?? value.cacheCreationInputTokens);
+  addNumber(usage, "cacheReadInputTokens", value.cache_read_input_tokens ?? value.cacheReadInputTokens);
+  addNumber(usage, "totalTokens", value.total_tokens ?? value.totalTokens);
+  addNumber(usage, "costUsd", value.total_cost_usd ?? value.totalCostUsd ?? value.cost_usd ?? value.costUsd);
+}
+
+function collectUsageFromJsonLines(text, usage) {
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+      continue;
+    }
+    try {
+      collectUsageFromObject(JSON.parse(trimmed), usage);
+    } catch {
+      // Worker logs are best-effort telemetry; ignore non-JSON lines.
+    }
+  }
+}
+
+/**
+ * Extract token/cost telemetry from common CLI-agent log formats.
+ *
+ * @param {string} text
+ * @returns {{ inputTokens: number, outputTokens: number, cacheCreationInputTokens: number, cacheReadInputTokens: number, totalTokens: number, costUsd: number }}
+ */
+export function extractUsageFromText(text) {
+  const usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+    totalTokens: 0,
+    costUsd: 0,
+  };
+
+  const source = String(text ?? "");
+  collectUsageFromJsonLines(source, usage);
+  const nonJsonSource = source
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      return !(trimmed.startsWith("{") && trimmed.endsWith("}"));
+    })
+    .join("\n");
+
+  /** @type {{ key: keyof typeof usage, regex: RegExp }[]} */
+  const regexes = [
+    { key: "inputTokens", regex: /\binput[_\s-]*tokens?\b["':=\s]+([0-9][0-9,]*)/gi },
+    { key: "outputTokens", regex: /\boutput[_\s-]*tokens?\b["':=\s]+([0-9][0-9,]*)/gi },
+    { key: "totalTokens", regex: /\b(?:total[_\s-]*tokens?|tokens used)\b["':=\s]+([0-9][0-9,]*)/gi },
+    { key: "costUsd", regex: /\b(?:total[_\s-]*cost[_\s-]*usd|cost[_\s-]*usd|cost)\b["':=$\s]+([0-9]+(?:\.[0-9]+)?)/gi },
+  ];
+
+  for (const { key, regex } of regexes) {
+    for (const match of nonJsonSource.matchAll(regex)) {
+      addNumber(usage, key, String(match[1]).replaceAll(",", ""));
+    }
+  }
+
+  if (!usage.totalTokens) {
+    usage.totalTokens = usage.inputTokens + usage.outputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens;
+  }
+
+  return usage;
+}
+
+/**
+ * @param {string[]} files
+ * @param {{ readFileSync?: typeof import("node:fs").readFileSync }} [options]
+ */
+export function extractUsageFromFiles(files, options = {}) {
+  const readFileSync = options.readFileSync ?? fs.readFileSync;
+  const total = extractUsageFromText("");
+  for (const file of files ?? []) {
+    if (!file) continue;
+    try {
+      const usage = extractUsageFromText(String(readFileSync ? readFileSync(file, "utf8") : ""));
+      for (const key of Object.keys(total)) {
+        total[key] += usage[key] ?? 0;
+      }
+    } catch {
+      // Missing or rotated worker logs should not break the budget gate.
+    }
+  }
+  return total;
 }

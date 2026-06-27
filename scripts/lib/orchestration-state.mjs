@@ -256,6 +256,133 @@ export function isTerminalRunPhase(phase) {
   return TERMINAL_RUN_PHASES.has(phase);
 }
 
+function command(label, argv, reason) {
+  return { label, argv, reason };
+}
+
+/**
+ * Build a deterministic recovery plan for an interrupted orchestrated run.
+ *
+ * @param {{
+ *   run?: any,
+ *   tracksDoc?: { tracks?: any[] },
+ *   state?: { tasks?: any[] },
+ *   checkpointStatus?: { stale: boolean, reason: string },
+ *   halt?: boolean,
+ *   nowMs?: number,
+ *   trackTimeoutMs?: number,
+ * }} input
+ */
+export function buildRecoveryPlan(input = {}) {
+  const run = input.run ?? null;
+  const tracks = Array.isArray(input.tracksDoc?.tracks) ? input.tracksDoc.tracks : [];
+  const tasks = Array.isArray(input.state?.tasks) ? input.state.tasks : [];
+  const pendingTasks = tasks.filter((task) => task?.state !== "Done").length;
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const nowMs = Number.isFinite(input.nowMs) ? input.nowMs : Date.now();
+  const trackTimeoutMs = Number.isFinite(input.trackTimeoutMs) ? input.trackTimeoutMs : 600_000;
+  const issues = [];
+  const mutations = [];
+  const nextCommands = [];
+
+  if (!run) {
+    issues.push({ code: "NO_ACTIVE_RUN", severity: pendingTasks > 0 ? "warning" : "info", message: "No active orchestration run exists." });
+    nextCommands.push(command("Start run", ["node", "scripts/auto-pilot.mjs", "orchestrate", "init"], "Create an orchestration run before planning."));
+    return { ok: true, status: pendingTasks > 0 ? "recoverable" : "idle", issues, mutations, nextCommands };
+  }
+
+  if (isTerminalRunPhase(run.phase)) {
+    issues.push({ code: "RUN_TERMINAL", severity: "info", message: `Run phase is ${run.phase}.` });
+    nextCommands.push(command("Start run", ["node", "scripts/auto-pilot.mjs", "orchestrate", "init"], "Terminal runs do not resume in place."));
+    return { ok: true, status: "idle", issues, mutations, nextCommands };
+  }
+
+  if (input.halt) {
+    issues.push({ code: "HALT_DIRECTIVE", severity: "warning", message: "A halt-run directive is active." });
+    nextCommands.push(command("Inspect halt", ["node", "scripts/auto-pilot.mjs", "observe", "--json"], "Clear or supersede the halt directive before continuing."));
+  }
+
+  if (run.locks?.executorPid && !isProcessAlive(run.locks.executorPid)) {
+    issues.push({ code: "DEAD_EXECUTOR_LOCK", severity: "warning", message: `Executor pid ${run.locks.executorPid} is not alive.` });
+    mutations.push({ type: "clear-executor-lock" });
+  }
+
+  if (input.checkpointStatus?.stale && ["plan-approved", "dispatch-queued", "running"].includes(run.phase)) {
+    issues.push({ code: "STALE_CHECKPOINT", severity: "critical", message: input.checkpointStatus.reason || "checkpoint is stale" });
+    mutations.push({ type: "return-to-plan-approval", reason: input.checkpointStatus.reason || "checkpoint is stale" });
+    nextCommands.push(command("Review plan", ["node", "scripts/auto-pilot.mjs", "orchestrate", "review-plan"], "Plan context changed; review before approving again."));
+  }
+
+  for (const track of tracks) {
+    if (track?.state !== "running") {
+      continue;
+    }
+    const startedMs = Date.parse(track.startedAt || track.lastHeartbeat || "");
+    const heartbeatAgeMs = Number.isFinite(startedMs) ? nowMs - startedMs : null;
+    const pidDead = track.pid ? !isProcessAlive(track.pid) : false;
+    const heartbeatExpired = heartbeatAgeMs !== null && heartbeatAgeMs > trackTimeoutMs;
+    const sprintTask = taskById.get(track.taskId);
+    if (pidDead || heartbeatExpired || ["Done", "Failed"].includes(sprintTask?.state)) {
+      const reason = pidDead
+        ? `worker pid ${track.pid} is not alive`
+        : heartbeatExpired
+          ? `worker heartbeat expired after ${heartbeatAgeMs}ms`
+          : `sprint task is already ${sprintTask?.state}`;
+      issues.push({ code: "STALE_RUNNING_TRACK", severity: "warning", taskId: track.taskId, message: reason });
+      mutations.push({ type: "settle-track", taskId: track.taskId, resultAction: "recovered-stale-track", reason });
+    }
+  }
+
+  if (pendingTasks === 0 && run.phase !== "done") {
+    issues.push({ code: "STALE_RUN_NO_PENDING_TASKS", severity: "warning", message: `Run phase is ${run.phase}, but sprint has no pending tasks.` });
+    mutations.push({ type: "close-run" });
+    nextCommands.push(command("Close run", ["node", "scripts/auto-pilot.mjs", "orchestrate", "recover", "--apply"], "Close stale run state."));
+  }
+
+  if (nextCommands.length === 0) {
+    switch (run.phase) {
+      case "initialized":
+      case "cycle-closed":
+        nextCommands.push(command("Plan", ["node", "scripts/auto-pilot.mjs", "orchestrate", "plan"], "Run is ready to plan."));
+        break;
+      case "awaiting-plan-approval":
+        nextCommands.push(command("Review plan", ["node", "scripts/auto-pilot.mjs", "orchestrate", "review-plan"], "Plan needs review before approval."));
+        break;
+      case "plan-reviewed":
+        nextCommands.push(command("Approve plan", ["node", "scripts/auto-pilot.mjs", "orchestrate", "approve-plan"], "Reviewed plan is ready for approval."));
+        break;
+      case "plan-approved":
+        nextCommands.push(command("Dispatch", ["node", "scripts/auto-pilot.mjs", "orchestrate", "dispatch"], "Approved plan is ready to dispatch."));
+        break;
+      case "dispatch-queued":
+      case "running":
+        nextCommands.push(command("Await workers", ["node", "scripts/auto-pilot.mjs", "orchestrate", "await-workers"], "Queued or running tracks need synchronization."));
+        break;
+      case "awaiting-commit-approval":
+        nextCommands.push(command("Approve commit", ["node", "scripts/auto-pilot.mjs", "orchestrate", "approve-commit", "--tasks", "<ids>"], "Completed tasks need commit approval."));
+        break;
+      case "commit-approved":
+        nextCommands.push(command("Commit", ["node", "scripts/auto-pilot.mjs", "orchestrate", "commit"], "Commit approval has been granted."));
+        break;
+      case "committed":
+        nextCommands.push(command("Journal", ["node", "scripts/auto-pilot.mjs", "orchestrate", "journal"], "Record cycle boundary and close the cycle."));
+        break;
+      default:
+        nextCommands.push(command("Observe", ["node", "scripts/auto-pilot.mjs", "observe", "--json"], "Inspect current orchestration state."));
+        break;
+    }
+  }
+
+  const hasCritical = issues.some((issue) => issue.severity === "critical");
+  return {
+    ok: !hasCritical,
+    status: mutations.length > 0 ? "recoverable" : "ready",
+    issues,
+    mutations,
+    nextCommands,
+  };
+}
+
 export function clearCheckpoint(workDir) {
   const { checkpoint } = orchestrationPaths(workDir);
   if (fs.existsSync(checkpoint)) {

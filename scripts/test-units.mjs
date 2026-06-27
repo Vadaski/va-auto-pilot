@@ -66,6 +66,7 @@ import {
 } from "./lib/permission-scope.mjs";
 import {
   evaluateBudget,
+  extractUsageFromText,
   formatBudgetSummary,
   normalizeBudgetConfig,
 } from "./lib/budget-guardrails.mjs";
@@ -79,6 +80,7 @@ import {
   resolveEvalHistoryFile,
 } from "./lib/eval-history.mjs";
 import { withPilotFileLock, writeTextFileAtomicSync } from "./lib/pilot-state.mjs";
+import { buildRecoveryPlan } from "./lib/orchestration-state.mjs";
 
 // ---------------------------------------------------------------------------
 // Import pure functions from sprint-board via a thin re-export shim.
@@ -595,6 +597,43 @@ test("appendHumanBoardAuditEntry writes the extracted acknowledgment list", () =
   assert.ok(journal.includes("/tmp/agent.log"), journal);
 });
 
+test("journal --view caps active signals while preserving recent entries", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-journal-view-"));
+  const journalFile = path.join(tmpDir, "run-journal.md");
+  const lines = [
+    "# Run Journal",
+    "",
+    "## Codebase Signals",
+    "- seed-signal",
+    "",
+    "## Entries",
+  ];
+  for (let index = 1; index <= 90; index += 1) {
+    lines.push(
+      `## 2026-06-26T00:${String(index).padStart(2, "0")}:00.000Z - AP-${String(index).padStart(3, "0")}`,
+      `- Summary: entry ${index}`,
+      "- Signals:",
+      `  - signal-${index}`,
+      "---",
+      "",
+    );
+  }
+  fs.writeFileSync(journalFile, lines.join("\n"), "utf8");
+
+  const output = execFileSync(process.execPath, [
+    "scripts/sprint-board.mjs",
+    "journal",
+    "--view",
+    "--journal-file",
+    journalFile,
+  ], { cwd: process.cwd(), encoding: "utf8" });
+
+  assert.match(output, /\[compressed\] 11 older signal\(s\) omitted/);
+  assert.doesNotMatch(output, /- signal-1\n/);
+  assert.match(output, /- signal-90/);
+  assert.match(output, /## 2026-06-26T00:90:00.000Z - AP-090/);
+});
+
 test("deriveCommitType infers docs, test, and fix task categories", () => {
   assert.equal(deriveCommitType({ source: "docs/operations/va-auto-pilot-protocol.md", title: "Update protocol" }), "docs");
   assert.equal(deriveCommitType({ source: "", title: "Add CLI flow coverage" }), "test");
@@ -969,6 +1008,57 @@ test("budget-guardrails: formatBudgetSummary includes stops for journal output",
   });
   assert.match(summary, /budget=stop/);
   assert.match(summary, /stops=hard elapsed budget reached/);
+});
+
+test("budget-guardrails: extracts token and cost usage from CLI worker logs", () => {
+  const usage = extractUsageFromText([
+    '{"type":"result","total_cost_usd":0.0125,"usage":{"input_tokens":100,"cache_read_input_tokens":25,"output_tokens":40}}',
+    "tokens used: 1,000",
+    "cost: $0.004",
+  ].join("\n"));
+
+  assert.equal(usage.inputTokens, 100);
+  assert.equal(usage.outputTokens, 40);
+  assert.equal(usage.cacheReadInputTokens, 25);
+  assert.equal(usage.totalTokens, 1000);
+  assert.equal(usage.costUsd, 0.0165);
+});
+
+test("orchestration recovery plan identifies stale checkpoints and dead running tracks", () => {
+  const plan = buildRecoveryPlan({
+    run: {
+      runId: "run-1",
+      phase: "running",
+      locks: { executorPid: 99999999 },
+    },
+    tracksDoc: {
+      tracks: [
+        {
+          taskId: "AP-101",
+          state: "running",
+          pid: 99999999,
+          startedAt: "2026-06-26T00:00:00.000Z",
+        },
+      ],
+    },
+    state: {
+      tasks: [
+        { id: "AP-101", state: "In Progress" },
+      ],
+    },
+    checkpointStatus: { stale: true, reason: "human-board changed since approve-plan" },
+    nowMs: Date.parse("2026-06-26T00:20:00.000Z"),
+    trackTimeoutMs: 600_000,
+  });
+
+  assert.equal(plan.status, "recoverable");
+  assert.equal(plan.ok, false);
+  assert.ok(plan.issues.some((issue) => issue.code === "STALE_CHECKPOINT"));
+  assert.ok(plan.issues.some((issue) => issue.code === "DEAD_EXECUTOR_LOCK"));
+  assert.ok(plan.issues.some((issue) => issue.code === "STALE_RUNNING_TRACK"));
+  assert.ok(plan.mutations.some((mutation) => mutation.type === "return-to-plan-approval"));
+  assert.ok(plan.mutations.some((mutation) => mutation.type === "clear-executor-lock"));
+  assert.ok(plan.mutations.some((mutation) => mutation.type === "settle-track"));
 });
 
 test("mcp-readonly-resources: lists read-only resource descriptors", () => {

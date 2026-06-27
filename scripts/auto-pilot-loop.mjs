@@ -52,6 +52,7 @@ import {
 } from "./lib/permission-scope.mjs";
 import {
   evaluateBudget,
+  extractUsageFromFiles,
   normalizeBudgetConfig,
 } from "./lib/budget-guardrails.mjs";
 import {
@@ -2002,7 +2003,8 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
           done: false,
           task,
           action: resultActions[action],
-          details: partialDispatch.partial ? `partial-success: exitCode=${result.exitCode}` : "success"
+          details: partialDispatch.partial ? `partial-success: exitCode=${result.exitCode}` : "success",
+          logFile: result.logFile ?? ""
         };
       }
 
@@ -2044,7 +2046,8 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
         done: false,
         task,
         action: failureActions[action],
-        details: failedGateId ? `exitCode=${result.exitCode}; failedGate=${failedGateId}` : `exitCode=${result.exitCode}`
+        details: failedGateId ? `exitCode=${result.exitCode}; failedGate=${failedGateId}` : `exitCode=${result.exitCode}`,
+        logFile: result.logFile ?? ""
       };
     }
 
@@ -2572,6 +2575,7 @@ async function runLoop(opts) {
         pendingTasks,
         stopCondition,
         commitFiles: trackResults.flatMap((track) => track.commitFiles ?? []),
+        workerUsage: extractUsageFromFiles(trackResults.map((track) => track.logFile).filter(Boolean)),
         steps: trackResults.flatMap((track) => track.steps ?? [])
       };
       cycleResult.budget = evaluateBudget({
@@ -2579,7 +2583,11 @@ async function runLoop(opts) {
         cycle,
         startedAtMs: budgetStartedAtMs,
         commandCount: cycleResult.steps.length,
+        tokenCount: cycleResult.workerUsage.totalTokens || null,
       });
+      if (cycleResult.workerUsage.costUsd > 0) {
+        cycleResult.budget.summary = `${cycleResult.budget.summary} | costUsd=${cycleResult.workerUsage.costUsd.toFixed(6)}`;
+      }
 
       if (stopCondition.stop) {
         cycleResult.done = true;

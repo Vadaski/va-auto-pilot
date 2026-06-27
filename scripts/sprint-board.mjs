@@ -90,6 +90,7 @@ const DEFAULT_PITFALLS_FILE = ".va-auto-pilot/pitfalls.json";
 const DEFAULT_CONFIG_FILE = ".va-auto-pilot/config.yaml";
 const DEFAULT_CONSTRAINTS_DIR = ".va-auto-pilot/constraints";
 const VALID_FAILURE_TYPES = ["gate", "acceptance", "review"];
+const JOURNAL_VIEW_MAX_ACTIVE_SIGNALS = 80;
 const CONSTRAINT_STOPWORDS = new Set([
   "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "into",
   "is", "it", "of", "on", "or", "that", "the", "this", "to", "via", "with"
@@ -990,14 +991,19 @@ function renderJournalView(filePath) {
   }
 
   const { codebaseSignals, entries } = parseJournal(fs.readFileSync(filePath, "utf8"));
-  const activeSignals = [];
+  const activeSignalsNewestFirst = [];
   const seenSignals = new Set();
-  for (const signal of [...codebaseSignals, ...entries.flatMap((entry) => entry.signals)]) {
+  const historicalSignals = [...codebaseSignals, ...entries.flatMap((entry) => entry.signals)];
+  for (const signal of [...historicalSignals].reverse()) {
     const normalized = String(signal ?? "").trim();
     if (!normalized || seenSignals.has(normalized)) continue;
     seenSignals.add(normalized);
-    activeSignals.push(normalized);
+    activeSignalsNewestFirst.push(normalized);
   }
+  const activeSignals = activeSignalsNewestFirst
+    .slice(0, JOURNAL_VIEW_MAX_ACTIVE_SIGNALS)
+    .reverse();
+  const omittedSignalCount = Math.max(0, activeSignalsNewestFirst.length - activeSignals.length);
 
   const recentEntries = entries.slice(-5).reverse();
   const earlierEntries = entries.slice(0, Math.max(0, entries.length - 5));
@@ -1006,6 +1012,9 @@ function renderJournalView(filePath) {
   if (activeSignals.length === 0) {
     lines.push("- none");
   } else {
+    if (omittedSignalCount > 0) {
+      lines.push(`- [compressed] ${omittedSignalCount} older signal(s) omitted; source journal remains append-only.`);
+    }
     for (const signal of activeSignals) {
       lines.push(`- ${signal}`);
     }

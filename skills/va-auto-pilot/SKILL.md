@@ -79,6 +79,7 @@ node scripts/auto-pilot.mjs orchestrate dispatch
 node scripts/auto-pilot.mjs orchestrate await-workers
 node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-XXX
 node scripts/auto-pilot.mjs orchestrate commit
+node scripts/auto-pilot.mjs orchestrate recover --json     # diagnose stale/crashed run state
 ```
 
 Unattended only: `node scripts/auto-pilot-loop.mjs --max-cycles 50` or `orchestrate run-unattended --waive-approvals`.
@@ -107,6 +108,7 @@ Unattended only: `node scripts/auto-pilot-loop.mjs --max-cycles 50` or `orchestr
 - Severity mapped: transient/fixable/critical
 - Recovery strategy selected: retry-immediately, retry-with-fix, escalate-model, create-fix-task, stop
 - Classification is journaled on every failure
+- `orchestrate recover --json` diagnoses interrupted runs; `--apply` only performs conservative state repair (clear dead locks, settle stale tracks, return stale checkpoints to plan approval, close no-pending-work runs)
 
 ### Structured Review Pipeline
 - Review output parsed for CRITICAL/BUG/P0/P1/P2/WARNING/STYLE findings
@@ -160,6 +162,7 @@ Cross-project: inherit proven gates from similar projects.
 ```bash
 # Autonomous loop (primary)
 node scripts/auto-pilot-loop.mjs [--max-cycles 50] [--no-parallel] [--skip-sprint-review]
+node scripts/auto-pilot.mjs orchestrate recover [--apply] [--json]
 
 # Sprint board management
 node scripts/sprint-board.mjs next [--json] [--strict]

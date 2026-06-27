@@ -28,6 +28,7 @@ Usage:
   node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-001,AP-002 [--json]
   node scripts/auto-pilot.mjs orchestrate commit [--json]
   node scripts/auto-pilot.mjs orchestrate journal [--json]
+  node scripts/auto-pilot.mjs orchestrate recover [--apply] [--json]
   node scripts/auto-pilot.mjs orchestrate close [--json]
   node scripts/auto-pilot.mjs orchestrate run-unattended --waive-approvals [--max-cycles N]
 
@@ -42,7 +43,7 @@ Shared options:
   --state-file, --board-file, --journal-file, --dry-run, --no-commit, --no-colony, --strict, --json
 
 Interactive default loop (session agent):
-  init → plan → approve-plan → dispatch → observe → await-workers → approve-commit → commit → journal
+  init → plan → review-plan → approve-plan → dispatch → observe → await-workers → approve-commit → commit → journal
 `);
 }
 

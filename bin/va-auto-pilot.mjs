@@ -127,6 +127,8 @@ Examples:
   va-auto-pilot run .
   va-auto-pilot run . --max-cycles 5 --dry-run
   va-auto-pilot run . --no-colony --agent-template "codex exec {taskId}"
+  va-auto-pilot orchestrate recover --json
+  va-auto-pilot orchestrate recover --apply
 `);
 }
 

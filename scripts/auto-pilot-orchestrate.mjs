@@ -14,6 +14,7 @@ import {
 } from "./lib/orchestration-cli.mjs";
 import {
   assertActiveRun,
+  buildRecoveryPlan,
   buildCheckpoint,
   clearCheckpoint,
   createPlanId,
@@ -138,6 +139,98 @@ async function orchestrateClose(opts) {
   }
   await refreshSnapshot(opts);
   return emitResult(opts, { ok: true, action: "close", runId: run.runId });
+}
+
+async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
+  if (!opts.parsed?.flags?.has("apply") || plan.mutations.length === 0) {
+    return { applied: false, mutations: [] };
+  }
+
+  const applied = [];
+  let runChanged = false;
+  let tracksChanged = false;
+  const now = new Date().toISOString();
+
+  for (const mutation of plan.mutations) {
+    if (mutation.type === "clear-executor-lock") {
+      run.locks = { ...(run.locks ?? {}), executorPid: null };
+      runChanged = true;
+      applied.push(mutation);
+    }
+
+    if (mutation.type === "return-to-plan-approval") {
+      run.approvedPlanId = null;
+      run.phase = "awaiting-plan-approval";
+      clearCheckpoint(opts.workDir);
+      runChanged = true;
+      applied.push(mutation);
+    }
+
+    if (mutation.type === "settle-track") {
+      for (const track of tracksDoc.tracks ?? []) {
+        if (track.taskId !== mutation.taskId) continue;
+        track.state = "settled";
+        track.resultAction = mutation.resultAction;
+        track.error = mutation.reason;
+        track.lastHeartbeat = now;
+        tracksChanged = true;
+      }
+      applied.push(mutation);
+    }
+
+    if (mutation.type === "close-run") {
+      run.phase = "done";
+      run.locks = { ...(run.locks ?? {}), executorPid: null };
+      run.approvedPlanId = null;
+      run.approvedCommitTasks = [];
+      clearCheckpoint(opts.workDir);
+      runChanged = true;
+      applied.push(mutation);
+    }
+  }
+
+  if (runChanged) {
+    run.updatedAt = now;
+    await writeRun(opts.workDir, run);
+  }
+  if (tracksChanged) {
+    await writeTracks(opts.workDir, tracksDoc);
+  }
+  if (applied.length > 0) {
+    await sprintBoardExec(
+      ["journal", "--task", "recovery", "--summary", `orchestrate recover applied ${applied.length} mutation(s)`, "--signals", "orchestrate:recovery"],
+      opts
+    );
+  }
+  return { applied: true, mutations: applied };
+}
+
+async function orchestrateRecover(opts) {
+  const run = readRun(opts.workDir);
+  const tracksDoc = readTracks(opts.workDir);
+  const state = readSprintState(opts.stateFile);
+  const checkpoint = readCheckpoint(opts.workDir);
+  const checkpointStatus = checkpoint
+    ? isCheckpointStale(checkpoint, { stateFile: opts.stateFile, workDir: opts.workDir })
+    : { stale: false, reason: "" };
+  const directives = readDirectives(opts.workDir);
+  const plan = buildRecoveryPlan({
+    run,
+    tracksDoc,
+    state,
+    checkpointStatus,
+    halt: hasHaltDirective(directives),
+    trackTimeoutMs: opts.trackTimeout,
+  });
+  const application = run ? await applyRecoveryPlan(plan, run, tracksDoc, opts) : { applied: false, mutations: [] };
+  const snapshot = await refreshSnapshot(opts);
+  return emitResult(opts, {
+    ok: plan.ok,
+    action: "recover",
+    applied: application.applied,
+    plan,
+    snapshot,
+  }, plan.ok ? 0 : 1);
 }
 
 async function initRun(opts) {
@@ -615,6 +708,8 @@ export async function runOrchestrateCommand(subcommand, argv) {
       return orchestrateJournal(opts);
     case "close":
       return orchestrateClose(opts);
+    case "recover":
+      return orchestrateRecover(opts);
     case "run-unattended":
       return orchestrateRunUnattended(opts);
     default:

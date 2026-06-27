@@ -2579,3 +2579,12 @@
   - adaptive-gate:claude-exec
   - adaptive-gate-trigger:PF-044
 ---
+
+## 2026-06-27T00:17:32.283Z - AP-100
+- Summary: Long-run robustness hardening: recover command for stale/crashed orchestration state, best-effort worker log token/cost usage parsing for budget guardrails, and capped journal --view active signals to keep context bounded.
+- Files: `scripts/lib/orchestration-state.mjs`, `scripts/auto-pilot-orchestrate.mjs`, `scripts/lib/budget-guardrails.mjs`, `scripts/sprint-board.mjs`, `scripts/test-units.mjs`
+- Signals:
+  - long-run-recovery
+  - budget-usage-from-worker-logs
+  - journal-view-compressed
+---

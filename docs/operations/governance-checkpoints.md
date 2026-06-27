@@ -44,8 +44,8 @@ Current governance schema:
 
 | Checkpoint | CLI action | Required before | Invalidates on | Durable evidence |
 | --- | --- | --- | --- | --- |
-| Plan approval | `orchestrate approve-plan` | `dispatch` | sprint state, human-board instructions, git HEAD | `checkpoint.json`, `plan.approved` event |
-| Dispatch gate | `orchestrate dispatch` | worker execution | stale plan checkpoint, halt directive, unchecked human-board instruction, active executor lock | `dispatch.queued` or `checkpoint.stale` event |
+| Plan approval | `orchestrate approve-plan` | `dispatch` | sprint state, projected human intent, git HEAD | `checkpoint.json`, `plan.approved` event |
+| Dispatch gate | `orchestrate dispatch` | worker execution | stale plan checkpoint, halt directive, unchecked projected intent, active executor lock | `dispatch.queued` or `checkpoint.stale` event |
 | Commit approval | `orchestrate approve-commit --tasks ...` | `commit` | task state no longer Done, missing approved task set | `run.json.approvedCommitTasks` |
 | Release approval | release workflow | publish or distribution promotion | failed checks, stale package evidence, missing human release note | future release checkpoint |
 
@@ -54,16 +54,17 @@ not yet ship a release orchestrator. Release automation must reuse the same
 pattern: bind approval to evidence, write an append-only event, and block if
 the evidence changes before publication.
 
-## Human-Board Invalidation
+## Human Intent Invalidation
 
-`docs/todo/human-board.md` is strategic intent. It always overrides automated
-decisions.
+`docs/todo/human-board.md` is the internal projection of strategic intent
+captured through `auto-pilot intent` or by the manager. It always overrides
+automated decisions.
 
 Only unchecked `Instructions` items are hashed for checkpoint freshness. This
 keeps archival notes and processed history from invalidating active approvals,
 while still making new or edited live instructions a hard stop.
 
-When unchecked human-board instructions change after plan approval:
+When unchecked projected human intent changes after plan approval:
 
 1. `orchestrate dispatch` returns `STALE_CONTEXT`.
 2. A `checkpoint.stale` event is appended to `.va-auto-pilot/evidence/events.jsonl`.

@@ -2,7 +2,7 @@ name: Auto-Pilot Loop CLI
 # Regression flow for scripts/auto-pilot-loop.mjs.
 
 flows:
-  - name: "loop: injects human-board instructions without blocking"
+  - name: "loop: injects projected human intent without blocking"
     command: "bash"
     args:
       - "-lc"
@@ -37,8 +37,8 @@ flows:
       must:
         - exit_code: 0
         - stdout_contains:
-            - "human-board instruction(s) injected into delegate prompt"
-            - "[dry-run] injected human-board instructions:"
+            - "projected human intent injected into delegate prompt"
+            - "[dry-run] injected projected human intent:"
             - "handle this first"
         - stdout_not_contains: ["HUMAN_BOARD_BLOCKED", "sprint-complete"]
       should: []

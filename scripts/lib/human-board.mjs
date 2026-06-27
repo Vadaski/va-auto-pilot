@@ -3,9 +3,9 @@ import path from "node:path";
 import { resolveDefaults } from "./sprint-utils.mjs";
 
 /**
- * Resolves the human board path from the sprint state file's project root.
- * The human board always lives at `docs/todo/human-board.md` under the
- * project root that contains the sprint state/config.
+ * Resolves the human intent projection path from the sprint state file's project root.
+ * The projection always lives at `docs/todo/human-board.md` under the project
+ * root that contains the sprint state/config.
  *
  * @param {string} [sprintStateFile]
  * @returns {string}
@@ -45,7 +45,7 @@ function resolveProjectRootFromStateFile(sprintStateFile) {
 }
 
 /**
- * Reads unchecked instruction items from human-board.md.
+ * Reads unchecked instruction items from the internal human intent projection.
  * Any list item under the Instructions section that is not marked [x] is
  * treated as unprocessed.
  *

@@ -49,7 +49,7 @@ export async function runIntent(subcommand, argv) {
     text,
     boardPath: entry.boardPath,
     line: entry.line,
-    staleApprovalImpact: "changes human-board instruction hash; approved plans must be re-approved before dispatch",
+    staleApprovalImpact: "changes human intent projection hash; approved plans must be re-approved before dispatch",
     cockpit: snapshot.cockpit,
   });
 }

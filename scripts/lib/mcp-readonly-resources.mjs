@@ -37,8 +37,8 @@ const RESOURCE_DEFINITIONS = [
   },
   {
     uri: "va-auto-pilot://human-board",
-    name: "Human Board",
-    description: "Human-on-the-loop instructions and intervention context.",
+    name: "Human Intent Projection",
+    description: "Current internal projection of human intent.",
     mimeType: "text/markdown",
     kind: "file",
     relativePath: "docs/todo/human-board.md",

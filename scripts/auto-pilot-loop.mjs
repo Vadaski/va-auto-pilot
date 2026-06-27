@@ -254,11 +254,11 @@ async function recordPitfallAndSuggestGates(task, details, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// Human board parser
+// Human intent projection parser
 // ---------------------------------------------------------------------------
 
 /**
- * Parse human-board.md and return unchecked instruction lines.
+ * Parse the internal human-board projection and return unchecked intent lines.
  * @param {string} boardPath
  * @returns {string[]}
  */
@@ -276,13 +276,13 @@ function formatHumanBoardInstructionBlock(instructions) {
   }
 
   const lines = [
-    "⚠ Human Board Instructions requiring your explicit acknowledgment:"
+    "Pending human intent requiring your explicit acknowledgment:"
   ];
   instructions.forEach((instruction, index) => {
     lines.push(`  ${index + 1}. ${instruction.text}`);
   });
   lines.push("For each item above, state: ADDRESSED (reason) | SUPERSEDED (reason) | STILL_PENDING (will handle this cycle)");
-  lines.push("Return the same numbered list in a `Human Board Acknowledgments` section so it can be journaled.");
+  lines.push("Return the same numbered list in a `Human Intent Acknowledgments` section so it can be journaled.");
   return lines.join("\n");
 }
 
@@ -387,7 +387,7 @@ function appendHumanBoardAuditEntry(journalFile, task, acknowledgments, logFile)
 
   const lines = [];
   lines.push(`## ${nowIso()} - ${task.id} human-board`);
-  lines.push("- Summary: Human board instruction acknowledgments captured for this cycle.");
+  lines.push("- Summary: Human intent acknowledgments captured for this cycle.");
   lines.push("- Signals:");
   for (const acknowledgment of acknowledgments) {
     lines.push(`  - ${acknowledgment.index}. ${acknowledgment.status}${acknowledgment.reason ? ` (${acknowledgment.reason})` : ""}`);
@@ -1080,7 +1080,7 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
   if (opts.dryRun) {
     log(opts, `  [dry-run] would dispatch ${task.id} via: ${template}`);
     if (humanBoardBlock) {
-      log(opts, "  [dry-run] injected human-board instructions:");
+      log(opts, "  [dry-run] injected projected human intent:");
       log(opts, humanBoardBlock);
     }
     return { taskId: task.id, success: true, dryRun: true };
@@ -1088,7 +1088,7 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
 
   log(opts, `  dispatching ${task.id} via: ${template}`);
   if (humanBoardBlock) {
-    log(opts, "  injecting human-board instructions into sub-agent prompt:");
+    log(opts, "  injecting projected human intent into sub-agent prompt:");
     log(opts, humanBoardBlock);
   }
   const result = await bridge.dispatch(track, template, logFile, opts.trackTimeout);
@@ -1939,7 +1939,7 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
 
   log(opts, `\n--- Cycle: ${task.id} (${task.state ?? "Backlog"}) action=${action} ---`);
   if (humanBoardBlock) {
-    log(opts, `  human-board instruction(s) injected into delegate prompt (${humanBoardInstructions.length} item(s))`);
+    log(opts, `  projected human intent injected into delegate prompt (${humanBoardInstructions.length} item(s))`);
   }
 
   const pitfallContext = injectPitfallContext(task, pitfalls);

@@ -45,14 +45,15 @@ Agent 优先通过 CLI 委派、执行、验收，而不是手工逐行操作。
 
 ## 3. 系统架构：七个模块
 
-### 3.1 Human Board（人类控制平面）
+### 3.1 Cockpit + Intent（人类判断入口）
 
-`docs/todo/human-board.md` 是最高优先级输入源。
+人类控制面不应该要求用户理解状态文件、日志、pitfall 或 phase。
+默认入口是：
 
-- `Instructions`：立即执行
-- `Feedback`：纳入下一轮决策
-- `Direction`：影响长期排序
+- `cockpit`：把内部状态压缩成目标、风险、证据三个判断问题
+- `intent`：把人类的目标、约束、风险、验收和 override 写入系统
 
+`docs/todo/human-board.md` 仍然存在，但它是 agent 管理的内部意图投影，而不是最终用户每天手改的工作面。
 这让人类从“实时遥控”变成“高带宽异步控制”。
 
 ### 3.2 Sprint Board（状态机）
@@ -172,7 +173,7 @@ va-auto-pilot/
 ├── templates/
 │   ├── .va-auto-pilot/config.yaml       # 参数化配置
 │   ├── docs/todo/sprint.md
-│   ├── docs/todo/human-board.md
+│   ├── docs/todo/human-board.md        # internal intent projection
 │   ├── docs/operations/va-auto-pilot-protocol.md
 │   ├── scripts/test-runner.ts
 │   └── test-flows/feature-smoke.yaml

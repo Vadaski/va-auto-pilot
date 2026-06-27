@@ -26,7 +26,7 @@ The module exports:
 | `va-auto-pilot://sprint-summary` | `application/json` | State-derived counts and next-task preview |
 | `va-auto-pilot://run-journal` | `text/markdown` | `docs/todo/run-journal.md` |
 | `va-auto-pilot://pitfall-guide` | `text/markdown` | Computed from unresolved `.va-auto-pilot/pitfalls.json` entries |
-| `va-auto-pilot://human-board` | `text/markdown` | `docs/todo/human-board.md` |
+| `va-auto-pilot://human-board` | `text/markdown` | Internal human intent projection at `docs/todo/human-board.md` |
 | `va-auto-pilot://orchestration-snapshot` | `application/json` | `.va-auto-pilot/orchestration/snapshot.json` from `observe --json` |
 
 All descriptors carry `metadata.access = "read-only"`.

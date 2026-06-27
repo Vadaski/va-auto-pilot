@@ -547,7 +547,7 @@ test("extractHumanBoardAcknowledgments parses Colony-style evidence objects", ()
   const source = {
     evidence: {
       output: [
-        "Human Board Acknowledgments",
+        "Human Intent Acknowledgments",
         "1. ADDRESSED (docs updated)",
         "2. SUPERSEDED (covered by existing test)",
       ].join("\n")
@@ -4716,7 +4716,7 @@ test("next --json: includes human_board_instructions without blocking", () => {
   assert.deepEqual(parsed.human_board_instructions[0], { lineNumber: 5, text: "[ ] handle this first" });
 });
 
-test("next: warns on unchecked human-board instructions and continues", () => {
+test("next: warns on unchecked projected human intent and continues", () => {
   const { stateFile } = writeTmpState([
     { id: "UT-001", title: "Task", priority: "P1", state: "Backlog", dependsOn: [] }
   ]);
@@ -4733,7 +4733,7 @@ test("next: warns on unchecked human-board instructions and continues", () => {
   assert.ok(r.stderr.includes("Warning: projected human intent contains"), `expected warning in stderr, got: ${r.stderr}`);
 });
 
-test("next --strict: hard-blocks unchecked human-board instructions", () => {
+test("next --strict: hard-blocks unchecked projected human intent", () => {
   const { stateFile } = writeTmpState([
     { id: "UT-001", title: "Task", priority: "P1", state: "Backlog", dependsOn: [] }
   ]);
@@ -5615,7 +5615,7 @@ test("orchestration-state: checkpoint detects sprint-state drift", () => {
   assert.equal(isCheckpointStale(checkpoint, { stateFile, workDir: tmpDir }).stale, true);
 });
 
-test("orchestration-state: checkpoint detects live human-board instruction drift", () => {
+test("orchestration-state: checkpoint detects live human intent drift", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-human-board-"));
   const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
   const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");

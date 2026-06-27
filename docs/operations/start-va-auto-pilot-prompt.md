@@ -92,4 +92,6 @@ Do not use unattended mode in an interactive session.
 - Run project test command: `npm run check:units`.
 - Run acceptance gate: `npm run validate:distribution`.
 
-Begin: `orchestrate init`, then `observe --json`.
+Begin by capturing or confirming the goal through `goal --text "..."`, then read
+`cockpit --json`. Follow `nextCommands` internally; expose only goal, risk,
+evidence, and required approvals to the human.

@@ -25,7 +25,8 @@ rm -rf "$tmp"
 
 2. **Preferred: orchestrated mode (you are the manager).**
 
-You stay in the session loop. The executor runs one phase and exits. You **must** explicitly approve plan and commit.
+Start with `node scripts/auto-pilot.mjs goal --text "..."` or `cockpit --json`.
+Then stay in the session loop. The executor runs one phase and exits. You **must** explicitly approve plan and commit.
 Humans should only need to decide whether the goal is still right, risk is acceptable, and evidence is trustworthy. Use `cockpit` and `intent` as the public control surface; treat sprint-state, run-journal, pitfalls, quality gates, and orchestration phases as internal mechanics.
 
 ```bash

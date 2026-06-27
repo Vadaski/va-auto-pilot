@@ -5988,6 +5988,7 @@ test("auto-pilot intent: appends human intent and cockpit exposes goal judgment"
 test("auto-pilot cockpit: returns goal risk evidence view only", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-cockpit-"));
   const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const configFile = path.join(tmpDir, ".va-auto-pilot", "config.yaml");
   const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
   const journalFile = path.join(tmpDir, "docs", "todo", "run-journal.md");
   fs.mkdirSync(path.dirname(stateFile), { recursive: true });
@@ -5996,6 +5997,21 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
     projectPrefix: "AP",
     tasks: [{ id: "AP-001", title: "t", priority: "P1", state: "Backlog", dependsOn: [] }],
   }), "utf8");
+  fs.writeFileSync(configFile, [
+    "qualityGate:",
+    "  buildCommand: npm run check:all",
+    "  reviewCommand: codex review --uncommitted",
+    "  acceptanceTestCommand: npm run validate:distribution",
+    "  smokeTestCommand: node scripts/smoke-test-runner.mjs --config",
+    "  smokeTest:",
+    "    enabled: true",
+    "    criticalPaths: []",
+    "  adaptiveGates:",
+    "    - name: todo-gate",
+    "      command: 'echo \"TODO: implement gate\"'",
+    "      required: true",
+    "",
+  ].join("\n"), "utf8");
   fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
   fs.writeFileSync(journalFile, [
     "# Run Journal",
@@ -6033,8 +6049,13 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
   assert.ok(evidence.summary.gates.some((item) => item.includes("review gate PASS")));
   assert.ok(evidence.summary.failures.some((item) => item.includes("Dispatch failed")));
   assert.ok(evidence.summary.decisions.some((item) => item.includes("accepted risk")));
+  assert.equal(evidence.summary.gateTrust.status, "needs-agent-attention");
+  assert.ok(evidence.summary.gateTrust.weakSignals.some((item) => item.includes("weak placeholder command")));
+  assert.ok(evidence.summary.gateTrust.weakSignals.some((item) => item.includes("no critical paths")));
+  assert.ok(payload.cockpit.humanJudgment.risk.signals.some((item) => item.includes("gate trust")));
   assert.ok(evidence.signals.some((item) => item.includes("Dispatch failed")));
   assert.ok(evidence.signals.some((item) => item.includes("review gate PASS")));
+  assert.ok(payload.cockpit.recommendedActions.includes("strengthen evidence gates before relying on acceptance"));
   assert.ok(payload.cockpit.recommendedActions.every((item) => !item.includes("orchestrate")));
   assert.ok(payload.cockpit.nextCommands.some((item) => item.argv.includes("orchestrate")));
   assert.ok(!Object.hasOwn(payload, "snapshot"));

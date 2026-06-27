@@ -1,7 +1,9 @@
 import fs from "node:fs";
+import path from "node:path";
 
 import { readHumanBoardInstructions, resolveHumanBoardPath } from "./lib/human-board.mjs";
 import { buildOrchestrationOpts, emitResult, sprintBoardExec, tryParseJson } from "./lib/orchestration-cli.mjs";
+import { readQualityGateConfig } from "./lib/sprint-utils.mjs";
 import {
   hasHaltDirective,
   isTerminalRunPhase,
@@ -95,12 +97,113 @@ function buildEvidenceSummary(entries) {
   };
 }
 
+function normalizeCommand(value) {
+  return String(value ?? "").trim();
+}
+
+function isWeakGateCommand(command) {
+  return /\bTODO\b/i.test(command)
+    || /\bplaceholder\b/i.test(command)
+    || /^echo\b/i.test(command);
+}
+
+function gateEntry(name, command, { required = true } = {}) {
+  const normalized = normalizeCommand(command);
+  return normalized ? { name, command: normalized, required } : null;
+}
+
+function buildGateTrustSummary(qualityGate = {}) {
+  const gates = [
+    gateEntry("build", qualityGate.buildCommand),
+    gateEntry("review", qualityGate.reviewCommand, {
+      required: qualityGate.reviewRequired !== false
+        && qualityGate.allowAdvisoryReview !== true
+        && qualityGate.review?.required !== false,
+    }),
+    gateEntry("acceptance", qualityGate.acceptanceTestCommand),
+    gateEntry("smoke", qualityGate.smokeTestCommand, {
+      required: qualityGate.smokeTest?.enabled === true,
+    }),
+    gateEntry("eval", qualityGate.evalCommand),
+    ...(Array.isArray(qualityGate.evalGates)
+      ? qualityGate.evalGates.map((gate, index) => gateEntry(
+        String(gate?.name ?? `eval-${index + 1}`),
+        gate?.command,
+        { required: gate?.required !== false }
+      ))
+      : []),
+    ...(Array.isArray(qualityGate.adaptiveGates)
+      ? qualityGate.adaptiveGates.map((gate, index) => gateEntry(
+        String(gate?.name ?? `adaptive-${index + 1}`),
+        gate?.command,
+        { required: gate?.required !== false }
+      ))
+      : []),
+  ].filter(Boolean);
+
+  const requiredGates = gates.filter((gate) => gate.required);
+  const weakSignals = [];
+  const missingRequired = [];
+
+  if (!normalizeCommand(qualityGate.buildCommand)) {
+    missingRequired.push("build");
+  }
+  if (!normalizeCommand(qualityGate.acceptanceTestCommand)) {
+    missingRequired.push("acceptance");
+  }
+  if (qualityGate.smokeTest?.enabled === true && !normalizeCommand(qualityGate.smokeTestCommand)) {
+    missingRequired.push("smoke");
+  }
+  if (!normalizeCommand(qualityGate.reviewCommand)
+    && qualityGate.reviewRequired !== false
+    && qualityGate.allowAdvisoryReview !== true
+    && qualityGate.review?.required !== false) {
+    missingRequired.push("review");
+  }
+
+  const weakRequiredGates = requiredGates.filter((gate) => isWeakGateCommand(gate.command));
+  for (const gateName of uniqueStrings(weakRequiredGates.map((item) => item.name)).slice(0, 5)) {
+    weakSignals.push(`${gateName}: weak placeholder command`);
+  }
+
+  if (qualityGate.allowAdvisoryReview === true || qualityGate.reviewRequired === false || qualityGate.review?.required === false) {
+    weakSignals.push("review gate is advisory");
+  }
+
+  if (qualityGate.smokeTest?.enabled === true && (qualityGate.smokeTest.criticalPaths?.length ?? 0) === 0) {
+    weakSignals.push("smoke test enabled with no critical paths");
+  }
+
+  const status = missingRequired.length > 0
+    ? "missing-required-gates"
+    : weakSignals.length > 0
+      ? "needs-agent-attention"
+      : requiredGates.length > 0
+        ? "configured"
+        : "not-configured";
+
+  return {
+    status,
+    requiredCount: requiredGates.length,
+    configuredCount: gates.length,
+    missingRequired: uniqueStrings(missingRequired),
+    weakSignals: uniqueStrings(weakSignals),
+    confirmed: qualityGate.confirmed === true || Boolean(qualityGate.confirmedAt),
+  };
+}
+
 function riskLevelFromSnapshot(snapshot) {
   if (snapshot.anomalies?.some((item) => item.code?.includes("STALE") || item.severity === "critical")) {
     return "high";
   }
+  if (snapshot.gateTrust?.status === "missing-required-gates") {
+    return "high";
+  }
   if (snapshot.directives?.halt || snapshot.sprint?.stopCondition?.stop) {
     return "high";
+  }
+  if (snapshot.gateTrust?.status === "needs-agent-attention" || snapshot.gateTrust?.status === "not-configured") {
+    return "medium";
   }
   const phase = snapshot.run?.phase ?? "idle";
   if (["awaiting-plan-approval", "plan-reviewed", "awaiting-commit-approval"].includes(phase)) {
@@ -118,6 +221,8 @@ export function buildCockpit(snapshot) {
   const phase = snapshot.run?.phase ?? "idle";
   const evidenceSummary = buildEvidenceSummary(snapshot.journalTail ?? []);
   const evidenceSignals = uniqueStrings([
+    ...((snapshot.gateTrust?.weakSignals ?? []).map((signal) => `gate trust: ${signal}`)),
+    ...((snapshot.gateTrust?.missingRequired ?? []).map((gate) => `gate trust: missing ${gate}`)),
     ...evidenceSummary.failures,
     ...evidenceSummary.gates,
     ...evidenceSummary.completions,
@@ -160,6 +265,8 @@ export function buildCockpit(snapshot) {
           : "Is the current risk level acceptable?",
         signals: [
           ...((snapshot.anomalies ?? []).map((item) => `${item.code}: ${item.message}`)),
+          ...((snapshot.gateTrust?.weakSignals ?? []).map((signal) => `gate trust: ${signal}`)),
+          ...((snapshot.gateTrust?.missingRequired ?? []).map((gate) => `gate trust: missing ${gate}`)),
           ...(snapshot.directives?.halt ? ["halt directive active"] : []),
           ...(snapshot.sprint?.stopCondition?.stop ? [`stop condition: ${snapshot.sprint.stopCondition.reason}`] : []),
         ].filter(Boolean),
@@ -169,7 +276,10 @@ export function buildCockpit(snapshot) {
         question: phase === "awaiting-commit-approval"
           ? "Is the completion evidence trustworthy enough to approve commit?"
           : "Is more evidence needed before accepting the current direction?",
-        summary: evidenceSummary,
+        summary: {
+          ...evidenceSummary,
+          gateTrust: snapshot.gateTrust ?? buildGateTrustSummary({}),
+        },
         signals: evidenceSignals,
       },
     },
@@ -193,6 +303,8 @@ export async function refreshSnapshot(opts) {
   const summaryResult = await sprintBoardExec(["summary"], opts);
   const pitfallResult = await sprintBoardExec(["pitfall", "--list", "--unresolved", "--json"], opts);
   const pitfallsParsed = tryParseJson(pitfallResult.stdout.trim());
+  const qualityGate = readQualityGateConfig(path.join(opts.workDir, ".va-auto-pilot", "config.yaml"));
+  const gateTrust = buildGateTrustSummary(qualityGate);
 
   const pendingTasks = Array.isArray(state.tasks)
     ? state.tasks.filter((task) => task.state !== "Done").length
@@ -229,6 +341,7 @@ export async function refreshSnapshot(opts) {
     journalTail: tailJournal(opts.journalFile),
     summaryText: summaryResult.stdout.trim(),
     pitfalls: pitfallsParsed.parsed ? pitfallsParsed.value : [],
+    gateTrust,
     anomalies,
     recommendedActions: buildRecommendedActions({
       run,
@@ -237,6 +350,7 @@ export async function refreshSnapshot(opts) {
       directives,
       pendingTasks,
       anomalies,
+      gateTrust,
     }),
     nextCommands: buildNextCommands({
       run,
@@ -290,8 +404,13 @@ function buildAnomalies({ run, trackList, state, pendingTasks, stopCondition }) 
   return anomalies;
 }
 
-function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies }) {
+function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies, gateTrust }) {
   const actions = [];
+  if (gateTrust?.status === "missing-required-gates") {
+    actions.push("configure required evidence gates");
+  } else if (gateTrust?.status === "needs-agent-attention" || gateTrust?.status === "not-configured") {
+    actions.push("strengthen evidence gates before relying on acceptance");
+  }
   if (!run) {
     actions.push("start agent run");
     if (uncheckedBoard.length > 0) {

@@ -58,7 +58,8 @@ goal is still correct, whether the risk is acceptable, and whether the
 acceptance evidence is trustworthy.
 Use `cockpit.humanJudgment.evidence.summary` for the evidence view; it
 compresses journal memory into recent completions, failures, gates, and
-decisions.
+decisions. Its `gateTrust` field summarizes missing or weak evidence gates so
+the human can judge evidence trust without reading `qualityGate` internals.
 
 Use the cockpit and intent commands as the daily agent-facing interface:
 

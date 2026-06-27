@@ -44,6 +44,9 @@ overrides without requiring the human to edit internal files directly.
 Cockpit evidence must be shown through `humanJudgment.evidence.summary`, which
 compresses journal memory into recent completions, failures, gates, and critical
 decisions.
+Its `gateTrust` field summarizes whether configured gates look trustworthy
+enough for acceptance. Humans see this as risk and evidence-trust context, not
+as raw `qualityGate` mechanics.
 `recommendedActions` must stay semantic and human-readable; executable phase
 commands belong in `nextCommands[].argv` for the session agent.
 

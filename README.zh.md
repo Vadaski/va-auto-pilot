@@ -185,7 +185,7 @@ node scripts/auto-pilot.mjs goal --text "把这个项目推进到可发布状态
 
 cockpit 是日常控制面：人类只需要判断目标是否仍然正确、风险是否可接受、验收证据是否可信。
 sprint-state、run-journal、pitfall、quality gate 和 orchestration phase 都是 agent 的可审计内部机制。
-journal 证据会先压缩成最近完成项、失败项、gate 和决策摘要，再呈现给人类。
+journal 证据会先压缩成最近完成项、失败项、gate 和决策摘要，gate 可信度会压缩成证据风险信号，再呈现给人类。
 
 ---
 

@@ -2588,3 +2588,9 @@
   - budget-usage-from-worker-logs
   - journal-view-compressed
 ---
+
+## 2026-06-27T00:21:22.946Z - recovery
+- Summary: orchestrate recover applied 1 mutation(s)
+- Signals:
+  - orchestrate:recovery
+---

@@ -3338,6 +3338,35 @@ function writeTempHumanBoardFromState(stateFile, lines) {
   fs.writeFileSync(tempHumanBoardFile, lines.join("\n"), "utf8");
 }
 
+test("test-cli-flows: isolated_state does not mutate the real sprint board", () => {
+  const realBoardFile = path.join(process.cwd(), "docs", "todo", "sprint.md");
+  const originalBoard = fs.readFileSync(realBoardFile, "utf8");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-cli-flow-regression-"));
+  const flowFile = path.join(tmpDir, "isolated-state.yaml");
+  fs.writeFileSync(flowFile, [
+    "name: isolated state regression",
+    "flows:",
+    "  - name: update isolated state only",
+    "    command: node",
+    "    args: [\"scripts/sprint-board.mjs\", \"update\", \"--id\", \"AP-004\", \"--state\", \"In Progress\"]",
+    "    isolated_state: true",
+    "    assert:",
+    "      must:",
+    "        - exit_code: 0",
+    "      should: []",
+    "",
+  ].join("\n"), "utf8");
+
+  const result = spawnSync(process.execPath, [
+    path.join(process.cwd(), "scripts", "test-cli-flows.mjs"),
+    "--flow",
+    flowFile,
+  ], { cwd: process.cwd(), encoding: "utf8", timeout: 20_000 });
+
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.equal(fs.readFileSync(realBoardFile, "utf8"), originalBoard);
+});
+
 // ---------------------------------------------------------------------------
 // normalizeTask / schema — tested by round-tripping add command
 // ---------------------------------------------------------------------------

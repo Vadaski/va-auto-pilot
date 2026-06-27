@@ -8,8 +8,9 @@
  *   command           - CLI binary (e.g. "node")
  *   args              - argument list
  *   env               - additional environment variables
- *   isolated_state    - if true, copy the sprint state to a temp file and pass
- *                       --state-file pointing to the copy (avoids polluting real state)
+ *   isolated_state    - if true, copy the sprint state to a temp file, pass
+ *                       --state-file pointing to the copy, and route generated
+ *                       sprint board writes to the same temp root
  *   isolated_journal  - if true, create a temp journal file and pass
  *                       --journal-file pointing to it
  *   isolated_pitfalls - if true, create a temp pitfalls file and pass
@@ -155,10 +156,14 @@ function runFlow(flow) {
 
   // Build the final args list, injecting temp file paths when isolation is requested.
   let finalArgs = [...args];
+  const isolationEnv = {};
 
   if (flow.isolated_state) {
     const tmpState = makeTempStateFile();
+    const tmpBoard = path.join(path.dirname(tmpState), "docs", "todo", "sprint.md");
+    fs.mkdirSync(path.dirname(tmpBoard), { recursive: true });
     finalArgs = [...finalArgs, "--state-file", tmpState];
+    isolationEnv.AUTO_PILOT_SPRINT_BOARD_FILE = tmpBoard;
   }
 
   if (flow.isolated_journal) {
@@ -171,7 +176,7 @@ function runFlow(flow) {
     finalArgs = [...finalArgs, "--pitfalls-file", tmpPitfalls];
   }
 
-  const spawnEnv = { ...process.env, ...env };
+  const spawnEnv = { ...process.env, ...isolationEnv, ...env };
 
   const result = spawnSync(command, finalArgs, {
     encoding: "utf8",

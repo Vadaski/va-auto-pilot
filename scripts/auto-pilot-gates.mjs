@@ -60,7 +60,8 @@ function formatAudit(payload) {
   if (payload.maintenance.actions.length > 0) {
     lines.push(`Maintenance actions: ${payload.maintenance.actions.length}`);
     for (const action of payload.maintenance.actions) {
-      lines.push(`- ${action.type}: ${action.name} (${action.triggeredBy})`);
+      const triggerSuffix = action.triggeredBy ? ` (${action.triggeredBy})` : "";
+      lines.push(`- ${action.type}: ${action.name}${triggerSuffix}`);
     }
   } else {
     lines.push("Maintenance actions: none");

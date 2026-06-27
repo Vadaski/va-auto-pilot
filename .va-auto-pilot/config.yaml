@@ -10,10 +10,11 @@ qualityGate:
   acceptanceTestCommand: npm run validate:distribution
   smokeTestCommand: node scripts/smoke-test-runner.mjs --config
   smokeTest:
-    enabled: true
+    enabled: false
     timeout: 30000
     screenshotDir: .va-auto-pilot/screenshots
     criticalPaths: []
+    maintenanceReason: disabled because no smoke critical paths are configured
   adaptiveGates:
     - name: dispatch-failed
       command: 'echo "TODO: implement gate for PF-004"'

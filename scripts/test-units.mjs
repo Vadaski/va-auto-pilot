@@ -4528,6 +4528,7 @@ test("gate trust: flags weak required commands and missing smoke command", () =>
 test("gate maintenance: downgrades only resolved weak adaptive gates", () => {
   const config = {
     qualityGate: {
+      smokeTest: { enabled: true, criticalPaths: ["test-flows/smoke.yaml"] },
       adaptiveGates: [
         { name: "resolved", command: "echo \"TODO: implement\"", required: true, triggeredBy: "PF-001" },
         { name: "unresolved", command: "echo \"TODO: implement\"", required: true, triggeredBy: "PF-002" },
@@ -4548,6 +4549,24 @@ test("gate maintenance: downgrades only resolved weak adaptive gates", () => {
   assert.equal(plan.updatedConfig.qualityGate.adaptiveGates[0].status, "advisory");
   assert.equal(plan.updatedConfig.qualityGate.adaptiveGates[1].required, true);
   assert.equal(plan.updatedConfig.qualityGate.adaptiveGates[2].required, true);
+  assert.equal(plan.updatedConfig.qualityGate.smokeTest.enabled, true);
+});
+
+test("gate maintenance: disables smoke gate when no critical paths exist", () => {
+  const config = {
+    qualityGate: {
+      buildCommand: "npm run check",
+      smokeTest: { enabled: true, criticalPaths: [] },
+      adaptiveGates: [],
+    },
+  };
+  const plan = planGateMaintenance(config, new Map());
+
+  assert.equal(plan.changed, true);
+  assert.equal(plan.actions.length, 1);
+  assert.equal(plan.actions[0].type, "disable-empty-smoke-test");
+  assert.equal(plan.updatedConfig.qualityGate.smokeTest.enabled, false);
+  assert.match(plan.updatedConfig.qualityGate.smokeTest.maintenanceReason, /no smoke critical paths/);
 });
 
 // ---------------------------------------------------------------------------
@@ -6117,6 +6136,9 @@ test("auto-pilot gates maintain: applies resolved weak gate downgrade", () => {
     "  buildCommand: npm run check:all",
     "  reviewCommand: codex review --uncommitted",
     "  acceptanceTestCommand: npm run validate:distribution",
+    "  smokeTest:",
+    "    enabled: true",
+    "    criticalPaths: []",
     "  adaptiveGates:",
     "    - name: old-placeholder",
     "      command: 'echo \"TODO: implement gate\"'",
@@ -6148,12 +6170,19 @@ test("auto-pilot gates maintain: applies resolved weak gate downgrade", () => {
   assert.equal(apply.status, 0, apply.stderr);
   const applyPayload = JSON.parse(apply.stdout);
   assert.equal(applyPayload.maintenance.applied, true);
-  assert.equal(applyPayload.maintenance.actions.length, 1);
+  assert.equal(applyPayload.maintenance.actions.length, 2);
+  assert.ok(applyPayload.maintenance.actions.some((action) =>
+    action.type === "downgrade-resolved-weak-adaptive-gate" && action.name === "old-placeholder"
+  ));
+  assert.ok(applyPayload.maintenance.actions.some((action) =>
+    action.type === "disable-empty-smoke-test" && action.name === "smoke"
+  ));
 
   const updated = parseYaml(fs.readFileSync(configFile, "utf8"));
   assert.equal(updated.qualityGate.adaptiveGates[0].required, false);
   assert.equal(updated.qualityGate.adaptiveGates[0].status, "advisory");
   assert.equal(updated.qualityGate.adaptiveGates[1].required, true);
+  assert.equal(updated.qualityGate.smokeTest.enabled, false);
 });
 
 // ---------------------------------------------------------------------------

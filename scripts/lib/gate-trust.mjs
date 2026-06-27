@@ -162,6 +162,24 @@ export function planGateMaintenance(config, pitfallResolutionMap) {
     ? qualityGate.adaptiveGates
     : [];
   const actions = [];
+  const smokeTest = qualityGate.smokeTest && typeof qualityGate.smokeTest === "object"
+    ? qualityGate.smokeTest
+    : null;
+  let updatedSmokeTest = smokeTest;
+
+  if (smokeTest?.enabled === true && (smokeTest.criticalPaths?.length ?? 0) === 0) {
+    actions.push({
+      type: "disable-empty-smoke-test",
+      name: "smoke",
+      reason: "smoke gate is enabled but has no critical paths to execute",
+    });
+    updatedSmokeTest = {
+      ...smokeTest,
+      enabled: false,
+      maintenanceReason: "disabled because no smoke critical paths are configured",
+    };
+  }
+
   const updatedAdaptiveGates = adaptiveGates.map((gate, index) => {
     if (!gate || typeof gate !== "object") {
       return gate;
@@ -196,6 +214,7 @@ export function planGateMaintenance(config, pitfallResolutionMap) {
     ...config,
     qualityGate: {
       ...qualityGate,
+      ...(updatedSmokeTest ? { smokeTest: updatedSmokeTest } : {}),
       adaptiveGates: updatedAdaptiveGates,
     },
   };

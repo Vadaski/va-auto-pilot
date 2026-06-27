@@ -19,6 +19,7 @@
     "bin/",
     "scripts/auto-pilot-intervene.mjs",
     "scripts/auto-pilot-loop.mjs",
+    "scripts/auto-pilot-intent.mjs",
     "scripts/auto-pilot-observe.mjs",
     "scripts/auto-pilot-orchestrate.mjs",
     "scripts/auto-pilot.mjs",

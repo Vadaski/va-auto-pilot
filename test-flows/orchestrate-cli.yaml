@@ -153,7 +153,7 @@ flows:
         - exit_code: 0
       should: []
 
-  - name: "observe: empty backlog suggests replenish"
+  - name: "observe: empty backlog suggests intent objective"
     command: "bash"
     args:
       - "-lc"
@@ -165,7 +165,32 @@ flows:
         echo -e '# Human Board\n\n## Instructions\n' > "$tmpdir/docs/todo/human-board.md"
         repo="$(cd "$ROOT" && pwd)"
         cd "$tmpdir"
-        node "$repo/scripts/auto-pilot.mjs" observe --json | grep -q replenish
+        node "$repo/scripts/auto-pilot.mjs" observe --json | grep -q 'intent objective'
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
+  - name: "intent + cockpit: human-facing control surface"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        echo '{"projectPrefix":"AP","tasks":[]}' > "$tmpdir/.va-auto-pilot/sprint-state.json"
+        echo -e '# Human Board\n\n## Instructions\n' > "$tmpdir/docs/todo/human-board.md"
+        echo -e '# Run Journal\n' > "$tmpdir/docs/todo/run-journal.md"
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/auto-pilot.mjs" intent objective --text "Make the project agent-facing" --json \
+          | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); process.exit(j.cockpit?.humanJudgment?.goal?.status==='needs-human-intent-processing'?0:1)"
+        grep -q '\[objective\] Make the project agent-facing' "$tmpdir/docs/todo/human-board.md"
+        node "$repo/scripts/auto-pilot.mjs" cockpit --json \
+          | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); process.exit(j.cockpit?.principle?.includes('human judges goal')?0:1)"
     env:
       ROOT: "."
     assert:

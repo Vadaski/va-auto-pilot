@@ -42,7 +42,6 @@ import {
 import { refreshSnapshot } from "./auto-pilot-observe.mjs";
 import {
   clearPlanReview,
-  computeCandidatePlanHash,
   readPlanReview,
   runPlanReviewCommand,
   validatePlanReviewForApprove,

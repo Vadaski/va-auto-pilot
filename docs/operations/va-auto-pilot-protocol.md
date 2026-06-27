@@ -26,6 +26,20 @@
 
 When you work in a capable CLI agent surface (for example Claude Code, Cursor, or Codex), the **session agent is the manager**. The auto-pilot CLI is an **executor** that runs one phase at a time and exits. The manager reads global state, approves high-leverage steps, and may intervene between phases.
 
+The final user-facing split is:
+
+| Concern | Owner |
+| --- | --- |
+| Goal correctness | Human, with agent clarification |
+| Risk acceptability | Human, with agent synthesis |
+| Acceptance evidence trust | Human, with agent presentation |
+| Sprint state, run journal, pitfalls, gates, orchestration phases | Auto-Pilot internals managed by the session agent |
+
+Use `node scripts/auto-pilot.mjs cockpit --json` to translate internal state
+into the three human judgments. Use `node scripts/auto-pilot.mjs intent ...` to
+write human objectives, constraints, risk notes, acceptance expectations, and
+overrides without requiring the human to edit internal files directly.
+
 ### Roles
 
 | Role | Who | Responsibility |
@@ -38,7 +52,7 @@ When you work in a capable CLI agent surface (for example Claude Code, Cursor, o
 
 | File | Purpose |
 |------|---------|
-| `docs/todo/human-board.md` | Strategic intent (human + manager): goals, direction, boundaries |
+| `docs/todo/human-board.md` | Internal projection of strategic intent written by `auto-pilot intent` or the manager |
 | `.va-auto-pilot/orchestration/directives.json` | **Tactical** directives for the active run only (halt, replan, supersede-plan) — **not** merged into human-board |
 | `.va-auto-pilot/orchestration/run.json` | Active run phase, approved plan id, approved commit tasks |
 | `.va-auto-pilot/orchestration/tracks.json` | Per-track execution status |

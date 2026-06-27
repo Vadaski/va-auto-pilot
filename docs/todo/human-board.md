@@ -1,6 +1,6 @@
 # Human Board
 
-> Human writes objectives and constraints here.
+> Human intent is usually written by the session manager agent through `auto-pilot intent`.
 > VA Auto-Pilot reads this at the start of every cycle.
 > Processed items must be marked `[x]`, never deleted.
 

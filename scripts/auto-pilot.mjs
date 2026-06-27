@@ -12,8 +12,9 @@ import { pathToFileURL } from "node:url";
 import path from "node:path";
 
 import { runOrchestrateCommand } from "./auto-pilot-orchestrate.mjs";
-import { runObserve } from "./auto-pilot-observe.mjs";
+import { runCockpit, runObserve } from "./auto-pilot-observe.mjs";
 import { runIntervene } from "./auto-pilot-intervene.mjs";
+import { runIntent } from "./auto-pilot-intent.mjs";
 
 function printHelp() {
   console.log(`auto-pilot — Orchestrated execution (session agent is the manager)
@@ -33,6 +34,12 @@ Usage:
   node scripts/auto-pilot.mjs orchestrate run-unattended --waive-approvals [--max-cycles N]
 
   node scripts/auto-pilot.mjs observe [--json]
+  node scripts/auto-pilot.mjs cockpit [--json]
+  node scripts/auto-pilot.mjs intent objective --text "..."
+  node scripts/auto-pilot.mjs intent constraint --text "..."
+  node scripts/auto-pilot.mjs intent risk --text "..."
+  node scripts/auto-pilot.mjs intent acceptance --text "..."
+  node scripts/auto-pilot.mjs intent override --text "..."
   node scripts/auto-pilot.mjs intervene halt-run --reason "..."
   node scripts/auto-pilot.mjs intervene halt-track --task AP-001 --reason "..."
   node scripts/auto-pilot.mjs intervene replan --task AP-001 [--reset-fail-count]
@@ -67,6 +74,20 @@ async function main() {
 
   if (command === "observe") {
     await runObserve(argv.slice(1));
+    return;
+  }
+
+  if (command === "cockpit") {
+    await runCockpit(argv.slice(1));
+    return;
+  }
+
+  if (command === "intent") {
+    if (!subcommand) {
+      printHelp();
+      process.exit(1);
+    }
+    await runIntent(subcommand, argv.slice(2));
     return;
   }
 

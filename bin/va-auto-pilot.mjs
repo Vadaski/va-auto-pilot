@@ -77,6 +77,8 @@ Usage:
   va-auto-pilot run [target-dir] [options]
   va-auto-pilot orchestrate <subcommand> [options]
   va-auto-pilot observe [options]
+  va-auto-pilot cockpit [options]
+  va-auto-pilot intent <objective|constraint|risk|acceptance|override|note> --text "..."
   va-auto-pilot intervene <subcommand> [options]
   va-auto-pilot --help
 
@@ -86,6 +88,8 @@ Commands:
   run       Execute the autonomous decision loop (unattended; prefer orchestrate for interactive)
   orchestrate  Manager-on-the-loop phased execution (session agent approves plan/commit)
   observe      Refresh orchestration snapshot.json and print global status
+  cockpit      Print the human-facing goal/risk/evidence control surface
+  intent       Append human intent through the agent-managed override channel
   intervene    Tactical directives for the active run (separate from human-board)
 
 Options (run):
@@ -127,6 +131,8 @@ Examples:
   va-auto-pilot run .
   va-auto-pilot run . --max-cycles 5 --dry-run
   va-auto-pilot run . --no-colony --agent-template "codex exec {taskId}"
+  va-auto-pilot cockpit --json
+  va-auto-pilot intent objective --text "Ship a reliable release"
   va-auto-pilot orchestrate recover --json
   va-auto-pilot orchestrate recover --apply
 `);
@@ -221,7 +227,7 @@ function readTargetPackageJson(packageJsonPath) {
     const parsed = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch (error) {
-    throw new Error(`Cannot parse existing package.json at ${packageJsonPath}: ${error.message}`);
+    throw new Error(`Cannot parse existing package.json at ${packageJsonPath}: ${error.message}`, { cause: error });
   }
 }
 
@@ -915,7 +921,7 @@ function main() {
     process.exit(0);
   }
 
-  if (argv[0] === "orchestrate" || argv[0] === "observe" || argv[0] === "intervene") {
+  if (["orchestrate", "observe", "cockpit", "intent", "intervene"].includes(argv[0])) {
     runAutoPilotCli(argv);
     return;
   }

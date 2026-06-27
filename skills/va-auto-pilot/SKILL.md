@@ -52,6 +52,25 @@ Maintainers working inside the source checkout may set `VA_AUTO_PILOT_ROOT` and 
 - `docs/todo/run-journal.md`
 - `docs/operations/va-auto-pilot-protocol.md`
 
+Treat these as Auto-Pilot internal control surfaces. In normal user-facing
+operation, keep the human conversation focused on three judgments: whether the
+goal is still correct, whether the risk is acceptable, and whether the
+acceptance evidence is trustworthy.
+
+Use the cockpit and intent commands as the daily agent-facing interface:
+
+```bash
+node scripts/auto-pilot.mjs cockpit --json
+node scripts/auto-pilot.mjs intent objective --text "..."
+node scripts/auto-pilot.mjs intent constraint --text "..."
+node scripts/auto-pilot.mjs intent risk --text "..."
+node scripts/auto-pilot.mjs intent acceptance --text "..."
+node scripts/auto-pilot.mjs intent override --text "..."
+```
+
+`intent` writes to the human override channel without requiring the user to edit
+`human-board.md`; stale approval invalidation still applies.
+
 4. **Configure quality gates** (pluggable + adaptive):
 
 Gates are NOT hardcoded. Auto-detect by project type:
@@ -71,6 +90,7 @@ Adaptive: `node scripts/sprint-board.mjs suggest-gate` reads unresolved pitfalls
 
 ```bash
 node scripts/auto-pilot.mjs orchestrate init --manager-surface cursor
+node scripts/auto-pilot.mjs cockpit --json
 node scripts/auto-pilot.mjs orchestrate plan
 node scripts/auto-pilot.mjs observe --json
 node scripts/auto-pilot.mjs orchestrate review-plan    # Codex/read-only plan review — required before approve
@@ -161,6 +181,8 @@ Cross-project: inherit proven gates from similar projects.
 
 ```bash
 # Autonomous loop (primary)
+node scripts/auto-pilot.mjs cockpit [--json]
+node scripts/auto-pilot.mjs intent objective --text "..."
 node scripts/auto-pilot-loop.mjs [--max-cycles 50] [--no-parallel] [--skip-sprint-review]
 node scripts/auto-pilot.mjs orchestrate recover [--apply] [--json]
 

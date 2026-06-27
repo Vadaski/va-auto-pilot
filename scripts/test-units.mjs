@@ -5584,7 +5584,6 @@ test("runReviewCommand: uses execRunner output fallback", async () => {
 // ---------------------------------------------------------------------------
 import {
   buildCheckpoint,
-  computeSprintStateHash,
   hasHaltDirective,
   isCheckpointStale,
   orchestrationPaths,
@@ -5592,7 +5591,6 @@ import {
   readRun,
   readWorkerOverrides,
   writeDirectives,
-  writeRun,
 } from "./lib/orchestration-state.mjs";
 
 test("orchestration-state: checkpoint detects sprint-state drift", () => {
@@ -5914,6 +5912,79 @@ test("auto-pilot observe: writes snapshot.json", () => {
   ));
   const payload = JSON.parse(observe.stdout);
   assert.deepEqual(payload.snapshot.nextCommands, snapshot.nextCommands);
+  assert.equal(payload.snapshot.cockpit.principle, "agent manages mechanics; human judges goal, risk, and evidence");
+  assert.ok(payload.snapshot.cockpit.hiddenMechanics.includes("sprint-state"));
+});
+
+test("auto-pilot intent: appends human intent and cockpit exposes goal judgment", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-intent-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  const journalFile = path.join(tmpDir, "docs", "todo", "run-journal.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ projectPrefix: "AP", tasks: [] }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n", "utf8");
+
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  const intent = spawnSync(process.execPath, [
+    script,
+    "intent",
+    "objective",
+    "--text",
+    "Ship a reliable agent-facing control surface",
+    "--json",
+    "--state-file",
+    stateFile,
+    "--journal-file",
+    journalFile,
+  ], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(intent.status, 0, intent.stderr);
+  const payload = JSON.parse(intent.stdout);
+  assert.equal(payload.type, "objective");
+  assert.equal(payload.staleApprovalImpact.includes("approved plans must be re-approved"), true);
+
+  const boardText = fs.readFileSync(humanBoard, "utf8");
+  assert.match(boardText, /\[objective\] Ship a reliable agent-facing control surface/);
+  const instructions = readHumanBoardInstructions(humanBoard);
+  assert.equal(instructions.length, 1);
+  assert.match(instructions[0].text, /\[objective\]/);
+
+  const journal = fs.readFileSync(journalFile, "utf8");
+  assert.match(journal, /human-intent:objective/);
+  assert.equal(payload.cockpit.humanJudgment.goal.status, "needs-human-intent-processing");
+});
+
+test("auto-pilot cockpit: returns goal risk evidence view only", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-cockpit-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    tasks: [{ id: "AP-001", title: "t", priority: "P1", state: "Backlog", dependsOn: [] }],
+  }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], { cwd: tmpDir, encoding: "utf8" });
+  const cockpit = spawnSync(process.execPath, [
+    script,
+    "cockpit",
+    "--json",
+    "--state-file",
+    stateFile,
+  ], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(cockpit.status, 0, cockpit.stderr);
+  const payload = JSON.parse(cockpit.stdout);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.cockpit.audience, "session-manager-agent");
+  assert.ok(payload.cockpit.humanJudgment.goal);
+  assert.ok(payload.cockpit.humanJudgment.risk);
+  assert.ok(payload.cockpit.humanJudgment.evidence);
+  assert.ok(!Object.hasOwn(payload, "snapshot"));
 });
 
 // ---------------------------------------------------------------------------

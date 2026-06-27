@@ -161,10 +161,6 @@ export function validateEvent(event) {
   return { ok: errors.length === 0, errors };
 }
 
-function escapeRegex(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function isTextArtifact(artifactName) {
   const ext = path.extname(artifactName).toLowerCase();
   return TEXT_KIND_SUFFIXES.has(ext);

@@ -106,3 +106,76 @@ export function readHumanBoardInstructions(boardPath) {
 
   return unchecked;
 }
+
+function ensureHumanBoard(boardPath) {
+  const resolved = path.resolve(boardPath);
+  if (fs.existsSync(resolved)) {
+    return;
+  }
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  fs.writeFileSync(
+    resolved,
+    [
+      "# Human Board",
+      "",
+      "> Human intent is usually written by the session manager agent through `auto-pilot intent`.",
+      "> VA Auto-Pilot reads this at the start of every cycle.",
+      "> Processed items must be marked `[x]`, never deleted.",
+      "",
+      "---",
+      "",
+      "## Instructions (highest priority)",
+      "",
+      "## Feedback (to fold into next cycle)",
+      "",
+      "## Direction (long-term)",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+}
+
+function insertUnderInstructions(raw, line) {
+  const lines = raw.split(/\r?\n/);
+  const headingIndex = lines.findIndex((item) => /^##\s+Instructions(?:\s*\(.*\))?\s*$/i.test(item));
+  if (headingIndex === -1) {
+    const prefix = raw.endsWith("\n") || raw.length === 0 ? raw : `${raw}\n`;
+    return `${prefix}\n## Instructions (highest priority)\n${line}\n`;
+  }
+
+  let insertIndex = headingIndex + 1;
+  while (insertIndex < lines.length && lines[insertIndex].trim() === "") {
+    insertIndex += 1;
+  }
+  lines.splice(insertIndex, 0, line);
+  return `${lines.join("\n").replace(/\n*$/, "")}\n`;
+}
+
+/**
+ * Appends a human intent item into the Instructions section.
+ * This keeps the human-board as the high-priority override channel while
+ * letting users express intent through agent-facing commands instead of files.
+ *
+ * @param {string} boardPath
+ * @param {{type: string, text: string, source?: string}} intent
+ * @returns {{boardPath: string, line: string}}
+ */
+export function appendHumanIntent(boardPath, intent) {
+  const resolved = path.resolve(boardPath);
+  const type = String(intent.type ?? "objective").trim().toLowerCase();
+  const text = String(intent.text ?? "").trim();
+  const source = String(intent.source ?? "agent").trim() || "agent";
+  if (!text) {
+    throw new Error("Human intent text is required.");
+  }
+  if (!/^[a-z][a-z0-9-]*$/.test(type)) {
+    throw new Error(`Invalid human intent type: ${type}`);
+  }
+
+  ensureHumanBoard(resolved);
+  const raw = fs.readFileSync(resolved, "utf8");
+  const stamp = new Date().toISOString();
+  const line = `- [ ] [${type}] ${text} _(source: ${source}, ${stamp})_`;
+  fs.writeFileSync(resolved, insertUnderInstructions(raw, line), "utf8");
+  return { boardPath: resolved, line };
+}

@@ -122,8 +122,8 @@ export async function runPlanReviewCommand({ workDir, candidatePlan, runId, revi
   const command = reviewCommand
     || `codex exec --sandbox read-only -C ${workDir} ${JSON.stringify(prompt)}`;
 
-  let stdout = "";
-  let stderr = "";
+  let stdout;
+  let stderr;
   let exitCode = 0;
   try {
     if (command.includes("codex exec")) {

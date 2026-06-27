@@ -5,11 +5,9 @@ import { buildOrchestrationOpts, emitResult, sprintBoardExec, tryParseJson } fro
 import {
   hasHaltDirective,
   isTerminalRunPhase,
-  orchestrationPaths,
   readCheckpoint,
   readDirectives,
   readRun,
-  readSprintStateFile,
   readTracks,
   writeSnapshot,
 } from "./lib/orchestration-state.mjs";
@@ -22,6 +20,88 @@ function tailJournal(journalFile, maxEntries = 5) {
   const content = fs.readFileSync(journalFile, "utf8");
   const blocks = content.split(/^## /m).filter(Boolean);
   return blocks.slice(-maxEntries).map((block) => `## ${block.trim()}`);
+}
+
+function extractJournalSummaries(entries) {
+  return entries.map((entry) => {
+    const match = entry.match(/^- Summary:\s*(.+)$/m);
+    return match ? match[1].trim() : entry.split(/\r?\n/)[0].replace(/^##\s*/, "").trim();
+  }).filter(Boolean);
+}
+
+function riskLevelFromSnapshot(snapshot) {
+  if (snapshot.anomalies?.some((item) => item.code?.includes("STALE") || item.severity === "critical")) {
+    return "high";
+  }
+  if (snapshot.directives?.halt || snapshot.sprint?.stopCondition?.stop) {
+    return "high";
+  }
+  const phase = snapshot.run?.phase ?? "idle";
+  if (["awaiting-plan-approval", "plan-reviewed", "awaiting-commit-approval"].includes(phase)) {
+    return "medium";
+  }
+  if ((snapshot.sprint?.pendingTasks ?? 0) > 0 || (snapshot.humanBoard?.uncheckedCount ?? 0) > 0) {
+    return "medium";
+  }
+  return "low";
+}
+
+export function buildCockpit(snapshot) {
+  const pendingTasks = snapshot.sprint?.pendingTasks ?? 0;
+  const unchecked = snapshot.humanBoard?.unchecked ?? [];
+  const phase = snapshot.run?.phase ?? "idle";
+  const pendingApproval =
+    phase === "awaiting-plan-approval" ? "plan-review-and-approval"
+      : phase === "plan-reviewed" ? "plan-approval"
+        : phase === "awaiting-commit-approval" ? "commit-approval"
+          : null;
+  const riskLevel = riskLevelFromSnapshot(snapshot);
+
+  return {
+    schemaVersion: 1,
+    updatedAt: snapshot.updatedAt,
+    audience: "session-manager-agent",
+    principle: "agent manages mechanics; human judges goal, risk, and evidence",
+    hiddenMechanics: [
+      "sprint-state",
+      "run-journal",
+      "pitfalls",
+      "qualityGate",
+      "orchestrate phases",
+    ],
+    humanJudgment: {
+      goal: {
+        status: unchecked.length > 0 ? "needs-human-intent-processing" : pendingTasks > 0 ? "active" : "needs-objective",
+        question: unchecked.length > 0
+          ? "Are these new or changed objectives, constraints, or overrides still correct?"
+          : pendingTasks > 0
+            ? "Is the current objective still correct?"
+            : "What goal should the agent pursue next?",
+        signals: unchecked.slice(0, 5).map((item) => item.text),
+      },
+      risk: {
+        level: riskLevel,
+        question: riskLevel === "high"
+          ? "Risk is above the normal operating range; should the agent pause, replan, or continue with explicit approval?"
+          : "Is the current risk level acceptable?",
+        signals: [
+          ...((snapshot.anomalies ?? []).map((item) => `${item.code}: ${item.message}`)),
+          ...(snapshot.directives?.halt ? ["halt directive active"] : []),
+          ...(snapshot.sprint?.stopCondition?.stop ? [`stop condition: ${snapshot.sprint.stopCondition.reason}`] : []),
+        ].filter(Boolean),
+      },
+      evidence: {
+        status: phase === "awaiting-commit-approval" ? "needs-human-trust-check" : pendingTasks === 0 ? "idle" : "collecting",
+        question: phase === "awaiting-commit-approval"
+          ? "Is the completion evidence trustworthy enough to approve commit?"
+          : "Is more evidence needed before accepting the current direction?",
+        signals: extractJournalSummaries(snapshot.journalTail ?? []).slice(-5),
+      },
+    },
+    pendingApproval,
+    recommendedActions: snapshot.recommendedActions ?? [],
+    nextCommands: snapshot.nextCommands ?? [],
+  };
 }
 
 export async function refreshSnapshot(opts) {
@@ -93,6 +173,8 @@ export async function refreshSnapshot(opts) {
     }),
   };
 
+  snapshot.cockpit = buildCockpit(snapshot);
+
   await writeSnapshot(opts.workDir, snapshot);
   return snapshot;
 }
@@ -138,7 +220,7 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
   if (!run) {
     actions.push("orchestrate init");
     if (pendingTasks === 0) {
-      actions.push("replenish backlog: sprint-board add or human-board Instructions");
+      actions.push("capture objective: auto-pilot intent objective --text \"...\"");
     }
     return actions;
   }
@@ -147,7 +229,7 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
     if (pendingTasks > 0) {
       actions.push("orchestrate plan");
     } else {
-      actions.push("replenish backlog: sprint-board add or human-board Instructions");
+      actions.push("capture objective: auto-pilot intent objective --text \"...\"");
     }
     return actions;
   }
@@ -155,16 +237,16 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
     actions.push("orchestrate close");
   }
   if (uncheckedBoard.length > 0) {
-    actions.push("process human-board instructions");
+    actions.push("process human intent from cockpit");
   }
   if (hasHaltDirective(directives)) {
     actions.push("clear halt directive or start new run");
   }
   if (stopCondition.stop) {
-    actions.push("intervene replan or update human-board before continue");
+    actions.push("intervene replan or capture updated intent before continue");
   }
   if (pendingTasks === 0 && ["initialized", "cycle-closed"].includes(run.phase)) {
-    actions.push("replenish backlog: sprint-board add or human-board Instructions");
+    actions.push("capture objective: auto-pilot intent objective --text \"...\"");
   }
   switch (run.phase) {
     case "initialized":
@@ -210,14 +292,6 @@ function command(label, args, reason) {
   };
 }
 
-function sprintCommand(label, args, reason) {
-  return {
-    label,
-    argv: ["node", "scripts/sprint-board.mjs", ...args],
-    reason,
-  };
-}
-
 function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies }) {
   const commands = [];
 
@@ -225,11 +299,7 @@ function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pen
     commands.push(command("Close stale run", ["orchestrate", "close"], "Run phase is stale after sprint work settled."));
   }
   if (uncheckedBoard.length > 0) {
-    commands.push({
-      label: "Review human-board instructions",
-      argv: ["$EDITOR", "docs/todo/human-board.md"],
-      reason: "Unchecked human-board instructions may affect dispatch decisions.",
-    });
+    commands.push(command("Review cockpit", ["cockpit", "--json"], "Unchecked human intent may affect dispatch decisions."));
   }
   if (hasHaltDirective(directives)) {
     commands.push(command("Observe halt directive", ["observe", "--json"], "A halt directive is active; clear or supersede it before continuing."));
@@ -243,20 +313,20 @@ function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pen
     if (pendingTasks > 0) {
       commands.push(command("Plan next cycle", ["orchestrate", "plan"], "Pending sprint tasks are available."));
     } else {
-      commands.push(sprintCommand(
-        "Add backlog task",
-        ["add", "--title", "<task title>", "--priority", "P1", "--source", "human"],
-        "No pending sprint tasks are available."
+      commands.push(command(
+        "Capture objective",
+        ["intent", "objective", "--text", "<objective>"],
+        "No pending sprint tasks are available; ask the human for the next goal."
       ));
     }
     return commands;
   }
 
   if (pendingTasks === 0 && ["initialized", "cycle-closed"].includes(run.phase)) {
-    commands.push(sprintCommand(
-      "Add backlog task",
-      ["add", "--title", "<task title>", "--priority", "P1", "--source", "human"],
-      "The run is ready, but backlog is empty."
+    commands.push(command(
+      "Capture objective",
+      ["intent", "objective", "--text", "<objective>"],
+      "The run is ready, but backlog is empty; ask the human for the next goal."
     ));
   }
 
@@ -302,4 +372,10 @@ export async function runObserve(argv) {
   const opts = buildOrchestrationOpts(argv);
   const snapshot = await refreshSnapshot(opts);
   return emitResult(opts, { ok: true, snapshot });
+}
+
+export async function runCockpit(argv) {
+  const opts = buildOrchestrationOpts(argv);
+  const snapshot = await refreshSnapshot(opts);
+  return emitResult(opts, { ok: true, cockpit: snapshot.cockpit });
 }

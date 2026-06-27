@@ -1037,7 +1037,7 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
   const logFile = path.join(logDir, `${task.id}-${Date.now()}.log`);
   const defaultNotes = [task.notes, humanBoardBlock].filter(Boolean).join("\n\n");
   let title = task.title + (pitfallContext ? pitfallContext : "");
-  let notes = defaultNotes;
+  let notes;
 
   /** @internal test-only bridge override for deterministic prompt assertions. */
   const constraintBridge = opts.constraintBridge ?? {};

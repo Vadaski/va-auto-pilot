@@ -6100,6 +6100,9 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
   assert.ok(evidence.signals.some((item) => item.includes("review gate PASS")));
   assert.ok(payload.cockpit.recommendedActions.includes("strengthen evidence gates before relying on acceptance"));
   assert.ok(payload.cockpit.recommendedActions.every((item) => !item.includes("orchestrate")));
+  assert.ok(payload.cockpit.nextCommands.some((item) =>
+    JSON.stringify(item.argv) === JSON.stringify(["node", "scripts/auto-pilot.mjs", "gates", "audit", "--json"])
+  ));
   assert.ok(payload.cockpit.nextCommands.some((item) => item.argv.includes("orchestrate")));
   assert.ok(!Object.hasOwn(payload, "snapshot"));
 });

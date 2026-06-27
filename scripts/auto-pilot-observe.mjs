@@ -265,6 +265,7 @@ export async function refreshSnapshot(opts) {
       directives,
       pendingTasks,
       anomalies,
+      gateTrust,
     }),
   };
 
@@ -396,8 +397,13 @@ function command(label, args, reason) {
   };
 }
 
-function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies }) {
+function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies, gateTrust }) {
   const commands = [];
+
+  if (["missing-required-gates", "needs-agent-attention", "not-configured"].includes(gateTrust?.status)) {
+    commands.push(command("Audit gate trust", ["gates", "audit", "--json"], "Gate trust needs agent attention before relying on acceptance evidence."));
+    commands.push(command("Maintain gates", ["gates", "maintain", "--apply", "--json"], "Apply conservative maintenance for resolved weak adaptive gates, if any."));
+  }
 
   if (anomalies?.some((a) => a.code === "STALE_RUN_PHASE")) {
     commands.push(command("Close stale run", ["orchestrate", "close"], "Run phase is stale after sprint work settled."));

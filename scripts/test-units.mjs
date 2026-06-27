@@ -5960,6 +5960,7 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-cockpit-"));
   const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
   const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  const journalFile = path.join(tmpDir, "docs", "todo", "run-journal.md");
   fs.mkdirSync(path.dirname(stateFile), { recursive: true });
   fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
   fs.writeFileSync(stateFile, JSON.stringify({
@@ -5967,6 +5968,19 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
     tasks: [{ id: "AP-001", title: "t", priority: "P1", state: "Backlog", dependsOn: [] }],
   }), "utf8");
   fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(journalFile, [
+    "# Run Journal",
+    "",
+    "## 2026-06-01T00:00:00.000Z - AP-001",
+    "- Summary: npm run check:all PASS; review gate PASS",
+    "",
+    "## 2026-06-01T00:01:00.000Z - AP-002",
+    "- Summary: Dispatch failed: exitCode=1",
+    "",
+    "## 2026-06-01T00:02:00.000Z - decision",
+    "- Summary: accepted risk: waived temporary warning",
+    "",
+  ].join("\n"), "utf8");
 
   const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
   spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], { cwd: tmpDir, encoding: "utf8" });
@@ -5976,6 +5990,8 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
     "--json",
     "--state-file",
     stateFile,
+    "--journal-file",
+    journalFile,
   ], { cwd: tmpDir, encoding: "utf8" });
   assert.equal(cockpit.status, 0, cockpit.stderr);
   const payload = JSON.parse(cockpit.stdout);
@@ -5983,7 +5999,13 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
   assert.equal(payload.cockpit.audience, "session-manager-agent");
   assert.ok(payload.cockpit.humanJudgment.goal);
   assert.ok(payload.cockpit.humanJudgment.risk);
-  assert.ok(payload.cockpit.humanJudgment.evidence);
+  const evidence = payload.cockpit.humanJudgment.evidence;
+  assert.ok(evidence);
+  assert.ok(evidence.summary.gates.some((item) => item.includes("review gate PASS")));
+  assert.ok(evidence.summary.failures.some((item) => item.includes("Dispatch failed")));
+  assert.ok(evidence.summary.decisions.some((item) => item.includes("accepted risk")));
+  assert.ok(evidence.signals.some((item) => item.includes("Dispatch failed")));
+  assert.ok(evidence.signals.some((item) => item.includes("review gate PASS")));
   assert.ok(!Object.hasOwn(payload, "snapshot"));
 });
 

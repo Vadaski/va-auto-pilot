@@ -56,6 +56,9 @@ Treat these as Auto-Pilot internal control surfaces. In normal user-facing
 operation, keep the human conversation focused on three judgments: whether the
 goal is still correct, whether the risk is acceptable, and whether the
 acceptance evidence is trustworthy.
+Use `cockpit.humanJudgment.evidence.summary` for the evidence view; it
+compresses journal memory into recent completions, failures, gates, and
+decisions.
 
 Use the cockpit and intent commands as the daily agent-facing interface:
 

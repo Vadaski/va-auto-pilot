@@ -12,7 +12,7 @@
 3. Agents manage mechanics: sprint-state, generated boards, run-journal, pitfalls, quality gates, and orchestration phases.
 4. `.va-auto-pilot/sprint-state.json` is the machine task source of truth.
 5. `docs/todo/sprint.md` is a generated board view (`node scripts/sprint-board.mjs render`).
-6. `docs/todo/run-journal.md` is append-only execution memory; summarize it before showing humans.
+6. `docs/todo/run-journal.md` is append-only execution memory; show humans `cockpit.humanJudgment.evidence.summary`, not raw journal entries.
 7. `docs/todo/human-board.md` is an internal projection of human intent and always overrides automatic decisions.
 8. Execute one primary task per cycle; optional parallel tracks are allowed when independent.
 9. Goal-first delegation: define objective + constraints + acceptance. Do not prescribe implementation steps.

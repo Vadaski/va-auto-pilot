@@ -41,6 +41,9 @@ Use `node scripts/auto-pilot.mjs cockpit --json` to translate internal state
 into the three human judgments. Use `node scripts/auto-pilot.mjs intent ...` to
 write human objectives, constraints, risk notes, acceptance expectations, and
 overrides without requiring the human to edit internal files directly.
+Cockpit evidence must be shown through `humanJudgment.evidence.summary`, which
+compresses journal memory into recent completions, failures, gates, and critical
+decisions.
 
 ### Roles
 

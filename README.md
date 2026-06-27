@@ -171,7 +171,9 @@ node scripts/auto-pilot.mjs goal --text "Ship this project to a releasable state
 The cockpit is the daily control surface. It keeps human attention on whether
 the goal is still right, whether risk is acceptable, and whether the evidence is
 trustworthy. Sprint state, run journals, pitfalls, quality gates, and
-orchestration phases remain auditable internals for the agent.
+orchestration phases remain auditable internals for the agent. Journal evidence
+is summarized into recent completions, failures, gates, and decisions before it
+is shown to humans.
 
 ---
 

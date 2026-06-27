@@ -29,6 +29,72 @@ function extractJournalSummaries(entries) {
   }).filter(Boolean);
 }
 
+function uniqueStrings(items) {
+  return Array.from(new Set(items.filter(Boolean)));
+}
+
+function matchesAny(text, patterns) {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+function buildEvidenceSummary(entries) {
+  const recent = extractJournalSummaries(entries).slice(-5);
+  const completions = recent.filter((summary) => matchesAny(summary, [
+    /\bpass(?:ed)?\b/i,
+    /\bcomplete(?:d)?\b/i,
+    /\bdone\b/i,
+    /\bcommitted\b/i,
+    /\blanded\b/i,
+  ])).slice(-3);
+  const failures = recent.filter((summary) => matchesAny(summary, [
+    /\bfail(?:ed|ure)?\b/i,
+    /\bblocked\b/i,
+    /\bcritical\b/i,
+    /\bp0\b/i,
+    /\bstop condition\b/i,
+    /\bnon-zero\b/i,
+    /\bexitCode=\d+/i,
+  ])).slice(-3);
+  const gates = recent.filter((summary) => matchesAny(summary, [
+    /\bgate\b/i,
+    /\bcheck:all\b/i,
+    /\blint\b/i,
+    /\btype-?check\b/i,
+    /\btest(?:s|ing)?\b/i,
+    /\bvalidate\b/i,
+    /\breview\b/i,
+    /\bpytest\b/i,
+    /\bmypy\b/i,
+    /\bruff\b/i,
+  ])).slice(-3);
+  const decisions = recent.filter((summary) => matchesAny(summary, [
+    /\bdecision\b/i,
+    /\bapproved\b/i,
+    /\baccepted\b/i,
+    /\bwaive(?:d|r)?\b/i,
+    /\boverride\b/i,
+    /\bhuman-intent\b/i,
+    /\bobjective\b/i,
+    /\brisk\b/i,
+    /\bacceptance\b/i,
+  ])).slice(-3);
+
+  return {
+    recent,
+    completions,
+    failures,
+    gates,
+    decisions,
+    counts: {
+      recent: recent.length,
+      completions: completions.length,
+      failures: failures.length,
+      gates: gates.length,
+      decisions: decisions.length,
+    },
+  };
+}
+
 function riskLevelFromSnapshot(snapshot) {
   if (snapshot.anomalies?.some((item) => item.code?.includes("STALE") || item.severity === "critical")) {
     return "high";
@@ -50,6 +116,14 @@ export function buildCockpit(snapshot) {
   const pendingTasks = snapshot.sprint?.pendingTasks ?? 0;
   const unchecked = snapshot.humanBoard?.unchecked ?? [];
   const phase = snapshot.run?.phase ?? "idle";
+  const evidenceSummary = buildEvidenceSummary(snapshot.journalTail ?? []);
+  const evidenceSignals = uniqueStrings([
+    ...evidenceSummary.failures,
+    ...evidenceSummary.gates,
+    ...evidenceSummary.completions,
+    ...evidenceSummary.decisions,
+    ...evidenceSummary.recent,
+  ]).slice(0, 5);
   const pendingApproval =
     phase === "awaiting-plan-approval" ? "plan-review-and-approval"
       : phase === "plan-reviewed" ? "plan-approval"
@@ -95,7 +169,8 @@ export function buildCockpit(snapshot) {
         question: phase === "awaiting-commit-approval"
           ? "Is the completion evidence trustworthy enough to approve commit?"
           : "Is more evidence needed before accepting the current direction?",
-        signals: extractJournalSummaries(snapshot.journalTail ?? []).slice(-5),
+        summary: evidenceSummary,
+        signals: evidenceSignals,
       },
     },
     pendingApproval,

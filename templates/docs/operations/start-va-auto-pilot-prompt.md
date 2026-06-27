@@ -21,6 +21,10 @@ node scripts/auto-pilot.mjs goal --text "..."
 node scripts/auto-pilot.mjs cockpit --json
 ```
 
+Treat `cockpit.humanJudgment.evidence.summary` as the human evidence layer.
+It compresses journal memory into recent completions, failures, gates, and
+decisions; do not ask the human to read raw journal entries for normal approval.
+
 When the human gives granular direction, write it through the intent CLI instead
 of asking them to edit `human-board.md`:
 

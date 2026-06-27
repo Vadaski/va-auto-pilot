@@ -78,6 +78,8 @@ Usage:
   va-auto-pilot orchestrate <subcommand> [options]
   va-auto-pilot observe [options]
   va-auto-pilot cockpit [options]
+  va-auto-pilot gates audit [options]
+  va-auto-pilot gates maintain [--apply] [options]
   va-auto-pilot goal --text "..."
   va-auto-pilot intent <objective|constraint|risk|acceptance|override|note> --text "..."
   va-auto-pilot intervene <subcommand> [options]
@@ -90,6 +92,7 @@ Commands:
   orchestrate  Manager-on-the-loop phased execution (session agent approves plan/commit)
   observe      Refresh orchestration snapshot.json and print global status
   cockpit      Print the human-facing goal/risk/evidence control surface
+  gates        Audit and maintain internal quality gate trust
   goal         Capture a goal and return the cockpit/next agent actions
   intent       Append human intent through the agent-managed override channel
   intervene    Tactical directives for the active run (separate from human-board)
@@ -134,6 +137,8 @@ Examples:
   va-auto-pilot run . --max-cycles 5 --dry-run
   va-auto-pilot run . --no-colony --agent-template "codex exec {taskId}"
   va-auto-pilot cockpit --json
+  va-auto-pilot gates audit --json
+  va-auto-pilot gates maintain --apply --json
   va-auto-pilot goal --text "Ship a reliable release" --json
   va-auto-pilot intent objective --text "Ship a reliable release"
   va-auto-pilot orchestrate recover --json
@@ -921,7 +926,7 @@ function main() {
     process.exit(0);
   }
 
-  if (["orchestrate", "observe", "cockpit", "goal", "intent", "intervene"].includes(argv[0])) {
+  if (["orchestrate", "observe", "cockpit", "gates", "goal", "intent", "intervene"].includes(argv[0])) {
     runAutoPilotCli(argv);
     return;
   }

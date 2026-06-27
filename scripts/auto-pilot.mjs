@@ -13,6 +13,7 @@ import path from "node:path";
 
 import { runOrchestrateCommand } from "./auto-pilot-orchestrate.mjs";
 import { runCockpit, runObserve } from "./auto-pilot-observe.mjs";
+import { runGates } from "./auto-pilot-gates.mjs";
 import { runGoal } from "./auto-pilot-goal.mjs";
 import { runIntervene } from "./auto-pilot-intervene.mjs";
 import { runIntent } from "./auto-pilot-intent.mjs";
@@ -36,6 +37,8 @@ Usage:
 
   node scripts/auto-pilot.mjs observe [--json]
   node scripts/auto-pilot.mjs cockpit [--json]
+  node scripts/auto-pilot.mjs gates audit [--json]
+  node scripts/auto-pilot.mjs gates maintain [--apply] [--json]
   node scripts/auto-pilot.mjs goal --text "..."
   node scripts/auto-pilot.mjs intent objective --text "..."
   node scripts/auto-pilot.mjs intent constraint --text "..."
@@ -86,6 +89,15 @@ async function main() {
 
   if (command === "goal") {
     await runGoal(argv.slice(1));
+    return;
+  }
+
+  if (command === "gates") {
+    if (!subcommand) {
+      printHelp();
+      process.exit(1);
+    }
+    await runGates(subcommand, argv.slice(2));
     return;
   }
 

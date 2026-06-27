@@ -4471,6 +4471,7 @@ test("ColonyBridge: dispatch does not bypass colony for small tasks even if rout
 // readQualityGateConfig — unit tests
 // ---------------------------------------------------------------------------
 import { readQualityGateConfig } from "./lib/sprint-utils.mjs";
+import { buildGateTrustSummary, planGateMaintenance } from "./lib/gate-trust.mjs";
 
 test("readQualityGateConfig: returns {} for missing file", () => {
   const result = readQualityGateConfig("/nonexistent/qg-config.yaml");
@@ -4505,6 +4506,48 @@ test("readQualityGateConfig: returns {} when qualityGate is not an object", () =
   const { filePath } = withTempFile(yaml);
   const result = readQualityGateConfig(filePath);
   assert.deepEqual(result, {});
+});
+
+test("gate trust: flags weak required commands and missing smoke command", () => {
+  const result = buildGateTrustSummary({
+    buildCommand: "npm run check",
+    reviewCommand: "codex review --uncommitted",
+    acceptanceTestCommand: "npm test",
+    smokeTest: { enabled: true, criticalPaths: [] },
+    adaptiveGates: [
+      { name: "fallback", command: "reason: falling back to agentTemplate spawn", required: true },
+    ],
+  });
+
+  assert.equal(result.status, "missing-required-gates");
+  assert.deepEqual(result.missingRequired, ["smoke"]);
+  assert.ok(result.weakSignals.some((signal) => signal.includes("fallback")));
+  assert.ok(result.weakSignals.some((signal) => signal.includes("no critical paths")));
+});
+
+test("gate maintenance: downgrades only resolved weak adaptive gates", () => {
+  const config = {
+    qualityGate: {
+      adaptiveGates: [
+        { name: "resolved", command: "echo \"TODO: implement\"", required: true, triggeredBy: "PF-001" },
+        { name: "unresolved", command: "echo \"TODO: implement\"", required: true, triggeredBy: "PF-002" },
+        { name: "real", command: "npm run check:units", required: true, triggeredBy: "PF-003" },
+      ],
+    },
+  };
+  const plan = planGateMaintenance(config, new Map([
+    ["PF-001", true],
+    ["PF-002", false],
+    ["PF-003", true],
+  ]));
+
+  assert.equal(plan.changed, true);
+  assert.equal(plan.actions.length, 1);
+  assert.equal(plan.actions[0].name, "resolved");
+  assert.equal(plan.updatedConfig.qualityGate.adaptiveGates[0].required, false);
+  assert.equal(plan.updatedConfig.qualityGate.adaptiveGates[0].status, "advisory");
+  assert.equal(plan.updatedConfig.qualityGate.adaptiveGates[1].required, true);
+  assert.equal(plan.updatedConfig.qualityGate.adaptiveGates[2].required, true);
 });
 
 // ---------------------------------------------------------------------------
@@ -6059,6 +6102,55 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
   assert.ok(payload.cockpit.recommendedActions.every((item) => !item.includes("orchestrate")));
   assert.ok(payload.cockpit.nextCommands.some((item) => item.argv.includes("orchestrate")));
   assert.ok(!Object.hasOwn(payload, "snapshot"));
+});
+
+test("auto-pilot gates maintain: applies resolved weak gate downgrade", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-gates-maintain-"));
+  fs.mkdirSync(path.join(tmpDir, ".va-auto-pilot"), { recursive: true });
+  const configFile = path.join(tmpDir, ".va-auto-pilot", "config.yaml");
+  const pitfallsFile = path.join(tmpDir, ".va-auto-pilot", "pitfalls.json");
+  fs.writeFileSync(configFile, [
+    "qualityGate:",
+    "  buildCommand: npm run check:all",
+    "  reviewCommand: codex review --uncommitted",
+    "  acceptanceTestCommand: npm run validate:distribution",
+    "  adaptiveGates:",
+    "    - name: old-placeholder",
+    "      command: 'echo \"TODO: implement gate\"'",
+    "      required: true",
+    "      triggeredBy: PF-001",
+    "    - name: active-placeholder",
+    "      command: 'echo \"TODO: implement gate\"'",
+    "      required: true",
+    "      triggeredBy: PF-002",
+    "",
+  ].join("\n"), "utf8");
+  fs.writeFileSync(pitfallsFile, JSON.stringify({
+    version: 1,
+    entries: [
+      { id: "PF-001", resolvedAt: "2026-06-01T00:00:00.000Z" },
+      { id: "PF-002", resolvedAt: null },
+    ],
+  }, null, 2), "utf8");
+
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  const dryRun = spawnSync(process.execPath, [script, "gates", "maintain", "--json"], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(dryRun.status, 0, dryRun.stderr);
+  const dryPayload = JSON.parse(dryRun.stdout);
+  assert.equal(dryPayload.maintenance.changed, true);
+  assert.equal(dryPayload.maintenance.applied, false);
+  assert.match(fs.readFileSync(configFile, "utf8"), /required: true/);
+
+  const apply = spawnSync(process.execPath, [script, "gates", "maintain", "--apply", "--json"], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(apply.status, 0, apply.stderr);
+  const applyPayload = JSON.parse(apply.stdout);
+  assert.equal(applyPayload.maintenance.applied, true);
+  assert.equal(applyPayload.maintenance.actions.length, 1);
+
+  const updated = parseYaml(fs.readFileSync(configFile, "utf8"));
+  assert.equal(updated.qualityGate.adaptiveGates[0].required, false);
+  assert.equal(updated.qualityGate.adaptiveGates[0].status, "advisory");
+  assert.equal(updated.qualityGate.adaptiveGates[1].required, true);
 });
 
 // ---------------------------------------------------------------------------

@@ -66,6 +66,8 @@ Use the cockpit and intent commands as the daily agent-facing interface:
 ```bash
 node scripts/auto-pilot.mjs goal --text "..."
 node scripts/auto-pilot.mjs cockpit --json
+node scripts/auto-pilot.mjs gates audit --json
+node scripts/auto-pilot.mjs gates maintain --apply --json
 node scripts/auto-pilot.mjs intent objective --text "..."
 node scripts/auto-pilot.mjs intent constraint --text "..."
 node scripts/auto-pilot.mjs intent risk --text "..."
@@ -75,6 +77,8 @@ node scripts/auto-pilot.mjs intent override --text "..."
 
 `intent` writes to the human override channel without requiring the user to edit
 `human-board.md`; stale approval invalidation still applies.
+`gates maintain --apply` is agent-internal cleanup for resolved placeholder
+adaptive gates; unresolved weak gates remain evidence-risk signals.
 
 4. **Configure quality gates** (pluggable + adaptive):
 

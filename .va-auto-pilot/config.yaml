@@ -17,29 +17,39 @@ qualityGate:
   adaptiveGates:
     - name: dispatch-failed
       command: 'echo "TODO: implement gate for PF-004"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-004: Dispatch failed: exitCode=1"
       triggeredBy: PF-004
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: dispatch-failed
       command: 'echo "TODO: implement gate for PF-005"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-005: Dispatch failed: exitCode=1"
       triggeredBy: PF-005
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: dispatch-failed
       command: 'echo "TODO: implement gate for PF-006"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-006: Dispatch failed: exitCode=1"
       triggeredBy: PF-006
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: dispatch-failed
       command: 'echo "TODO: implement gate for PF-007"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-007: Dispatch failed: exitCode=1"
       triggeredBy: PF-007
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: dispatch-failed
       command: 'echo "TODO: implement gate for PF-008"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-008: Dispatch failed: exitCode=1"
       triggeredBy: PF-008
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: review-gate
       command: codex review --uncommitted
       required: false
@@ -47,54 +57,72 @@ qualityGate:
       triggeredBy: PF-009
     - name: dispatch-failed
       command: 'echo "TODO: implement gate for PF-010"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-010: Dispatch failed: exitCode=1"
       triggeredBy: PF-010
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: dispatch-failed
       command: 'echo "TODO: implement gate for PF-011"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-011: Dispatch failed: exitCode=1"
       triggeredBy: PF-011
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: fix-dispatch
       command: 'echo "TODO: implement gate for PF-012"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-012: Fix dispatch failed: exitCode=1"
       triggeredBy: PF-012
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: auto-pilot
       command: 'echo "TODO: implement gate for PF-013"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-013: va-auto-pilot | Usage: |
         va-auto-pilot init [target-dir] [options]"
       triggeredBy: PF-013
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: dispatch-failed
       command: 'echo "TODO: implement gate for PF-014"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-014: Dispatch failed: exitCode=1"
       triggeredBy: PF-014
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: dispatch-failed
       command: 'echo "TODO: implement gate for PF-015"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-015: Dispatch failed: exitCode=1"
       triggeredBy: PF-015
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: dispatch-failed
       command: 'echo "TODO: implement gate for PF-016"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-016: Dispatch failed: exitCode=1"
       triggeredBy: PF-016
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: auto-pilot
       command: 'echo "TODO: implement gate for PF-017"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-017: va-auto-pilot | Usage: |
         va-auto-pilot init [target-dir] [options]"
       triggeredBy: PF-017
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: kimi-execution
       command: 'echo "TODO: implement gate for PF-018"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-018: Dispatch failed: exitCode=1 | Kimi
         execution exceeded 600000ms | Task too complex or kimi hung. |
         objective: Sprint 3: migrate subcommand for store-level schema
         migrations (§14.3 + §11 four-phase preflight/apply/verify/rollback)"
       triggeredBy: PF-018
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: npm-test
       command: npm run validate:distribution
       required: true
@@ -102,24 +130,30 @@ qualityGate:
       triggeredBy: PF-001
     - name: codex-completed
       command: 'echo "TODO: implement gate for PF-022"'
-      required: true
+      required: false
       description: 'Suggested from pitfall PF-022: Fix dispatch failed: exitCode=1 |
         Codex completed but gate "undefined" failed | Gate check failed |
         objective: Sprint 1-bis B13: recovery rolls back target artifacts
         touched by refs mirror mid-update crash'
       triggeredBy: PF-022
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: auto-pilot
       command: 'echo "TODO: implement gate for PF-023"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-023: va-auto-pilot | Usage: |
         va-auto-pilot init [target-dir] [options]"
       triggeredBy: PF-023
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: auto-pilot
       command: 'echo "TODO: implement gate for PF-024"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-024: va-auto-pilot | Usage: |
         va-auto-pilot init [target-dir] [options]"
       triggeredBy: PF-024
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: codex-completed
       command: npm run check:units
       required: true
@@ -146,23 +180,27 @@ qualityGate:
       triggeredBy: PF-028
     - name: codex-completed
       command: 'echo "TODO: implement gate for PF-030"'
-      required: true
+      required: false
       description: 'Suggested from pitfall PF-030: Fix dispatch failed: exitCode=1 |
         Codex completed but gate "undefined" failed | Gate check failed |
         objective: Sprint 1-bis B13: recovery rolls back target artifacts
         touched by refs mirror mid-update crash'
       triggeredBy: PF-030
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: reason-changed
       command: "reason: 10 changed files; would route to kimi:va-auto-pilot | falling
         back to agentTemplate spawn | ---"
-      required: true
+      required: false
       description: "Suggested from pitfall PF-034: Dispatch failed: exitCode=1 |
         reason: 10 changed files; would route to kimi:va-auto-pilot | falling
         back to agentTemplate spawn | ---"
       triggeredBy: PF-034
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: codex-completed
       command: 'echo "TODO: implement gate for PF-036"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-036: Fix dispatch failed: exitCode=1 |
         Codex completed but gate \"undefined\" failed | Gate check failed |
         objective: Sprint 4(b): GitHub Actions CI step for DocStore — extend
@@ -170,17 +208,21 @@ qualityGate:
         'doc-store doctor' + 'doc-store enforce-staged --base main' on PRs;
         required for merge"
       triggeredBy: PF-036
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: reason-changed
       command: "reason: 8 changed files; would route to kimi:va-auto-pilot | falling
         back to agentTemplate spawn | ---"
-      required: true
+      required: false
       description: "Suggested from pitfall PF-037: Dispatch failed: exitCode=1 |
         reason: 8 changed files; would route to kimi:va-auto-pilot | falling
         back to agentTemplate spawn | ---"
       triggeredBy: PF-037
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: codex-completed
       command: 'echo "TODO: implement gate for PF-040"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-040: Dispatch failed: exitCode=1 | Codex
         completed but gate \"undefined\" failed | Gate check failed | objective:
         auto-pilot infra: fix 'falling back to agentTemplate spawn' path —
@@ -188,9 +230,11 @@ qualityGate:
         returns exit 1 in 119-414ms (clearly broken construction); restore
         viable dispatch when kimi is skipped"
       triggeredBy: PF-040
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: codex-execution
       command: 'echo "TODO: implement gate for PF-041"'
-      required: true
+      required: false
       description: "Suggested from pitfall PF-041: Dispatch failed: exitCode=1 | Codex
         execution exceeded 600000ms | Task too complex or codex hung. |
         objective: Phase 2 — write path: 'sprint-board pitfall --resolve'
@@ -198,15 +242,19 @@ qualityGate:
         from pitfall.hypothesis + resolution + task.title; commit with message
         scheme constraint: ... — no external engine call"
       triggeredBy: PF-041
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: codex-completed
       command: 'echo "TODO: implement gate for PF-043"'
-      required: true
+      required: false
       description: 'Suggested from pitfall PF-043: Dispatch failed: exitCode=1 | Codex
         completed but gate "undefined" failed | Gate check failed | objective:
         Sprint 4(e): README + start-va-auto-pilot-prompt updates — DocStore
         usage section (init / adopt / hook install / modes); cross-link from
         CLAUDE.md Quality Gate section'
       triggeredBy: PF-043
+      status: advisory
+      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
     - name: claude-exec
       command: npm run typecheck
       required: true

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { buildGateTrustSummary } from "./lib/gate-trust.mjs";
 import { readHumanBoardInstructions, resolveHumanBoardPath } from "./lib/human-board.mjs";
 import { buildOrchestrationOpts, emitResult, sprintBoardExec, tryParseJson } from "./lib/orchestration-cli.mjs";
 import { readQualityGateConfig } from "./lib/sprint-utils.mjs";
@@ -94,101 +95,6 @@ function buildEvidenceSummary(entries) {
       gates: gates.length,
       decisions: decisions.length,
     },
-  };
-}
-
-function normalizeCommand(value) {
-  return String(value ?? "").trim();
-}
-
-function isWeakGateCommand(command) {
-  return /\bTODO\b/i.test(command)
-    || /\bplaceholder\b/i.test(command)
-    || /^echo\b/i.test(command);
-}
-
-function gateEntry(name, command, { required = true } = {}) {
-  const normalized = normalizeCommand(command);
-  return normalized ? { name, command: normalized, required } : null;
-}
-
-function buildGateTrustSummary(qualityGate = {}) {
-  const gates = [
-    gateEntry("build", qualityGate.buildCommand),
-    gateEntry("review", qualityGate.reviewCommand, {
-      required: qualityGate.reviewRequired !== false
-        && qualityGate.allowAdvisoryReview !== true
-        && qualityGate.review?.required !== false,
-    }),
-    gateEntry("acceptance", qualityGate.acceptanceTestCommand),
-    gateEntry("smoke", qualityGate.smokeTestCommand, {
-      required: qualityGate.smokeTest?.enabled === true,
-    }),
-    gateEntry("eval", qualityGate.evalCommand),
-    ...(Array.isArray(qualityGate.evalGates)
-      ? qualityGate.evalGates.map((gate, index) => gateEntry(
-        String(gate?.name ?? `eval-${index + 1}`),
-        gate?.command,
-        { required: gate?.required !== false }
-      ))
-      : []),
-    ...(Array.isArray(qualityGate.adaptiveGates)
-      ? qualityGate.adaptiveGates.map((gate, index) => gateEntry(
-        String(gate?.name ?? `adaptive-${index + 1}`),
-        gate?.command,
-        { required: gate?.required !== false }
-      ))
-      : []),
-  ].filter(Boolean);
-
-  const requiredGates = gates.filter((gate) => gate.required);
-  const weakSignals = [];
-  const missingRequired = [];
-
-  if (!normalizeCommand(qualityGate.buildCommand)) {
-    missingRequired.push("build");
-  }
-  if (!normalizeCommand(qualityGate.acceptanceTestCommand)) {
-    missingRequired.push("acceptance");
-  }
-  if (qualityGate.smokeTest?.enabled === true && !normalizeCommand(qualityGate.smokeTestCommand)) {
-    missingRequired.push("smoke");
-  }
-  if (!normalizeCommand(qualityGate.reviewCommand)
-    && qualityGate.reviewRequired !== false
-    && qualityGate.allowAdvisoryReview !== true
-    && qualityGate.review?.required !== false) {
-    missingRequired.push("review");
-  }
-
-  const weakRequiredGates = requiredGates.filter((gate) => isWeakGateCommand(gate.command));
-  for (const gateName of uniqueStrings(weakRequiredGates.map((item) => item.name)).slice(0, 5)) {
-    weakSignals.push(`${gateName}: weak placeholder command`);
-  }
-
-  if (qualityGate.allowAdvisoryReview === true || qualityGate.reviewRequired === false || qualityGate.review?.required === false) {
-    weakSignals.push("review gate is advisory");
-  }
-
-  if (qualityGate.smokeTest?.enabled === true && (qualityGate.smokeTest.criticalPaths?.length ?? 0) === 0) {
-    weakSignals.push("smoke test enabled with no critical paths");
-  }
-
-  const status = missingRequired.length > 0
-    ? "missing-required-gates"
-    : weakSignals.length > 0
-      ? "needs-agent-attention"
-      : requiredGates.length > 0
-        ? "configured"
-        : "not-configured";
-
-  return {
-    status,
-    requiredCount: requiredGates.length,
-    configuredCount: gates.length,
-    missingRequired: uniqueStrings(missingRequired),
-    weakSignals: uniqueStrings(weakSignals),
-    confirmed: qualityGate.confirmed === true || Boolean(qualityGate.confirmedAt),
   };
 }
 

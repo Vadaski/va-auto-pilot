@@ -47,6 +47,9 @@ decisions.
 Its `gateTrust` field summarizes whether configured gates look trustworthy
 enough for acceptance. Humans see this as risk and evidence-trust context, not
 as raw `qualityGate` mechanics.
+The session agent may run `node scripts/auto-pilot.mjs gates audit --json` to
+inspect gate trust and `node scripts/auto-pilot.mjs gates maintain --apply --json`
+to downgrade resolved placeholder adaptive gates from required to advisory.
 `recommendedActions` must stay semantic and human-readable; executable phase
 commands belong in `nextCommands[].argv` for the session agent.
 
@@ -417,6 +420,12 @@ gates:
 ```
 
 Unknown stacks are fail-closed. The scaffolded commands must exit non-zero until the manager investigates the project and writes real `qualityGate` commands. `va-auto-pilot init --allow-placeholder-gates` exists only for scaffold experiments where non-blocking TODO gates are intentional.
+
+Adaptive gates are agent-maintained. Resolved pitfalls may leave historical
+placeholder gates behind; the manager should audit them with
+`auto-pilot gates audit` and use `auto-pilot gates maintain --apply` to downgrade
+resolved weak placeholders to advisory. Unresolved weak gates remain risk
+signals until the pitfall is resolved or a real command is configured.
 
 #### Example: TypeScript Project (default)
 

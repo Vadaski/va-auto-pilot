@@ -133,7 +133,7 @@ node scripts/auto-pilot.mjs orchestrate journal
 ```
 
 - 战术指令：`intervene` → `.va-auto-pilot/orchestration/directives.json`
-- 人类控制面：`cockpit --json` 汇总 goal/risk/evidence；`intent <type> --text "..."` 写入战略意图
+- 人类控制面：`goal --text "..."` 捕获目标并返回 cockpit；`intent <type> --text "..."` 写入细分战略意图
 - 无人值守：`orchestrate run-unattended --waive-approvals` 或 `auto-pilot-loop.mjs --max-cycles 50`
 
 详见 `docs/operations/va-auto-pilot-protocol.md` → Orchestrated Execution Mode。
@@ -467,7 +467,7 @@ This is the full cycle a manager agent executes:
 
 ```bash
 # 1. Read cockpit (always first)
-node scripts/auto-pilot.mjs cockpit --json
+node scripts/auto-pilot.mjs goal --text "Ship a reliable release" --json
 # Ask humans only about goal correctness, risk acceptability, and evidence trustworthiness.
 # Capture new direction through: node scripts/auto-pilot.mjs intent <type> --text "..."
 

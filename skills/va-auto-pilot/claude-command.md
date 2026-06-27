@@ -29,6 +29,7 @@ You stay in the session loop. The executor runs one phase and exits. You **must*
 Humans should only need to decide whether the goal is still right, risk is acceptable, and evidence is trustworthy. Use `cockpit` and `intent` as the public control surface; treat sprint-state, run-journal, pitfalls, quality gates, and orchestration phases as internal mechanics.
 
 ```bash
+node scripts/auto-pilot.mjs goal --text "..."
 node scripts/auto-pilot.mjs cockpit --json
 node scripts/auto-pilot.mjs intent objective --text "..."
 node scripts/auto-pilot.mjs intent constraint --text "..."

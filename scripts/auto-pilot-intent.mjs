@@ -37,19 +37,24 @@ export async function runIntent(subcommand, argv) {
   }
 
   const source = opts.parsed.options.source ?? opts.managerSurface ?? "agent";
-  const boardPath = resolveHumanBoardPath(opts.stateFile);
-  const entry = appendHumanIntent(boardPath, { type, text, source });
-  appendIntentJournal(opts.journalFile, { type, text, source });
-  const snapshot = await refreshSnapshot(opts);
+  const result = await captureIntent(opts, { type, text, source });
 
   return emitResult(opts, {
     ok: true,
     action: "intent",
     type,
     text,
-    boardPath: entry.boardPath,
-    line: entry.line,
+    boardPath: result.entry.boardPath,
+    line: result.entry.line,
     staleApprovalImpact: "changes human intent projection hash; approved plans must be re-approved before dispatch",
-    cockpit: snapshot.cockpit,
+    cockpit: result.snapshot.cockpit,
   });
+}
+
+export async function captureIntent(opts, { type, text, source }) {
+  const boardPath = resolveHumanBoardPath(opts.stateFile);
+  const entry = appendHumanIntent(boardPath, { type, text, source });
+  appendIntentJournal(opts.journalFile, { type, text, source });
+  const snapshot = await refreshSnapshot(opts);
+  return { entry, snapshot };
 }

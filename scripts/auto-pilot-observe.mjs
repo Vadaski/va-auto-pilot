@@ -219,8 +219,10 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
   const actions = [];
   if (!run) {
     actions.push("orchestrate init");
-    if (pendingTasks === 0) {
-      actions.push("capture objective: auto-pilot intent objective --text \"...\"");
+    if (uncheckedBoard.length > 0) {
+      actions.push("process human intent from cockpit");
+    } else if (pendingTasks === 0) {
+      actions.push("capture goal: auto-pilot goal --text \"...\"");
     }
     return actions;
   }
@@ -228,8 +230,10 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
     actions.push("orchestrate init");
     if (pendingTasks > 0) {
       actions.push("orchestrate plan");
+    } else if (uncheckedBoard.length > 0) {
+      actions.push("process human intent from cockpit");
     } else {
-      actions.push("capture objective: auto-pilot intent objective --text \"...\"");
+      actions.push("capture goal: auto-pilot goal --text \"...\"");
     }
     return actions;
   }
@@ -245,8 +249,8 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
   if (stopCondition.stop) {
     actions.push("intervene replan or capture updated intent before continue");
   }
-  if (pendingTasks === 0 && ["initialized", "cycle-closed"].includes(run.phase)) {
-    actions.push("capture objective: auto-pilot intent objective --text \"...\"");
+  if (pendingTasks === 0 && uncheckedBoard.length === 0 && ["initialized", "cycle-closed"].includes(run.phase)) {
+    actions.push("capture goal: auto-pilot goal --text \"...\"");
   }
   switch (run.phase) {
     case "initialized":
@@ -312,20 +316,20 @@ function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pen
     commands.push(command("Start run", ["orchestrate", "init"], run ? "Current run is terminal." : "No active orchestration run exists."));
     if (pendingTasks > 0) {
       commands.push(command("Plan next cycle", ["orchestrate", "plan"], "Pending sprint tasks are available."));
-    } else {
+    } else if (uncheckedBoard.length === 0) {
       commands.push(command(
-        "Capture objective",
-        ["intent", "objective", "--text", "<objective>"],
+        "Capture goal",
+        ["goal", "--text", "<objective>"],
         "No pending sprint tasks are available; ask the human for the next goal."
       ));
     }
     return commands;
   }
 
-  if (pendingTasks === 0 && ["initialized", "cycle-closed"].includes(run.phase)) {
+  if (pendingTasks === 0 && uncheckedBoard.length === 0 && ["initialized", "cycle-closed"].includes(run.phase)) {
     commands.push(command(
-      "Capture objective",
-      ["intent", "objective", "--text", "<objective>"],
+      "Capture goal",
+      ["goal", "--text", "<objective>"],
       "The run is ready, but backlog is empty; ask the human for the next goal."
     ));
   }

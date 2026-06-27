@@ -17,11 +17,12 @@ mechanics. Keep the conversation focused on:
 Use the cockpit view before asking the human for a decision:
 
 ```bash
+node scripts/auto-pilot.mjs goal --text "..."
 node scripts/auto-pilot.mjs cockpit --json
 ```
 
-When the human gives direction, write it through the intent CLI instead of
-asking them to edit `human-board.md`:
+When the human gives granular direction, write it through the intent CLI instead
+of asking them to edit `human-board.md`:
 
 ```bash
 node scripts/auto-pilot.mjs intent objective --text "..."

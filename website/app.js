@@ -275,7 +275,8 @@ const STATE_DETAILS = {
 const DEMO_LINES = {
   en: [
     "$ va-auto-pilot",
-    "[manager] Reading human-board + run-journal ...",
+    "[manager] Reading cockpit: goal / risk / evidence ...",
+    "[intent] objective captured -> internal human intent projection",
     "[manager] Goal classified: strategic — launching parallel dimension scan",
     "[moment 1] The model plans the sprint",
     "[scan:correctness] auditing checkout edge cases ...",
@@ -303,7 +304,8 @@ const DEMO_LINES = {
   ],
   zh: [
     "$ va-auto-pilot",
-    "[manager] \u8BFB\u53D6 human-board + run-journal ...",
+    "[manager] \u8BFB\u53D6 cockpit\uFF1A\u76EE\u6807 / \u98CE\u9669 / \u8BC1\u636E ...",
+    "[intent] \u76EE\u6807\u5DF2\u5199\u5165 -> \u5185\u90E8\u4EBA\u7C7B\u610F\u56FE\u6295\u5F71",
     "[manager] \u76EE\u6807\u5206\u7C7B\uFF1A\u6218\u7565\u7EA7\u2014\u2014\u542F\u52A8\u5E76\u884C\u7EF4\u5EA6\u626B\u63CF",
     "[\u5173\u952E\u65F6\u523B 1] \u6A21\u578B\u89C4\u5212\u51B2\u523A",
     "[\u626B\u63CF:\u6B63\u786E\u6027] \u5BA1\u8BA1\u7ED3\u7B97\u8FB9\u754C\u60C5\u51B5 ...",
@@ -694,7 +696,7 @@ function renderDynamicContent() {
   setText("genericInstallCmd", "npx va-auto-pilot init .\nnpm install");
   setText(
     "genericUseCmd",
-    "node scripts/auto-pilot.mjs orchestrate init --manager-surface generic-cli-agent\nnode scripts/auto-pilot.mjs orchestrate plan\nnode scripts/auto-pilot.mjs orchestrate review-plan\nnode scripts/auto-pilot.mjs orchestrate approve-plan"
+    'node scripts/auto-pilot.mjs goal --text "Ship a reliable release" --json\n$va-auto-pilot run one governed loop; keep humans on goal, risk, and evidence'
   );
 
   setText("codexInstallCmd", `$skill-installer install ${skillDirUrl}`);

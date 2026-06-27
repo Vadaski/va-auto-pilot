@@ -60,6 +60,7 @@ acceptance evidence is trustworthy.
 Use the cockpit and intent commands as the daily agent-facing interface:
 
 ```bash
+node scripts/auto-pilot.mjs goal --text "..."
 node scripts/auto-pilot.mjs cockpit --json
 node scripts/auto-pilot.mjs intent objective --text "..."
 node scripts/auto-pilot.mjs intent constraint --text "..."
@@ -91,6 +92,7 @@ Adaptive: `node scripts/sprint-board.mjs suggest-gate` reads unresolved pitfalls
 ```bash
 node scripts/auto-pilot.mjs orchestrate init --manager-surface cursor
 node scripts/auto-pilot.mjs cockpit --json
+node scripts/auto-pilot.mjs goal --text "..."
 node scripts/auto-pilot.mjs orchestrate plan
 node scripts/auto-pilot.mjs observe --json
 node scripts/auto-pilot.mjs orchestrate review-plan    # Codex/read-only plan review — required before approve
@@ -182,6 +184,7 @@ Cross-project: inherit proven gates from similar projects.
 ```bash
 # Autonomous loop (primary)
 node scripts/auto-pilot.mjs cockpit [--json]
+node scripts/auto-pilot.mjs goal --text "..."
 node scripts/auto-pilot.mjs intent objective --text "..."
 node scripts/auto-pilot-loop.mjs [--max-cycles 50] [--no-parallel] [--skip-sprint-review]
 node scripts/auto-pilot.mjs orchestrate recover [--apply] [--json]

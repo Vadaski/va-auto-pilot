@@ -78,6 +78,7 @@ Usage:
   va-auto-pilot orchestrate <subcommand> [options]
   va-auto-pilot observe [options]
   va-auto-pilot cockpit [options]
+  va-auto-pilot goal --text "..."
   va-auto-pilot intent <objective|constraint|risk|acceptance|override|note> --text "..."
   va-auto-pilot intervene <subcommand> [options]
   va-auto-pilot --help
@@ -89,6 +90,7 @@ Commands:
   orchestrate  Manager-on-the-loop phased execution (session agent approves plan/commit)
   observe      Refresh orchestration snapshot.json and print global status
   cockpit      Print the human-facing goal/risk/evidence control surface
+  goal         Capture a goal and return the cockpit/next agent actions
   intent       Append human intent through the agent-managed override channel
   intervene    Tactical directives for the active run (separate from human-board)
 
@@ -132,6 +134,7 @@ Examples:
   va-auto-pilot run . --max-cycles 5 --dry-run
   va-auto-pilot run . --no-colony --agent-template "codex exec {taskId}"
   va-auto-pilot cockpit --json
+  va-auto-pilot goal --text "Ship a reliable release" --json
   va-auto-pilot intent objective --text "Ship a reliable release"
   va-auto-pilot orchestrate recover --json
   va-auto-pilot orchestrate recover --apply
@@ -527,7 +530,7 @@ function runInit(parsed) {
   if (!dryRun) {
     console.log("\nNext steps:");
     console.log("1. Run npm install");
-    console.log('2. Capture the first objective with node scripts/auto-pilot.mjs intent objective --text "..."');
+    console.log('2. Capture the first objective with node scripts/auto-pilot.mjs goal --text "..."');
     console.log("3. Inspect the control summary with node scripts/auto-pilot.mjs cockpit --json");
     if (demo) {
       console.log(`4. Run ${DEMO_GATE_COMMAND}`);
@@ -918,7 +921,7 @@ function main() {
     process.exit(0);
   }
 
-  if (["orchestrate", "observe", "cockpit", "intent", "intervene"].includes(argv[0])) {
+  if (["orchestrate", "observe", "cockpit", "goal", "intent", "intervene"].includes(argv[0])) {
     runAutoPilotCli(argv);
     return;
   }

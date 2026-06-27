@@ -177,11 +177,14 @@ node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
 rm -rf "$tmp"
 ```
 
-初始化后渲染看板：
+初始化后先通过 agent-facing intent 通道捕获目标，再查看 cockpit 摘要：
 
 ```bash
-node scripts/sprint-board.mjs render
+node scripts/auto-pilot.mjs goal --text "把这个项目推进到可发布状态" --json
 ```
+
+cockpit 是日常控制面：人类只需要判断目标是否仍然正确、风险是否可接受、验收证据是否可信。
+sprint-state、run-journal、pitfall、quality gate 和 orchestration phase 都是 agent 的可审计内部机制。
 
 ---
 
@@ -260,6 +263,8 @@ $va-auto-pilot
 - 默认路径是模型原生并发工具调用
 - 将 `review-agent` 替换为你环境中配置的 reviewer 命令或包装器
 
+人类通常通过 `cockpit --json` 看摘要；下面的 planner / board 命令是 manager agent 的内部调试面：
+
 ```bash
 node scripts/sprint-board.mjs plan --json --max-parallel 3 > .va-auto-pilot/parallel-plan.json
 npm run check:all && review-agent review --uncommitted && npm run validate:distribution
@@ -277,12 +282,11 @@ npm i -g va-auto-pilot
 npx va-auto-pilot init .
 npm install
 
-# 然后从任意高能力 CLI Agent 界面驱动闭环
-node scripts/auto-pilot.mjs orchestrate init --manager-surface generic-cli-agent
-node scripts/auto-pilot.mjs orchestrate plan
-node scripts/auto-pilot.mjs orchestrate review-plan
-node scripts/auto-pilot.mjs orchestrate approve-plan
-node scripts/auto-pilot.mjs orchestrate recover --json   # 诊断中断/过期运行状态
+# 然后捕获目标并查看人类控制面
+node scripts/auto-pilot.mjs goal --text "发布一个可靠版本" --json
+
+# 高能力 CLI Agent 在内部运行治理闭环
+$va-auto-pilot 在当前仓库执行一轮最高标准闭环；人类只判断目标、风险和证据
 
 # Agent 集成示例：Claude Code command
 mkdir -p .claude/commands

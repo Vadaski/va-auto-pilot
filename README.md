@@ -161,11 +161,17 @@ node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
 rm -rf "$tmp"
 ```
 
-Render board after initialization:
+Capture the first goal through the agent-facing intent channel, then inspect
+the cockpit summary:
 
 ```bash
-node scripts/sprint-board.mjs render
+node scripts/auto-pilot.mjs goal --text "Ship this project to a releasable state" --json
 ```
+
+The cockpit is the daily control surface. It keeps human attention on whether
+the goal is still right, whether risk is acceptable, and whether the evidence is
+trustworthy. Sprint state, run journals, pitfalls, quality gates, and
+orchestration phases remain auditable internals for the agent.
 
 ---
 
@@ -248,6 +254,9 @@ No list of files. No sequence of steps. No prescribed approach. You define the d
 - Default path is model-native parallel tool orchestration
 - Replace `review-agent` with your configured reviewer command or wrapper
 
+Humans normally see this through `cockpit --json`; the planner and board
+commands below are internal/debug surfaces for the manager agent:
+
 ```bash
 node scripts/sprint-board.mjs plan --json --max-parallel 3 > .va-auto-pilot/parallel-plan.json
 npm run check:all && review-agent review --uncommitted && npm run validate:distribution
@@ -265,12 +274,11 @@ npm i -g va-auto-pilot
 npx va-auto-pilot init .
 npm install
 
-# Then drive the loop from any capable CLI agent surface
-node scripts/auto-pilot.mjs orchestrate init --manager-surface generic-cli-agent
-node scripts/auto-pilot.mjs orchestrate plan
-node scripts/auto-pilot.mjs orchestrate review-plan
-node scripts/auto-pilot.mjs orchestrate approve-plan
-node scripts/auto-pilot.mjs orchestrate recover --json   # diagnose interrupted/stale runs
+# Then capture the goal and inspect the human-facing cockpit
+node scripts/auto-pilot.mjs goal --text "Ship a reliable release" --json
+
+# A capable CLI agent can then run the governed loop internally
+$va-auto-pilot run one full loop in this repo with highest standards; keep humans on goal, risk, and evidence
 
 # Agent integration example: Claude Code command
 mkdir -p .claude/commands

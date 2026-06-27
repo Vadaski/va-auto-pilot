@@ -1,8 +1,38 @@
 Enter VA Auto-Pilot **orchestrated** mode.
 
-You are the **session manager** (Claude Code, Cursor, or Codex). The CLI executor runs one phase and exits; you keep global control.
+You are the **session manager** in a capable CLI agent surface. The CLI executor runs one phase and exits; you keep global control.
 
 Read `docs/operations/va-auto-pilot-protocol.md` — section **Orchestrated Execution Mode**.
+
+## Human-facing control surface
+
+Humans should not need to understand sprint-state, run-journal, pitfalls,
+qualityGate, or orchestration phases during daily use. Treat them as internal
+mechanics. Keep the conversation focused on:
+
+- whether the goal is still correct
+- whether the risk is acceptable
+- whether the acceptance evidence is trustworthy
+
+Use the cockpit view before asking the human for a decision:
+
+```bash
+node scripts/auto-pilot.mjs cockpit --json
+```
+
+When the human gives direction, write it through the intent CLI instead of
+asking them to edit `human-board.md`:
+
+```bash
+node scripts/auto-pilot.mjs intent objective --text "..."
+node scripts/auto-pilot.mjs intent constraint --text "..."
+node scripts/auto-pilot.mjs intent risk --text "..."
+node scripts/auto-pilot.mjs intent acceptance --text "..."
+node scripts/auto-pilot.mjs intent override --text "..."
+```
+
+These commands append unchecked high-priority intent to `human-board.md`, so
+existing stale checkpoint and approval invalidation rules still apply.
 
 ## Manager loop (each cycle)
 
@@ -20,18 +50,18 @@ node scripts/auto-pilot.mjs observe --json
 node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-XXX   # required
 node scripts/auto-pilot.mjs orchestrate commit
 node scripts/auto-pilot.mjs orchestrate journal
-node scripts/auto-pilot.mjs orchestrate close
 ```
 
 Tactical changes: `node scripts/auto-pilot.mjs intervene ...` → `.va-auto-pilot/orchestration/directives.json` (not human-board).
 
-Strategic intent: `docs/todo/human-board.md`.
+Strategic intent: `node scripts/auto-pilot.mjs intent ...` → `docs/todo/human-board.md`.
 
 ## Hard rules
 
 - Explicit **review-plan** then **approve-plan** before dispatch; explicit **approve-commit** before commit.
 - If plan review reports CRITICAL findings, adjust backlog and re-run plan + review-plan before dispatch.
 - Human-board unchecked Instructions block dispatch.
+- Use `cockpit --json` to translate internal mechanics into goal/risk/evidence questions.
 - Never skip quality gates on real commits.
 - Do not prescribe implementation steps to workers — objective + constraints + gates only.
 - Read memory via `node scripts/sprint-board.mjs journal --view`.

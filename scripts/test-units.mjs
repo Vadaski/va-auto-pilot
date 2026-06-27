@@ -1046,7 +1046,7 @@ test("orchestration recovery plan identifies stale checkpoints and dead running 
         { id: "AP-101", state: "In Progress" },
       ],
     },
-    checkpointStatus: { stale: true, reason: "human-board changed since approve-plan" },
+    checkpointStatus: { stale: true, reason: "human intent changed since approve-plan" },
     nowMs: Date.parse("2026-06-26T00:20:00.000Z"),
     trackTimeoutMs: 600_000,
   });
@@ -4730,7 +4730,7 @@ test("next: warns on unchecked human-board instructions and continues", () => {
   const r = runBoard(["next"], stateFile);
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes("UT-001"), `expected task output, got: ${r.stdout}`);
-  assert.ok(r.stderr.includes("Warning: human-board Instructions contain"), `expected warning in stderr, got: ${r.stderr}`);
+  assert.ok(r.stderr.includes("Warning: projected human intent contains"), `expected warning in stderr, got: ${r.stderr}`);
 });
 
 test("next --strict: hard-blocks unchecked human-board instructions", () => {
@@ -5636,7 +5636,7 @@ test("orchestration-state: checkpoint detects live human-board instruction drift
   fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n- [ ] Change strategy before dispatch\n", "utf8");
   const stale = isCheckpointStale(checkpoint, { stateFile, workDir: tmpDir });
   assert.equal(stale.stale, true);
-  assert.equal(stale.reason, "human-board changed since approve-plan");
+  assert.equal(stale.reason, "human intent changed since approve-plan");
 });
 
 test("orchestration-state: hasHaltDirective detects halt-run", () => {
@@ -5832,7 +5832,7 @@ test("auto-pilot orchestrate: governance events record approval, dispatch, and s
   const events = readEventLog(path.join(tmpDir, ".va-auto-pilot", "evidence", "events.jsonl"));
   assert.deepEqual(events.map((event) => event.eventType), ["plan.approved", "dispatch.queued", "checkpoint.stale"]);
   assert.equal(events[0].payload.checkpointId, checkpoint.governance.checkpointId);
-  assert.equal(events[2].payload.reason, "human-board changed since approve-plan");
+  assert.equal(events[2].payload.reason, "human intent changed since approve-plan");
 });
 
 test("resolveWorkerAgentTemplate maps codex worker to codex exec template", async () => {

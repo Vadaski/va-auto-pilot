@@ -437,7 +437,7 @@ function extractNextError(stdout) {
 }
 
 /**
- * Formats a clear human-board blocked message for loop termination.
+ * Formats a clear human-intent blocked message for loop termination.
  * @param {{ code?: string, message?: string, context?: Record<string, unknown> } } error
  * @returns {string}
  */
@@ -445,8 +445,8 @@ function formatHumanBoardBlockedDetails(error) {
   const instructionCount = Array.isArray(error.context?.instructions)
     ? error.context.instructions.length
     : 0;
-  const suffix = instructionCount > 0 ? ` (${instructionCount} unchecked instruction(s))` : "";
-  return `${error.code ?? "HUMAN_BOARD_BLOCKED"}: ${error.message ?? "human board is blocking progress"}${suffix}. Process docs/todo/human-board.md first.`;
+  const suffix = instructionCount > 0 ? ` (${instructionCount} pending intent item(s))` : "";
+  return `${error.code ?? "HUMAN_BOARD_BLOCKED"}: ${error.message ?? "human intent is blocking progress"}${suffix}. Inspect cockpit and process projected intent first.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2448,13 +2448,13 @@ async function runLoop(opts) {
       log(opts, `\n========== Cycle ${cycle} of ${opts.maxCycles} (max) ==========`);
       log(
         opts,
-        `  cycle context: human-board=${context.humanBoardInstructions.length} unchecked, journal entries=${context.journalEntryCount}`
+        `  cycle context: human-intent=${context.humanBoardInstructions.length} pending, journal entries=${context.journalEntryCount}`
       );
 
       if (opts.strict && context.humanBoardInstructions.length > 0) {
         const details = formatHumanBoardBlockedDetails({
           code: "HUMAN_BOARD_BLOCKED",
-          message: `human-board Instructions contain ${context.humanBoardInstructions.length} unprocessed item(s).`,
+          message: `projected human intent contains ${context.humanBoardInstructions.length} unprocessed item(s).`,
           context: { instructions: context.humanBoardInstructions }
         });
         const state = readSprintState(opts.stateFile);
@@ -2700,7 +2700,7 @@ Options:
   --no-commit             Skip git add/git commit after gates pass
   --no-colony             Skip Colony, use raw spawn
   --skip-sprint-review    Skip isolated sprint completion review
-  --strict                Keep human-board Instructions as a hard block
+  --strict                Keep pending human intent as a hard block
   --track-timeout <ms>    Per-task timeout in ms (default: 600000)
   --json                  JSON output
   --help                  Show this help

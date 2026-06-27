@@ -8,16 +8,18 @@
 ## Core Principles
 
 1. You are the manager of outcomes, not the implementer of steps.
-2. `.va-auto-pilot/sprint-state.json` is the machine task source of truth.
-3. `docs/todo/sprint.md` is a generated board view (`node scripts/sprint-board.mjs render`).
-4. `docs/todo/run-journal.md` is append-only execution memory.
-5. Execute one primary task per cycle; optional parallel tracks are allowed when independent.
-6. `docs/todo/human-board.md` always overrides automatic decisions.
-7. Goal-first delegation: define objective + constraints + acceptance. Do not prescribe implementation steps.
-8. CLI-first execution: prefer deterministic commands over manual operations.
-9. Frontier model first: use the strongest available model for high-impact tasks.
-10. Closed-loop quality is mandatory: build -> review -> acceptance -> commit.
-11. Perspectives emerge from constraints and anchors — never from fixed role lists. Wrong perspectives mean wrong anchors; change both.
+2. Humans manage judgment: goal correctness, risk acceptability, and evidence trustworthiness.
+3. Agents manage mechanics: sprint-state, generated boards, run-journal, pitfalls, quality gates, and orchestration phases.
+4. `.va-auto-pilot/sprint-state.json` is the machine task source of truth.
+5. `docs/todo/sprint.md` is a generated board view (`node scripts/sprint-board.mjs render`).
+6. `docs/todo/run-journal.md` is append-only execution memory; summarize it before showing humans.
+7. `docs/todo/human-board.md` is an internal projection of human intent and always overrides automatic decisions.
+8. Execute one primary task per cycle; optional parallel tracks are allowed when independent.
+9. Goal-first delegation: define objective + constraints + acceptance. Do not prescribe implementation steps.
+10. CLI-first execution: prefer deterministic commands over manual operations.
+11. Frontier model first: use the strongest available model for high-impact tasks.
+12. Closed-loop quality is mandatory: build -> review -> acceptance -> commit.
+13. Perspectives emerge from constraints and anchors — never from fixed role lists. Wrong perspectives mean wrong anchors; change both.
 
 ---
 
@@ -37,7 +39,7 @@ When you work in **Claude Code, Cursor, or Codex**, the **session agent is the m
 
 | File | Purpose |
 |------|---------|
-| `docs/todo/human-board.md` | Strategic intent (human + manager): goals, direction, boundaries |
+| `docs/todo/human-board.md` | Internal projection of strategic intent written by `auto-pilot intent` or the manager |
 | `.va-auto-pilot/orchestration/directives.json` | **Tactical** directives for the active run only (halt, replan, supersede-plan) — **not** merged into human-board |
 | `.va-auto-pilot/orchestration/run.json` | Active run phase, approved plan id, approved commit tasks |
 | `.va-auto-pilot/orchestration/tracks.json` | Per-track execution status |
@@ -71,7 +73,7 @@ node scripts/auto-pilot.mjs orchestrate journal
 node scripts/auto-pilot.mjs orchestrate close
 ```
 
-Between steps the manager may run `intervene` (writes `directives.json`) or update `human-board.md`. If checkpoint is stale after board edits, run `approve-plan` again before `dispatch`.
+Between steps the manager may run `intervene` (writes `directives.json`) or capture durable intent with `node scripts/auto-pilot.mjs intent ...`. If checkpoint is stale after intent changes, run `approve-plan` again before `dispatch`.
 
 ### Unattended mode (CI / overnight only)
 
@@ -102,15 +104,15 @@ Backlog -> In Progress -> Review -> Testing -> Done
 
 ---
 
-## Human Board Contract
+## Human Intent Contract
 
 At the start of each cycle:
 
-1. Read `docs/todo/human-board.md`.
-2. Execute unchecked items under `Instructions` immediately.
-3. Fold `Feedback` into backlog updates or current task context.
-4. Use `Direction` for priority decisions.
-5. Mark handled instruction items as `[x]`.
+1. Run `node scripts/auto-pilot.mjs cockpit --json`.
+2. If the human gives new direction, capture it with `node scripts/auto-pilot.mjs intent <type> --text "..."`.
+3. Treat unchecked projected intent in `docs/todo/human-board.md` as a hard override.
+4. Fold accepted feedback into backlog updates or current task context.
+5. Mark handled projected intent items as `[x]`.
 
 Never delete human-written content.
 
@@ -131,11 +133,13 @@ At the start of each cycle:
 ## Decision Loop
 
 ```bash
-# 1. Human board — always first
-cat docs/todo/human-board.md
-# -> unhandled instructions? execute now, then mark [x]
+# 1. Cockpit — always first
+node scripts/auto-pilot.mjs cockpit --json
+# -> translate internal mechanics into goal/risk/evidence questions
 
-# 2. Operational memory
+# 2. Human intent + operational memory
+# Capture new human direction through intent, not by asking users to edit internals.
+node scripts/auto-pilot.mjs intent objective --text "..."
 node scripts/sprint-board.mjs journal --view
 node scripts/sprint-board.mjs pitfall --list --unresolved
 

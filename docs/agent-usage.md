@@ -51,8 +51,8 @@ Before running the loop, verify these files exist:
   pitfalls.json            # (auto-created) Failure memory
 docs/todo/
   sprint.md                # Generated board view (do NOT hand-edit)
-  human-board.md           # Human writes objectives here
-  run-journal.md           # Append-only execution memory
+  human-board.md           # Internal projection of human intent (write via intent CLI)
+  run-journal.md           # Append-only execution memory (agent reads; summarize for humans)
 ```
 
 If bootstrapping a new project, use `va-auto-pilot init`:
@@ -123,6 +123,7 @@ npm run validate:distribution # distribution structure check
 node scripts/auto-pilot.mjs orchestrate init --manager-surface cursor
 node scripts/auto-pilot.mjs orchestrate plan
 node scripts/auto-pilot.mjs observe --json                    # 全局快照
+node scripts/auto-pilot.mjs orchestrate review-plan            # 只读计划评审（必须）
 node scripts/auto-pilot.mjs orchestrate approve-plan            # 显式批准（必须）
 node scripts/auto-pilot.mjs orchestrate dispatch
 node scripts/auto-pilot.mjs orchestrate await-workers           # 并行执行 queued tracks
@@ -132,7 +133,7 @@ node scripts/auto-pilot.mjs orchestrate journal
 ```
 
 - 战术指令：`intervene` → `.va-auto-pilot/orchestration/directives.json`
-- 战略意图：`docs/todo/human-board.md`
+- 人类控制面：`cockpit --json` 汇总 goal/risk/evidence；`intent <type> --text "..."` 写入战略意图
 - 无人值守：`orchestrate run-unattended --waive-approvals` 或 `auto-pilot-loop.mjs --max-cycles 50`
 
 详见 `docs/operations/va-auto-pilot-protocol.md` → Orchestrated Execution Mode。
@@ -465,9 +466,10 @@ The board groups tasks by state: In Progress, Failed, Review, Testing, Done, Bac
 This is the full cycle a manager agent executes:
 
 ```bash
-# 1. Read human board (always first)
-cat docs/todo/human-board.md
-# Execute unchecked instructions, mark handled items [x]
+# 1. Read cockpit (always first)
+node scripts/auto-pilot.mjs cockpit --json
+# Ask humans only about goal correctness, risk acceptability, and evidence trustworthiness.
+# Capture new direction through: node scripts/auto-pilot.mjs intent <type> --text "..."
 
 # 2. Read operational memory
 node scripts/sprint-board.mjs journal --view
@@ -910,20 +912,20 @@ node scripts/sprint-board.mjs pitfall --task AP-016 \
 
 Without pitfall records, the same failure will repeat. The pitfall guide is the durable, queryable memory that prevents recurring mistakes.
 
-### 4. 不要在同一个 cycle 里跳过 human-board
+### 4. 不要在同一个 cycle 里跳过 human intent
 
 ```bash
 # WRONG: go straight to next task
 node scripts/sprint-board.mjs next --json
 
-# RIGHT: always read human-board first
-cat docs/todo/human-board.md
-# Execute unchecked instructions immediately
+# RIGHT: always inspect cockpit and projected intent first
+node scripts/auto-pilot.mjs cockpit --json
+# Capture new human direction through intent CLI, then process projected intent
 # THEN resolve next task
 node scripts/sprint-board.mjs next --json
 ```
 
-`docs/todo/human-board.md` always overrides automatic decisions. An unchecked instruction from the human takes priority over any backlog task.
+`docs/todo/human-board.md` is the internal projection of human intent and always overrides automatic decisions. Do not ask final users to edit it directly.
 
 ### 5. 不要在委派时规定实现步骤
 

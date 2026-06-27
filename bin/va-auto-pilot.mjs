@@ -100,7 +100,7 @@ Options (run):
   --dry-run               Print plan without executing
   --no-commit             Skip git add/git commit after gates pass
   --no-colony             Skip Colony, use raw spawn
-  --strict                Keep human-board Instructions as a hard block
+  --strict                Keep pending human intent as a hard block
   --track-timeout <ms>    Per-task timeout in ms (default: 600000)
   --json                  JSON output
 
@@ -526,20 +526,17 @@ function runInit(parsed) {
 
   if (!dryRun) {
     console.log("\nNext steps:");
-    console.log(`1. Fill backlog in ${context.SPRINT_STATE_FILE}`);
-    console.log(
-      `2. Render board with node scripts/sprint-board.mjs render --state-file ${context.SPRINT_STATE_FILE} --board-file ${context.SPRINT_BOARD_FILE}`
-    );
+    console.log("1. Run npm install");
+    console.log('2. Capture the first objective with node scripts/auto-pilot.mjs intent objective --text "..."');
+    console.log("3. Inspect the control summary with node scripts/auto-pilot.mjs cockpit --json");
     if (demo) {
-      console.log("3. Run npm install");
       console.log(`4. Run ${DEMO_GATE_COMMAND}`);
       console.log("5. Start orchestrated mode with node scripts/auto-pilot.mjs orchestrate init");
     } else {
-      console.log("3. Add human instructions in docs/todo/human-board.md");
-      console.log("4. Run npm install if package dependencies changed");
+      console.log("4. Start orchestrated mode with node scripts/auto-pilot.mjs orchestrate init");
       console.log("5. Run your first acceptance flow with scripts/test-runner.ts");
       console.log(
-        "6. Start a new agent session and run the decision loop in docs/operations/va-auto-pilot-protocol.md"
+        "6. Keep humans on goal, risk, and evidence decisions; leave sprint-state, journal, pitfalls, and phases to the agent"
       );
     }
   }

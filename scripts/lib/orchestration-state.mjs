@@ -187,7 +187,7 @@ export function isCheckpointStale(checkpoint, { stateFile, workDir }) {
     return { stale: true, reason: "sprint-state changed since approve-plan" };
   }
   if (checkpoint.humanBoardHash !== computeHumanBoardHash(stateFile)) {
-    return { stale: true, reason: "human-board changed since approve-plan" };
+    return { stale: true, reason: "human intent changed since approve-plan" };
   }
   const head = computeGitHead(workDir);
   if (checkpoint.gitHead && head && checkpoint.gitHead !== head) {

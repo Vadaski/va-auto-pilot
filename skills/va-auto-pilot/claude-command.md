@@ -26,6 +26,16 @@ rm -rf "$tmp"
 2. **Preferred: orchestrated mode (you are the manager).**
 
 You stay in the session loop. The executor runs one phase and exits. You **must** explicitly approve plan and commit.
+Humans should only need to decide whether the goal is still right, risk is acceptable, and evidence is trustworthy. Use `cockpit` and `intent` as the public control surface; treat sprint-state, run-journal, pitfalls, quality gates, and orchestration phases as internal mechanics.
+
+```bash
+node scripts/auto-pilot.mjs cockpit --json
+node scripts/auto-pilot.mjs intent objective --text "..."
+node scripts/auto-pilot.mjs intent constraint --text "..."
+node scripts/auto-pilot.mjs intent risk --text "..."
+node scripts/auto-pilot.mjs intent acceptance --text "..."
+node scripts/auto-pilot.mjs intent override --text "..."
+```
 
 ```bash
 node scripts/auto-pilot.mjs orchestrate init --manager-surface claude
@@ -52,11 +62,11 @@ node scripts/auto-pilot.mjs orchestrate run-unattended --waive-approvals --max-c
 # or legacy: node scripts/auto-pilot-loop.mjs --max-cycles 50
 ```
 
-4. **Manual sprint-board** (fine-grained control without orchestrate):
+4. **Manual sprint-board** (internal/debug control without orchestrate):
 
-Read these files in order before taking action:
+Prefer `cockpit --json` first. Read these files only when debugging internals or running without orchestrate:
 - `docs/operations/va-auto-pilot-protocol.md`
-- `docs/todo/human-board.md`
+- `docs/todo/human-board.md` (internal projection written by `intent`)
 - `docs/todo/run-journal.md`
 - `docs/todo/sprint.md`
 - `.va-auto-pilot/constraints/` (typed constraints injected into delegation)

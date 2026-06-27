@@ -162,7 +162,7 @@ Options (pitfall):
   --unresolved              Filter --list to unresolved entries only
 
 Options (next):
-  --strict                  Keep human-board Instructions as a hard block
+  --strict                  Keep pending human intent as a hard block
 
 Global options:
   --max-parallel <n>
@@ -202,17 +202,17 @@ function printCommandError(jsonMode, error) {
     console.error(`Error: [${error.code}] ${error.message}`);
     const context = error.context ?? {};
     if (context.boardFile) {
-      console.error(`Human board: ${context.boardFile}`);
+      console.error(`Human intent projection: ${context.boardFile}`);
     }
     if (Array.isArray(context.instructions) && context.instructions.length > 0) {
-      console.error("Unprocessed Instructions:");
+      console.error("Unprocessed projected intent:");
       for (const instruction of context.instructions) {
         const lineNumber = instruction?.lineNumber ?? "?";
         const text = instruction?.text ?? "";
         console.error(`  - line ${lineNumber}: ${text}`);
       }
     }
-    console.error("Process the human-board Instructions, mark them [x], then run next again.");
+    console.error("Inspect cockpit, process projected intent, mark handled items [x], then run next again.");
     return;
   }
 
@@ -226,9 +226,9 @@ function printCommandError(jsonMode, error) {
  */
 function formatHumanBoardWarning(instructions) {
   const lines = [
-    `Warning: human-board Instructions contain ${instructions.length} unprocessed item(s).`,
+    `Warning: projected human intent contains ${instructions.length} unprocessed item(s).`,
     "Continuing because --strict was not provided.",
-    "Unprocessed Instructions:"
+    "Unprocessed projected intent:"
   ];
   for (const instruction of instructions) {
     lines.push(`  - line ${instruction.lineNumber}: ${instruction.text}`);
@@ -242,7 +242,7 @@ function formatHumanBoardWarning(instructions) {
  * @returns {VAPilotError}
  */
 function buildHumanBoardBlockError(boardFile, instructions) {
-  const message = `human-board Instructions contain ${instructions.length} unprocessed item(s).`;
+  const message = `projected human intent contains ${instructions.length} unprocessed item(s).`;
   return humanBoardBlockedError("HUMAN_BOARD_BLOCKED", message, {
     boardFile,
     instructions

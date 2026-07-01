@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-07-01T18:00:56.716Z",
+  "updatedAt": "2026-07-01T18:02:27.787Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -3293,6 +3293,37 @@
       },
       "dependsOn": [
         "AP-104"
+      ]
+    },
+    {
+      "id": "AP-109",
+      "title": "Project review: remove stale AP-102 validation matrix gaps",
+      "priority": "P1",
+      "state": "Done",
+      "owner": "",
+      "source": "post-AP-108 project review",
+      "createdAt": "2026-07-01",
+      "startedAt": "2026-07-01T18:01:52.539Z",
+      "completedAt": "2026-07-01T18:02:27.787Z",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "Post-AP-108 project review found stale AP-102 gaps in the design validation matrix after governed dogfood evidence had already landed.",
+      "verification": "Removed stale AP-102 gap language from the design validation matrix and verified with npm run check:public-narrative, npm run typecheck, npm run check:sprint, and git diff --check.",
+      "notes": "",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-108"
       ]
     }
   ],

@@ -2742,3 +2742,12 @@
   - worktree-clean
   - observable-journal
 ---
+
+## 2026-07-01T18:02:31.753Z - AP-109
+- Summary: Post-AP-108 project review removed stale AP-102 validation gap language so the design matrix now matches the completed governed dogfood evidence.
+- Files: `docs/operations/design-validation-matrix.md`, `docs/todo/sprint.md`, `.va-auto-pilot/sprint-state.json`
+- Signals:
+  - project-review
+  - stale-gap-removed
+  - design-matrix-current
+---

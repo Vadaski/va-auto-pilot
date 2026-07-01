@@ -153,3 +153,4 @@
 | P1 | AP-105 | Runtime proof for governance checkpoints and permission scope enforcement | AP-101 | - | human-board validation goal |
 | P1 | AP-106 | Runtime proof for budget guardrails and eval gate history | AP-101 | - | human-board validation goal |
 | P1 | AP-107 | Runtime proof for MCP read-only resources and smoke-test runner paths | AP-101 | - | human-board validation goal |
+| P1 | AP-108 | Fix regular loop final cycle-boundary journal dirty state | AP-104 | - | AP-104 runtime validation finding |

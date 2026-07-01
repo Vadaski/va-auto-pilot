@@ -1,6 +1,6 @@
 ---
 name: va-auto-pilot
-description: Bootstrap and operate the VA Auto-Pilot engineering loop in any repository. Use when users ask for autonomous delivery flow, sprint/human boards, quality gates, or /va-auto-pilot mode.
+description: Bootstrap and operate the VA Auto-Pilot engineering loop in any repository. Use when users ask for autonomous delivery flow, sprint/human boards, quality gates, /va-auto-pilot mode, or an explicitly installed /auto-pilot alias.
 metadata:
   version: 5.0.0
 ---
@@ -15,7 +15,7 @@ Use this skill when the user asks to:
 - adopt sprint state machine + human override board
 - enforce build/review/acceptance gates
 - run a manager-style multi-agent loop
-- enable `/va-auto-pilot` operating mode
+- enable `/va-auto-pilot` operating mode, or an explicitly installed `/auto-pilot` alias
 
 ## Workflow
 

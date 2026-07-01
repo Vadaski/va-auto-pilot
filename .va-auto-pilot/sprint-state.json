@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-07-01T15:41:06.673Z",
+  "updatedAt": "2026-07-01T15:51:51.827Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -3053,17 +3053,17 @@
       "id": "AP-101",
       "title": "Validation matrix: inventory every design surface and map each to executable proof",
       "priority": "P0",
-      "state": "Backlog",
-      "owner": "",
+      "state": "Done",
+      "owner": "codex",
       "source": "human-board validation goal",
       "createdAt": "2026-07-01",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-07-01T15:45:16.868Z",
+      "completedAt": "2026-07-01T15:51:51.827Z",
       "lastFailedAt": "",
       "failCount": 0,
       "reason": "",
-      "verification": "",
-      "notes": "Acceptance: create a design-validation matrix covering docs/operations designs, schemas, CLI paths, e2e/quality gates, CI workflow, and evidence artifacts; every row must have a real command or an explicit gap/fix task. Verify with npm run typecheck, npm run check:all, npm run check:e2e.",
+      "verification": "Created docs/operations/design-validation-matrix.md. Verified: npm run typecheck PASS; npm run check:all PASS; npm run check:e2e PASS; public stale-expression scan PASS/no matches; git diff --check PASS. Follow-up gaps mapped to AP-102..AP-107, with CI/typecheck gap assigned to AP-103.",
+      "notes": "Acceptance: create a design-validation matrix covering docs/operations designs, schemas, CLI paths, e2e/quality gates, CI workflow, and evidence artifacts; every row must have a real command or an explicit gap/fix task. Verify with npm run typecheck, npm run check:all, npm run check:e2e.; Started design-to-evidence inventory. Scope: docs/operations designs, schemas, CLI/e2e/quality gates, CI workflow, and evidence artifacts.; Matrix includes docs/operations designs, schemas, CLI paths, e2e/quality gates, CI workflow, evidence artifacts, public scan, distribution, and DocStore PR hygiene. CI/typecheck gap assigned to AP-103.",
       "review": {
         "implementer": "",
         "security": "",
@@ -3072,9 +3072,9 @@
         "architect": ""
       },
       "testing": {
-        "flow": "",
-        "mustPassRate": "",
-        "shouldPassRate": ""
+        "flow": "design-validation-matrix",
+        "mustPassRate": "100%",
+        "shouldPassRate": "100%"
       },
       "dependsOn": []
     },
@@ -3123,7 +3123,7 @@
       "failCount": 0,
       "reason": "",
       "verification": "",
-      "notes": "Acceptance: compare .github/workflows/ci.yml with the human acceptance gates and package scripts; CI must run npm ci, npm run check:all, npm run check:e2e, and doc-store PR checks or record an explicit risk with a fix task. Verify local equivalents and preserve green check:all/e2e.",
+      "notes": "Acceptance: compare .github/workflows/ci.yml with the human acceptance gates and package scripts; CI must run npm ci, npm run check:all, npm run check:e2e, and doc-store PR checks or record an explicit risk with a fix task. Verify local equivalents and preserve green check:all/e2e.; AP-101 matrix found that npm run typecheck is a human acceptance gate but is not invoked by check:all or current GitHub Actions. AP-103 must either add/fix CI coverage for typecheck or document an explicit manual gate with rationale; preferred outcome is CI coverage.",
       "review": {
         "implementer": "",
         "security": "",

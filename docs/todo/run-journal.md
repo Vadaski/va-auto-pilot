@@ -2627,3 +2627,25 @@
   - backlog-seeded
   - AP-101
 ---
+
+## 2026-07-01T15:51:51.923Z - AP-101
+- Summary: Created design-validation matrix mapping each design surface to executable proof or AP-102..AP-107 follow-up. Public scan initially caught vendor-specific review gate wording in the new matrix; fixed to neutral configured review gate wording and reran scan to no matches. Gates passed: typecheck, check:all, check:e2e, diff check, stale-expression scan.
+- Files: `docs/operations/design-validation-matrix.md`, `.va-auto-pilot/sprint-state.json`, `docs/todo/sprint.md`
+- Signals:
+  - design-validation-matrix
+  - typecheck
+  - check-all
+  - check-e2e
+  - public-scan
+  - AP-103-typecheck-gap
+---
+
+## 2026-07-01T16:00:54.696Z - AP-101
+- Summary: Review gate found distributed skill trigger wording drift: SKILL.md documented only /auto-pilot while command artifacts still install /va-auto-pilot. Restored /va-auto-pilot as primary trigger and kept /auto-pilot only as an explicitly installed alias.
+- Files: `skills/va-auto-pilot/SKILL.md`, `docs/todo/run-journal.md`
+- Signals:
+  - review-fix
+  - skill-trigger
+  - validate-distribution
+  - typecheck
+---

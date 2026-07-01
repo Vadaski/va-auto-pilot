@@ -58,6 +58,7 @@
 | AP-084 | Reopen P0: clean README.md and README.zh.md stale positioning, vendor binding, and protocol-layer confusion | 2026-06-26 | README stale positioning cleaned: removed weak-model gatekeeping wording, removed Codex/Claude co-creator ownership, replaced protocol comparison table with layer model, clarified standalone + va-agent-protocol reference engine relationship. npm run check:all PASS; validate:distribution PASS. |
 | AP-085 | Reopen P0: clean website copy, metadata, demo logs, credits, and generic CLI agent entry points | 2026-06-26 | Website cleaned: metadata and hero clarify standalone/reference-engine positioning; generic CLI tab added; credits made Vadaski-created with agent assistance; demo review gate made configured-agent neutral. node --check website/app.js PASS; npm run check:all PASS. |
 | AP-086 | Reopen P0: clean reopen article, human-on-the-loop article, and protocol docs for stable Harness + Loop framing | 2026-06-26 | npm run check:all PASS; stale-expression rg PASS for public docs excluding backlog and narrative spec. |
+| AP-101 | Validation matrix: inventory every design surface and map each to executable proof | 2026-07-01 | Created docs/operations/design-validation-matrix.md. Verified: npm run typecheck PASS; npm run check:all PASS; npm run check:e2e PASS; public stale-expression scan PASS/no matches; git diff --check PASS. Follow-up gaps mapped to AP-102..AP-107, with CI/typecheck gap assigned to AP-103. |
 | AP-001 | Upgrade multi-perspective review to dynamic perspective selection | 2026-02-23 | Two cross-reviews (adversarial + protocol designer), 6 CRITICALs resolved, templates synced |
 | AP-003 | Add sprint-board.mjs add command to create tasks via CLI without hand-editing JSON | 2026-02-23 | add command implemented: auto-ID (AP-NNN), validation, depends-on, regex-safe prefix; printHelp updated; templates mirrored; all gates pass |
 | AP-004 | Add unit test suite for sprint-board.mjs pure functions | 2026-02-23 | 41/41 unit tests pass via node:test; check:units added to check:all; all gates pass |
@@ -146,7 +147,6 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| P0 | AP-101 | Validation matrix: inventory every design surface and map each to executable proof | - | - | human-board validation goal |
 | P0 | AP-102 | Dogfood orchestrated mode end-to-end with observable evidence | AP-101 | - | human-board validation goal |
 | P0 | AP-103 | CI parity audit: prove required local gates are represented by GitHub Actions | AP-101 | - | human-board validation goal |
 | P1 | AP-104 | Runtime proof for observability events and evidence bundles | AP-101 | - | human-board validation goal |

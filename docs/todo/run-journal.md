@@ -2594,3 +2594,27 @@
 - Signals:
   - orchestrate:recovery
 ---
+## 2026-07-01T15:25:27.801Z - human-intent
+- Summary: objective: 大目标：验证 VA Auto-Pilot 的每一个设计都能在真实运行中被使用起来，而不是停留在文档、协议或摆设层面。以本仓库自身 dogfood 为主线，逐项跑通设计 -> CLI/CI/观测证据 -> 问题修复 -> 再验证的闭环；凡是实际运行中遇到的问题都必须修复或转成明确阻塞任务。
+- Source: unknown
+- Signals:
+  - human-intent:objective
+---
+## 2026-07-01T15:25:35.074Z - human-intent
+- Summary: constraint: 约束：验证必须走真实可执行路径，优先使用 VA Auto-Pilot 自身 CLI、orchestrated loop、quality gates、smoke/e2e、MCP/read-only resources、observability evidence bundle、GitHub Actions CI 等已设计机制；不能只靠文档阅读、静态声明或人工想象来判定设计可用。
+- Source: user
+- Signals:
+  - human-intent:constraint
+---
+## 2026-07-01T15:25:38.905Z - human-intent
+- Summary: acceptance: 验收：CI 必须全绿，包括本地质量门 npm run typecheck、npm run check:all、npm run check:e2e 或等价关键端到端/烟测，以及 GitHub Actions 对应必过检查；每个被验证的设计都要留下可观测证据：命令、输出摘要、事件/快照/evidence bundle、失败记录与修复提交。
+- Source: user
+- Signals:
+  - human-intent:acceptance
+---
+## 2026-07-01T15:25:43.225Z - human-intent
+- Summary: risk: 风险规则：任何设计如果不能被真实命令触发、不能产生可检查证据、或 CI/本地质量门不绿，都不能算完成；遇到问题先修复根因，若一轮无法修复，必须记录 pitfall、创建明确 backlog，并保留失败证据。
+- Source: user
+- Signals:
+  - human-intent:risk
+---

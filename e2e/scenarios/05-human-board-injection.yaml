@@ -36,7 +36,16 @@ assert:
     - type: exit_code
       value: 0
     - type: stdout_contains
-      pattern: "human-board instruction(s) injected"
+      pattern: "projected human intent injected into delegate prompt"
+    - type: file_contains
+      path: "E2E-001-prompt.txt"
+      pattern: "Pending human intent requiring your explicit acknowledgment"
+    - type: file_contains
+      path: "E2E-001-prompt.txt"
+      pattern: "Use strict TypeScript types for all new code"
+    - type: file_contains
+      path: "E2E-001-prompt.txt"
+      pattern: "Add error handling for edge cases"
   should:
     - type: stdout_contains
       pattern: "strict TypeScript types"

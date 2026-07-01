@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-07-01T17:26:07.151Z",
+  "updatedAt": "2026-07-01T17:35:15.038Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -3206,16 +3206,16 @@
       "id": "AP-106",
       "title": "Runtime proof for budget guardrails and eval gate history",
       "priority": "P1",
-      "state": "Backlog",
+      "state": "Done",
       "owner": "",
       "source": "human-board validation goal",
       "createdAt": "2026-07-01",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-07-01T17:29:28.958Z",
+      "completedAt": "2026-07-01T17:35:15.038Z",
       "lastFailedAt": "",
       "failCount": 0,
-      "reason": "",
-      "verification": "",
+      "reason": "Runtime proof for budget guardrails and eval history: exercise soft/hard budget stops plus eval pass/fail/ambiguous gates with observable journal/history evidence.",
+      "verification": "Runtime proof added in test-flows/auto-pilot-loop-cli.yaml for budget soft warn/hard stop journal evidence and eval PASS/FAIL/AMBIGUOUS task transitions. Verified .va-auto-pilot/evidence/eval-history.jsonl records, eval-compare --json pass rate, ambiguous required eval blocks Done. Validation: node scripts/test-cli-flows.mjs --flow test-flows/auto-pilot-loop-cli.yaml; npm run typecheck; npm run check:units; npm run check:all; npm run check:e2e; git diff --check.",
       "notes": "Acceptance: run budget soft/hard stop paths and eval pass/fail/ambiguous paths through real CLI/unit/e2e flows; verify journal summaries and .va-auto-pilot/evidence/eval-history.jsonl behavior are observable; add/fix gates so ambiguous eval output blocks required evals.",
       "review": {
         "implementer": "",

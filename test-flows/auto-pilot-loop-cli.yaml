@@ -103,3 +103,154 @@ flows:
             - "states=Done,Done"
         - stdout_not_contains: ["track-error"]
       should: []
+
+  - name: "loop: budget soft warning and hard stop are journaled"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        repo_root="$(pwd)"
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/config.yaml" <<'EOF'
+        qualityGate:
+          budget:
+            run:
+              maxCyclesSoft: 1
+              maxCyclesHard: 2
+        EOF
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {
+          "projectPrefix": "AP",
+          "updatedAt": "2026-07-01T00:00:00.000Z",
+          "tasks": [
+            { "id": "AP-001", "title": "First budget task", "priority": "P1", "state": "Testing", "dependsOn": [], "failCount": 0 },
+            { "id": "AP-002", "title": "Second budget task", "priority": "P1", "state": "Testing", "dependsOn": [], "failCount": 0 }
+          ]
+        }
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+        EOF
+        cat > "$tmpdir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        ## Entries
+        EOF
+        cd "$tmpdir"
+        node "$repo_root/scripts/sprint-board.mjs" render >/dev/null
+        node "$repo_root/scripts/auto-pilot-loop.mjs" --no-colony --no-parallel --no-commit --skip-sprint-review --max-cycles 2 --json > "$tmpdir/result.json"
+        node - <<'NODE' "$tmpdir"
+        const fs = require('fs');
+        const path = require('path');
+        const dir = process.argv[2];
+        const result = JSON.parse(fs.readFileSync(path.join(dir, 'result.json'), 'utf8'));
+        const journal = fs.readFileSync(path.join(dir, 'docs/todo/run-journal.md'), 'utf8');
+        const state = JSON.parse(fs.readFileSync(path.join(dir, '.va-auto-pilot/sprint-state.json'), 'utf8'));
+        const assert = (condition, message) => { if (!condition) throw new Error(message); };
+        assert(result.cycles === 2, `expected 2 cycles, got ${result.cycles}`);
+        assert(result.results[0].budget.status === 'warn', 'first cycle did not warn');
+        assert(result.results[1].action === 'budget-stop', 'second cycle did not hard-stop');
+        assert(result.results[1].budget.status === 'stop', 'second cycle budget was not stop');
+        assert(journal.includes('budget=warn'), 'journal missing soft budget warning');
+        assert(journal.includes('soft cycle budget reached: 1/1'), 'journal missing soft cycle detail');
+        assert(journal.includes('budget=stop'), 'journal missing hard budget stop');
+        assert(journal.includes('hard cycle budget reached: 2/2'), 'journal missing hard cycle detail');
+        assert(state.tasks.every((task) => task.state === 'Done'), 'budget fixture tasks did not reach Done before stop');
+        NODE
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
+  - name: "loop: eval pass fail ambiguous gates write observable history"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        repo_root="$(pwd)"
+        evidence="$(mktemp -d)"
+
+        setup_eval_case() {
+          local dir="$1"
+          local eval_command="$2"
+          mkdir -p "$dir/.va-auto-pilot" "$dir/docs/todo"
+          cat > "$dir/.va-auto-pilot/config.yaml" <<EOF
+        qualityGate:
+          evalCommand: "$eval_command"
+        EOF
+          cat > "$dir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {
+          "projectPrefix": "AP",
+          "updatedAt": "2026-07-01T00:00:00.000Z",
+          "tasks": [
+            { "id": "AP-001", "title": "Eval gated task", "priority": "P1", "state": "Testing", "dependsOn": [], "failCount": 0 }
+          ]
+        }
+        EOF
+          cat > "$dir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+        EOF
+          cat > "$dir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        ## Entries
+        EOF
+          (cd "$dir" && node "$repo_root/scripts/sprint-board.mjs" render >/dev/null)
+        }
+
+        run_eval_case() {
+          local name="$1"
+          local eval_command="$2"
+          local dir="$evidence/$name"
+          setup_eval_case "$dir" "$eval_command"
+          (cd "$dir" && node "$repo_root/scripts/auto-pilot-loop.mjs" --no-colony --no-parallel --no-commit --skip-sprint-review --max-cycles 1 --json > "$evidence/$name-result.json")
+          node "$repo_root/scripts/sprint-board.mjs" eval-compare --history-file "$dir/.va-auto-pilot/evidence/eval-history.jsonl" --json > "$evidence/$name-compare.json"
+        }
+
+        run_eval_case pass "printf 'EVAL STATUS: PASS\nscore=0.92\n'"
+        run_eval_case fail "printf 'EVAL STATUS: FAIL\nregression found\n'"
+        run_eval_case ambiguous "printf 'score=0.71\n'"
+
+        node - <<'NODE' "$evidence"
+        const fs = require('fs');
+        const path = require('path');
+        const evidence = process.argv[2];
+        const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+        const readHistory = (name) => fs.readFileSync(path.join(evidence, name, '.va-auto-pilot/evidence/eval-history.jsonl'), 'utf8')
+          .trim()
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .map((line) => JSON.parse(line));
+        const readState = (name) => readJson(path.join(evidence, name, '.va-auto-pilot/sprint-state.json'));
+        const assert = (condition, message) => { if (!condition) throw new Error(message); };
+
+        const passHistory = readHistory('pass');
+        assert(passHistory.length === 1, 'pass history length mismatch');
+        assert(passHistory[0].state === 'pass' && passHistory[0].passed === true, 'pass history did not record pass');
+        assert(passHistory[0].score === 0.92, 'pass score missing');
+        assert(readState('pass').tasks[0].state === 'Done', 'passing eval did not allow Done');
+        const passCompare = readJson(path.join(evidence, 'pass-compare.json'));
+        assert(passCompare.passRate === 1, 'eval-compare pass rate mismatch');
+
+        const failHistory = readHistory('fail');
+        assert(failHistory[0].state === 'fail' && failHistory[0].passed === false, 'fail history did not record fail');
+        assert(readState('fail').tasks[0].state === 'Failed', 'failing eval did not block Done');
+
+        const ambiguousHistory = readHistory('ambiguous');
+        assert(ambiguousHistory[0].state === 'ambiguous' && ambiguousHistory[0].passed === false, 'ambiguous history did not record non-pass');
+        assert(ambiguousHistory[0].score === 0.71, 'ambiguous score missing');
+        assert(readState('ambiguous').tasks[0].state === 'Failed', 'ambiguous eval did not block Done');
+        const ambiguousJournal = fs.readFileSync(path.join(evidence, 'ambiguous/docs/todo/run-journal.md'), 'utf8');
+        assert(ambiguousJournal.includes('Acceptance gate "eval" failed'), 'ambiguous eval journal evidence missing');
+        NODE
+    assert:
+      must:
+        - exit_code: 0
+      should: []

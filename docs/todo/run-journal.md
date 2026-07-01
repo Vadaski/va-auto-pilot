@@ -2706,3 +2706,12 @@
 - Signals:
   - check:units PASS; orchestrate-cli flow PASS; typecheck PASS; check:all PASS; check:e2e PASS; git diff --check PASS
 ---
+
+## 2026-07-01T17:35:20.972Z - AP-106
+- Summary: Closed AP-106 by adding real loop CLI flows for budget soft/hard cycle limits and eval pass/fail/ambiguous gate history.
+- Files: `test-flows/auto-pilot-loop-cli.yaml`, `docs/operations/design-validation-matrix.md`
+- Signals:
+  - budget-runtime-proof
+  - eval-history-runtime-proof
+  - ambiguous-eval-blocks-done
+---

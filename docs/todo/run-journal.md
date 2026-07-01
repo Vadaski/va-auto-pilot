@@ -2692,3 +2692,10 @@
   - check-e2e
   - doc-store-pr
 ---
+
+## 2026-07-01T17:16:03.721Z - AP-104
+- Summary: Runtime observability proof completed. The loop now writes task lifecycle/command/gate events into the global event log, materializes per-task evidence bundles with events and redacted manifests, carries the orchestrated runId into worker evidence, and prevents runtime evidence files from being mistaken for landed code during partial-dispatch recovery. Regression flows assert checkpoint evidence paths, event-log entries, tracked bundle manifests, redacted artifacts, and cycle-restart evidence generation.
+- Files: `scripts/auto-pilot-loop.mjs`, `scripts/auto-pilot-orchestrate.mjs`, `test-flows/orchestrate-cli.yaml`, `test-flows/cycle-restart.yaml`, `docs/operations/design-validation-matrix.md`, `.va-auto-pilot/sprint-state.json`, `docs/todo/sprint.md`
+- Signals:
+  - check:observability PASS; orchestrate-cli flow PASS; cycle-restart flow PASS; typecheck PASS; check:units PASS; check:all PASS; check:e2e PASS; git diff --check PASS
+---

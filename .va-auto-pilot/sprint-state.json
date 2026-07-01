@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-07-01T17:02:49.915Z",
+  "updatedAt": "2026-07-01T17:15:58.726Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -3144,16 +3144,16 @@
       "id": "AP-104",
       "title": "Runtime proof for observability events and evidence bundles",
       "priority": "P1",
-      "state": "Backlog",
-      "owner": "",
+      "state": "Done",
+      "owner": "codex",
       "source": "human-board validation goal",
       "createdAt": "2026-07-01",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-07-01T17:08:14.254Z",
+      "completedAt": "2026-07-01T17:15:58.726Z",
       "lastFailedAt": "",
       "failCount": 0,
-      "reason": "",
-      "verification": "",
+      "reason": "Runtime observability proof: loop events and per-task evidence bundles are being connected to real orchestrate/worker execution.",
+      "verification": "Runtime loop now emits task.started/task.command/task.gate/task.completed/task.failed events, materializes per-task evidence bundles with redacted manifests, wires orchestrate worker runId into evidence, and excludes runtime evidence from partial-dispatch landed-code detection. Regression proof: orchestrate-cli full governed cycle validates checkpoint evidence paths, global event log entries, bundle manifest/events/redacted artifacts, and tracked manifest; cycle-restart validates generated evidence bundles and tracked event log. Gates PASS: check:observability, targeted orchestrate-cli/cycle-restart flows, typecheck, check:units, check:all, check:e2e, git diff --check.",
       "notes": "Acceptance: generate or refresh completed/failed evidence bundles from real scripts, validate schemas, prove event log paths and evidence bundle dirs are referenced by checkpoints/observe output, and add regression coverage for any missing runtime link. Gates: check:observability, check:protocol-fixtures, check:all, check:e2e as applicable.",
       "review": {
         "implementer": "",

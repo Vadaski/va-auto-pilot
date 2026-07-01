@@ -63,6 +63,8 @@ flows:
         echo "STATES=$states"
         echo "CYCLE_BOUNDARIES=$(grep -c 'cycle-boundary:' docs/todo/run-journal.md)"
         echo "WORKTREE=$(test -z "$(git status --short)" && echo clean || echo dirty)"
+        echo "EVIDENCE_MANIFESTS=$(find .va-auto-pilot/evidence -mindepth 3 -maxdepth 3 -name manifest.json | wc -l | tr -d ' ')"
+        echo "EVENT_LOG_TRACKED=$(git ls-files .va-auto-pilot/evidence/events.jsonl | wc -l | tr -d ' ')"
         echo "HEAD_FILES"
         git show --pretty= --name-only HEAD | sort
         echo "PREV_FILES"
@@ -76,6 +78,8 @@ flows:
             - "Cycle 2 of 2 (max)"
             - "STATES=Done,Done"
             - "CYCLE_BOUNDARIES=2"
+            - "EVIDENCE_MANIFESTS=2"
+            - "EVENT_LOG_TRACKED=1"
       should: []
 
   - name: "loop: --single-cycle completes one task and stops"

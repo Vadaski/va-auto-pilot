@@ -245,6 +245,7 @@ flows:
         git log --oneline --decorate -3 > "$evidence/git-log.txt"
         git status --short > "$evidence/git-status.txt"
         git ls-files .va-auto-pilot/orchestration/run.json .va-auto-pilot/orchestration/snapshot.json > "$evidence/tracked-control-files.txt"
+        git ls-files .va-auto-pilot/evidence > "$evidence/tracked-evidence-files.txt"
         find .va-auto-pilot -maxdepth 4 -type f | sort > "$evidence/control-files.txt"
 
         node - <<'NODE' "$evidence" "$tmpdir"
@@ -262,6 +263,7 @@ flows:
         assert(read('review-plan.json').review.passed === true, 'plan review did not pass');
         assert(read('review-plan.json').review.command === '/bin/echo WARNING: dogfood-plan-reviewed', 'plan review command did not come from fixture config');
         assert(read('approve-plan.json').checkpoint.observability.eventLogPath.endsWith('.va-auto-pilot/evidence/events.jsonl'), 'checkpoint event log path missing');
+        assert(read('approve-plan.json').checkpoint.observability.evidenceBundleDir.endsWith('.va-auto-pilot/evidence'), 'checkpoint evidence bundle dir missing');
         assert(read('dispatch.json').queuedTasks.includes('AP-001'), 'dispatch did not queue AP-001');
         assert(read('observe-after-await.json').snapshot.run.phase === 'awaiting-commit-approval', 'observe after await did not show awaiting-commit-approval');
         assert(read('approve-commit.json').approvedCommitTasks.includes('AP-001'), 'commit approval missing AP-001');
@@ -283,7 +285,23 @@ flows:
         const events = fs.readFileSync(eventsLog, 'utf8');
         assert(events.includes('plan.approved'), 'plan approval event missing');
         assert(events.includes('dispatch.queued'), 'dispatch event missing');
+        assert(events.includes('task.started'), 'task started event missing');
+        assert(events.includes('task.command'), 'task command event missing');
+        assert(events.includes('task.gate'), 'task gate event missing');
+        assert(events.includes('task.completed'), 'task completed event missing');
         assert(events.includes('journal'), 'journal event missing');
+        const runId = read('approve-plan.json').runId;
+        const bundleDir = path.join(tmpdir, '.va-auto-pilot/evidence', runId, 'AP-001');
+        const manifestPath = path.join(bundleDir, 'manifest.json');
+        assert(fs.existsSync(manifestPath), 'task evidence bundle manifest missing');
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        assert(manifest.runId === runId, 'task evidence bundle runId mismatch');
+        assert(manifest.taskId === 'AP-001', 'task evidence bundle taskId mismatch');
+        assert(manifest.state === 'completed', 'task evidence bundle state mismatch');
+        assert(manifest.eventsLog === 'events.jsonl', 'task evidence bundle eventsLog mismatch');
+        assert(fs.existsSync(path.join(bundleDir, manifest.eventsLog)), 'task evidence bundle events log missing');
+        assert(fs.existsSync(path.join(bundleDir, manifest.redactedShareable)), 'task evidence bundle redacted manifest missing');
+        assert(text('tracked-evidence-files.txt').includes(`${runId}/AP-001/manifest.json`), 'task evidence manifest was not committed');
         assert(fs.readFileSync(path.join(tmpdir, 'AP-001.txt'), 'utf8') === 'done\n', 'worker artifact missing');
         assert(text('git-status.txt').trim() === '', `fixture repo dirty after cycle: ${text('git-status.txt')}`);
         NODE

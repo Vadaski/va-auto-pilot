@@ -544,6 +544,7 @@ async function orchestrateAwaitWorkers(opts) {
   const pitfalls = await loadUnresolvedPitfalls(opts);
   const execOpts = {
     ...opts,
+    runId: run.runId,
     deferCommit: true,
     workerOverrides: buildWorkerOverrideCommands(opts.workDir, readWorkerOverrides),
   };

@@ -62,6 +62,17 @@ import {
   parseEvalScore,
   resolveEvalHistoryFile,
 } from "./lib/eval-history.mjs";
+import {
+  appendEventLog,
+  buildBundleManifest,
+  buildEvent,
+  observabilityPaths,
+  readEventLog,
+  redactBundle,
+  taskEvidenceBundlePaths,
+  writeArtifact,
+  writeBundleManifest,
+} from "./lib/observability.mjs";
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./lib/pilot-state.mjs";
@@ -158,6 +169,121 @@ function mapGateToFailureType(gateName) {
   if (gateName === "review") return "review";
   if (gateName === "acceptance" || gateName === "smoke-test") return "acceptance";
   return "gate";
+}
+
+function createLoopRunId() {
+  return `loop-${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+}
+
+function resolveObservabilityRunId(opts) {
+  if (opts.runId) {
+    return opts.runId;
+  }
+  if (!opts.observabilityRunId) {
+    opts.observabilityRunId = createLoopRunId();
+  }
+  return opts.observabilityRunId;
+}
+
+function relativeToWorkDir(filePath, opts) {
+  return path.relative(opts.workDir ?? process.cwd(), path.resolve(filePath)).replace(/\\/g, "/");
+}
+
+async function appendTaskEvent(task, eventType, phase, payload, opts) {
+  if (opts.dryRun || !task?.id) {
+    return null;
+  }
+  const paths = observabilityPaths(opts.workDir ?? process.cwd());
+  const event = buildEvent({
+    eventType,
+    runId: resolveObservabilityRunId(opts),
+    taskId: task.id,
+    phase,
+    payload,
+    provenance: { source: "auto-pilot-loop" },
+  });
+  await appendEventLog(paths.eventsLog, event);
+  return event;
+}
+
+async function appendGateEvents(gate, result, durationMs, passed, opts) {
+  if (!opts.taskId) {
+    return;
+  }
+  const task = { id: opts.taskId };
+  const exitCode = Number.isInteger(Number(result?.exitCode)) ? Number(result.exitCode) : (passed ? 0 : 1);
+  await appendTaskEvent(task, "task.command", "gate", {
+    command: gate.cmd,
+    gateName: gate.name,
+    exitCode,
+    durationMs,
+  }, opts);
+  await appendTaskEvent(task, "task.gate", "gate", {
+    gateName: gate.name,
+    required: gate.required !== false,
+    passed,
+    exitCode,
+    durationMs,
+  }, opts);
+}
+
+function gateEventsToManifestGates(events) {
+  return events
+    .filter((event) => event.eventType === "task.gate")
+    .map((event) => ({
+      name: String(event.payload?.gateName ?? "unknown"),
+      required: event.payload?.required !== false,
+      passed: event.payload?.passed === true,
+      exitCode: Number.isInteger(Number(event.payload?.exitCode)) ? Number(event.payload.exitCode) : 0,
+      durationMs: Number.isInteger(Number(event.payload?.durationMs)) ? Number(event.payload.durationMs) : 0,
+    }));
+}
+
+async function materializeTaskEvidenceBundle(task, state, opts, outcomeExtra = {}) {
+  if (opts.dryRun || !task?.id) {
+    return null;
+  }
+
+  const workDir = opts.workDir ?? process.cwd();
+  const runId = resolveObservabilityRunId(opts);
+  const bundlePaths = taskEvidenceBundlePaths(workDir, runId, task.id);
+  const globalEventsLog = observabilityPaths(workDir).eventsLog;
+  const taskEvents = readEventLog(globalEventsLog)
+    .filter((event) => event.runId === runId && event.taskId === task.id);
+
+  const eventsContent = taskEvents.map((event) => JSON.stringify(event)).join("\n");
+  writeArtifact(bundlePaths.eventsLog, eventsContent ? `${eventsContent}\n` : "");
+
+  const gates = gateEventsToManifestGates(taskEvents);
+  const firstFailingGate = gates.find((gate) => !gate.passed)?.name ?? "";
+  const outcome = state === "completed"
+    ? { state: "completed", ...outcomeExtra }
+    : { state: "failed", firstFailingGate, recoveryDecision: "recorded", ...outcomeExtra };
+
+  const manifest = buildBundleManifest({
+    bundleType: "task",
+    runId,
+    taskId: task.id,
+    state,
+    outcome,
+    timeline: taskEvents.map((event) => ({
+      at: event.timestamp,
+      phase: event.phase ?? "",
+      eventId: event.eventId,
+      note: event.eventType,
+    })),
+    artifacts: [],
+    gates,
+    eventsLog: "events.jsonl",
+    redactedShareable: "redacted/manifest.json",
+  });
+  writeBundleManifest(bundlePaths.manifest, manifest);
+  redactBundle(bundlePaths.dir);
+  return {
+    dir: bundlePaths.dir,
+    manifest: bundlePaths.manifest,
+    relativeManifest: relativeToWorkDir(bundlePaths.manifest, opts),
+  };
 }
 
 function extractFailureReason(details = {}) {
@@ -577,8 +703,16 @@ async function runGateSequence(gateConfig, opts) {
       continue;
     }
 
+    const gateStartedAt = Date.now();
     if (gate.name === "review" && isCodexReviewCommand(gate.cmd)) {
       const result = await runPitfallAwareReviewGate(gate, opts);
+      await appendGateEvents(
+        gate,
+        { ...result, exitCode: result.exitCode ?? (result.passed ? 0 : 1) },
+        Date.now() - gateStartedAt,
+        result.passed,
+        opts
+      );
       if (result.passed) {
         log(opts, `  gate "${gate.name}" PASSED`);
       } else {
@@ -610,6 +744,7 @@ async function runGateSequence(gateConfig, opts) {
         });
         if (!parsed.passed) {
           const output = [`eval gate ${parsed.state}: ${parsed.reason}`, stdout, stderr].filter(Boolean).join("\n");
+          await appendGateEvents(gate, { exitCode: 0 }, Date.now() - gateStartedAt, false, opts);
           if (gate.required === false) {
             log(opts, `  gate "${gate.name}" ${parsed.state.toUpperCase()} (advisory, continuing)`);
             continue;
@@ -625,21 +760,24 @@ async function runGateSequence(gateConfig, opts) {
           };
         }
       }
+      await appendGateEvents(gate, { exitCode: 0 }, Date.now() - gateStartedAt, true, opts);
       log(opts, `  gate "${gate.name}" PASSED`);
     } catch (err) {
       const stdout = String(err.stdout ?? "");
       const stderr = String(err.stderr ?? err.message);
       const output = stdout + "\n" + stderr;
+      const exitCode = typeof err.code === "number" ? err.code : 1;
       if (gate.type === "eval") {
         const parsed = parseEvalGateOutput(output);
         recordEvalHistory(gate, parsed, {
           ...opts,
-          exitCode: typeof err.code === "number" ? err.code : 1,
+          exitCode,
           stdout,
           stderr,
           score: parseEvalScore(output),
         });
       }
+      await appendGateEvents(gate, { exitCode }, Date.now() - gateStartedAt, false, opts);
       if (gate.required === false) {
         log(opts, `  gate "${gate.name}" FAILED (advisory, continuing)`);
       } else {
@@ -648,7 +786,7 @@ async function runGateSequence(gateConfig, opts) {
           passed: false,
           gate: gate.name,
           output: output.slice(0, 2000),
-          exitCode: typeof err.code === "number" ? err.code : 1,
+          exitCode,
           stdout,
           stderr
         };
@@ -1107,6 +1245,9 @@ async function transitionToInProgress(task, opts) {
     "update", "--id", task.id, "--state", "In Progress",
     "--if-state", task.state
   ], opts, `transition ${task.id} -> In Progress`);
+  await appendTaskEvent(task, "task.started", "in-progress", {
+    previousState: task.state,
+  }, opts);
 }
 
 async function transitionToReview(task, opts, expectedState = "In Progress") {
@@ -1127,11 +1268,16 @@ async function transitionToTesting(task, opts, expectedState = "Review") {
 
 async function transitionToDone(task, opts, expectedState = "Testing") {
   if (opts.dryRun) return;
+  const bundlePaths = taskEvidenceBundlePaths(opts.workDir ?? process.cwd(), resolveObservabilityRunId(opts), task.id);
   await requireSprintBoard([
     "update", "--id", task.id, "--state", "Done",
     "--verification", `Auto-pilot loop: all gates passed at ${nowIso()}`,
     "--if-state", expectedState
   ], opts, `transition ${task.id} -> Done`);
+  await appendTaskEvent(task, "task.completed", "done", {
+    state: "completed",
+    evidenceBundle: relativeToWorkDir(bundlePaths.manifest, opts),
+  }, opts);
 }
 
 async function transitionToFailed(task, gate, output, opts, expectedState) {
@@ -1148,6 +1294,12 @@ async function transitionToFailed(task, gate, output, opts, expectedState) {
   }
 
   await requireSprintBoard(args, opts, `transition ${task.id} -> Failed`);
+  await appendTaskEvent(task, "task.failed", "failed", {
+    state: "failed",
+    failureType: mapGateToFailureType(gate),
+    firstFailingGate: gate,
+    output: output.slice(0, 500),
+  }, opts);
 }
 
 function findTaskById(state, taskId) {
@@ -1373,10 +1525,17 @@ async function listChangedFiles(opts) {
   ]);
 }
 
-function isOrchestrationRuntimeFile(file) {
+function isOrchestrationRuntimeFile(file, opts = {}) {
   const normalized = String(file ?? "").replace(/\\/g, "/");
-  return normalized.startsWith(".va-auto-pilot/orchestration/")
-    || normalized === ".va-auto-pilot/evidence/events.jsonl";
+  if (normalized.startsWith(".va-auto-pilot/orchestration/")) {
+    return true;
+  }
+  return Boolean(opts.deferCommit) && normalized === ".va-auto-pilot/evidence/events.jsonl";
+}
+
+function isTaskRuntimeEvidenceFile(file) {
+  const normalized = String(file ?? "").replace(/\\/g, "/");
+  return normalized.startsWith(".va-auto-pilot/evidence/");
 }
 
 function snapshotFileState(filePath, opts) {
@@ -1459,7 +1618,7 @@ async function ensureTaskBaseline(task, opts) {
     return opts.taskBaselines.get(task.id);
   }
 
-  const files = new Set([...(await listChangedFiles(opts))].filter((file) => !isOrchestrationRuntimeFile(file)));
+  const files = new Set([...(await listChangedFiles(opts))].filter((file) => !isOrchestrationRuntimeFile(file, opts)));
   const snapshots = new Map();
   for (const file of files) {
     snapshots.set(file, snapshotFileState(file, opts));
@@ -1493,7 +1652,7 @@ function isAutoPilotControlFile(file, opts) {
 
 async function listTaskDeltaFiles(task, opts) {
   const baseline = opts.taskBaselines.get(task.id) ?? { files: new Set(), snapshots: new Map(), head: "" };
-  const currentFiles = new Set([...(await listChangedFiles(opts))].filter((file) => !isOrchestrationRuntimeFile(file)));
+  const currentFiles = new Set([...(await listChangedFiles(opts))].filter((file) => !isOrchestrationRuntimeFile(file, opts)));
   const candidates = new Set([
     ...baseline.files,
     ...currentFiles
@@ -1517,7 +1676,7 @@ async function listTaskDeltaFiles(task, opts) {
   }
 
   for (const file of [...candidates].sort()) {
-    if (isAutoPilotControlFile(file, opts)) {
+    if (isAutoPilotControlFile(file, opts) || isTaskRuntimeEvidenceFile(file)) {
       continue;
     }
     const before = baseline.snapshots.get(file) ?? { exists: false, content: null };
@@ -1795,7 +1954,7 @@ async function autoCommitTask(task, opts) {
 
   const header = buildCommitHeader(task);
   const taskFiles = [...(await listChangedFiles(opts))]
-    .filter((file) => !isOrchestrationRuntimeFile(file))
+    .filter((file) => !isOrchestrationRuntimeFile(file, opts))
     .sort();
   let taskCommit;
   try {
@@ -2134,11 +2293,15 @@ async function executeSingleTask(taskId, bridge, pitfalls, gateConfig, opts) {
     }
 
     if (refreshedTask.state === "Done") {
+      const completedBundle = await materializeTaskEvidenceBundle(refreshedTask, "completed", opts, {
+        commitDeferred: Boolean(opts.deferCommit),
+      });
       if (opts.deferCommit) {
         return {
           task: refreshedTask,
           action: "awaiting-commit-approval",
           details: "gates passed; commit deferred for orchestrated approve-commit",
+          evidenceBundle: completedBundle?.relativeManifest ?? "",
           steps,
           terminal: true
         };
@@ -2151,21 +2314,36 @@ async function executeSingleTask(taskId, bridge, pitfalls, gateConfig, opts) {
           details: finalizeResult.details,
           commitHash: finalizeResult.commitResult.hash,
           commitFiles: finalizeResult.commitResult.files,
+          evidenceBundle: completedBundle?.relativeManifest ?? "",
           steps,
           terminal: true
         };
       }
+      const failedTaskState = findTaskById(readSprintState(opts.stateFile), taskId) ?? refreshedTask;
+      const failedBundle = await materializeTaskEvidenceBundle(failedTaskState, "failed", opts, {
+        firstFailingGate: "commit",
+        recoveryDecision: "rollback-to-failed",
+      });
       return {
-        task: refreshedTask,
+        task: failedTaskState,
         action: "commit-failed",
         details: finalizeResult.details,
+        evidenceBundle: failedBundle?.relativeManifest ?? "",
         steps,
         terminal: true
       };
     }
 
     if (refreshedTask.state === "Failed") {
-      return { task: refreshedTask, action: step.action, details: step.details, steps, terminal: true };
+      const failedBundle = await materializeTaskEvidenceBundle(refreshedTask, "failed", opts);
+      return {
+        task: refreshedTask,
+        action: step.action,
+        details: step.details,
+        evidenceBundle: failedBundle?.relativeManifest ?? "",
+        steps,
+        terminal: true,
+      };
     }
 
     pitfalls = await loadUnresolvedPitfalls(opts);

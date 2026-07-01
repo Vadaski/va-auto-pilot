@@ -153,6 +153,321 @@ flows:
         - exit_code: 0
       should: []
 
+  - name: "orchestrate: full governed cycle commits deterministic worker output"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        evidence="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.gitignore" <<'EOF'
+        .va-auto-pilot/orchestration/
+        .va-auto-pilot/parallel-runs/
+        EOF
+        cat > "$tmpdir/.va-auto-pilot/config.yaml" <<'EOF'
+        version: 1
+        projectPrefix: AP
+        sprint:
+          stateFile: .va-auto-pilot/sprint-state.json
+          boardFile: docs/todo/sprint.md
+          runJournalFile: docs/todo/run-journal.md
+        qualityGate:
+          buildCommand: test -f AP-001.txt
+          reviewCommand: /bin/echo REVIEW_STATUS_PASS
+          acceptanceTestCommand: test -f AP-001.txt
+          planReviewCommand: "/bin/echo WARNING: dogfood-plan-reviewed"
+        EOF
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {
+          "projectPrefix": "AP",
+          "tasks": [
+            {
+              "id": "AP-001",
+              "title": "Write deterministic dogfood artifact",
+              "priority": "P0",
+              "state": "Backlog",
+              "owner": "",
+              "source": "orchestrated-dogfood-fixture",
+              "createdAt": "2026-07-01",
+              "startedAt": "",
+              "completedAt": "",
+              "lastFailedAt": "",
+              "failCount": 0,
+              "reason": "",
+              "verification": "AP-001.txt exists and is committed after explicit approve-commit",
+              "notes": "Worker must create AP-001.txt; gates must verify the file exists.",
+              "review": {},
+              "testing": {},
+              "dependsOn": []
+            }
+          ]
+        }
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        cat > "$tmpdir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        EOF
+        external_journal="$evidence/external-run-journal.md"
+        cat > "$external_journal" <<'EOF'
+        # External Run Journal
+
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/sprint-board.mjs" render >/dev/null
+        git init -q
+        git config user.email dogfood@example.invalid
+        git config user.name "VA Auto-Pilot Dogfood"
+        git add .
+        git commit -q -m "chore: seed dogfood fixture"
+
+        node "$repo/scripts/auto-pilot.mjs" orchestrate init --manager-surface codex --json > "$evidence/init.json"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --max-parallel 1 --json > "$evidence/plan.json"
+        node "$repo/scripts/auto-pilot.mjs" observe --json > "$evidence/observe-after-plan.json"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --json > "$evidence/review-plan.json"
+        node "$repo/scripts/auto-pilot.mjs" observe --json > "$evidence/observe-after-review.json"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json > "$evidence/approve-plan.json"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json > "$evidence/dispatch.json"
+        node "$repo/scripts/auto-pilot.mjs" observe --json > "$evidence/observe-after-dispatch.json"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate await-workers --no-colony --agent-template "node $repo/e2e/stubs/deterministic-agent.mjs" > "$evidence/await-workers.log"
+        node "$repo/scripts/auto-pilot.mjs" observe --json > "$evidence/observe-after-await.json"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-commit --tasks AP-001 --json > "$evidence/approve-commit.json"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate commit --json > "$evidence/commit.json"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate journal --journal-file "$external_journal" --json > "$evidence/journal.json"
+        git log --oneline --decorate -3 > "$evidence/git-log.txt"
+        git status --short > "$evidence/git-status.txt"
+        git ls-files .va-auto-pilot/orchestration/run.json .va-auto-pilot/orchestration/snapshot.json > "$evidence/tracked-control-files.txt"
+        find .va-auto-pilot -maxdepth 4 -type f | sort > "$evidence/control-files.txt"
+
+        node - <<'NODE' "$evidence" "$tmpdir"
+        const fs = require('fs');
+        const path = require('path');
+        const evidence = process.argv[2];
+        const tmpdir = process.argv[3];
+        const read = (name) => JSON.parse(fs.readFileSync(path.join(evidence, name), 'utf8'));
+        const text = (name) => fs.readFileSync(path.join(evidence, name), 'utf8');
+        const assert = (condition, message) => {
+          if (!condition) throw new Error(message);
+        };
+
+        assert(read('plan.json').candidatePlan.primaryTaskId === 'AP-001', 'plan did not select AP-001');
+        assert(read('review-plan.json').review.passed === true, 'plan review did not pass');
+        assert(read('review-plan.json').review.command === '/bin/echo WARNING: dogfood-plan-reviewed', 'plan review command did not come from fixture config');
+        assert(read('approve-plan.json').checkpoint.observability.eventLogPath.endsWith('.va-auto-pilot/evidence/events.jsonl'), 'checkpoint event log path missing');
+        assert(read('dispatch.json').queuedTasks.includes('AP-001'), 'dispatch did not queue AP-001');
+        assert(read('observe-after-await.json').snapshot.run.phase === 'awaiting-commit-approval', 'observe after await did not show awaiting-commit-approval');
+        assert(read('approve-commit.json').approvedCommitTasks.includes('AP-001'), 'commit approval missing AP-001');
+        assert(read('commit.json').commits.some((item) => item.taskId === 'AP-001' && item.ok === true && item.hash), 'commit output missing AP-001 hash');
+        assert(read('journal.json').phase === 'cycle-closed', 'journal did not close cycle');
+        assert(read('journal.json').journalCommit.committed === true, 'journal control commit was not created');
+        assert(!read('journal.json').journalCommit.files.some((file) => file.includes('..')), 'external journal leaked into git pathspecs');
+        assert(text('tracked-control-files.txt').includes('.va-auto-pilot/orchestration/run.json'), 'ignored run.json was not force-added');
+        assert(text('tracked-control-files.txt').includes('.va-auto-pilot/orchestration/snapshot.json'), 'ignored snapshot.json was not force-added');
+        assert(fs.readFileSync(path.join(evidence, 'external-run-journal.md'), 'utf8').includes('cycle-boundary'), 'external journal was not updated');
+
+        const awaitLog = text('await-workers.log');
+        assert(awaitLog.includes('gate "build" PASSED'), 'build gate output missing');
+        assert(awaitLog.includes('gate "review" PASSED'), 'review gate output missing');
+        assert(awaitLog.includes('gate "acceptance" PASSED'), 'acceptance gate output missing');
+
+        const eventsLog = path.join(tmpdir, '.va-auto-pilot/evidence/events.jsonl');
+        assert(fs.existsSync(eventsLog), 'events log missing');
+        const events = fs.readFileSync(eventsLog, 'utf8');
+        assert(events.includes('plan.approved'), 'plan approval event missing');
+        assert(events.includes('dispatch.queued'), 'dispatch event missing');
+        assert(events.includes('journal'), 'journal event missing');
+        assert(fs.readFileSync(path.join(tmpdir, 'AP-001.txt'), 'utf8') === 'done\n', 'worker artifact missing');
+        assert(text('git-status.txt').trim() === '', `fixture repo dirty after cycle: ${text('git-status.txt')}`);
+        NODE
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
+  - name: "orchestrate: run-unattended replans after journal commits"
+    command: "bash"
+    timeout_ms: 30000
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        evidence="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.gitignore" <<'EOF'
+        .va-auto-pilot/orchestration/
+        .va-auto-pilot/parallel-runs/
+        EOF
+        cat > "$tmpdir/.va-auto-pilot/config.yaml" <<'EOF'
+        version: 1
+        projectPrefix: AP
+        sprint:
+          stateFile: .va-auto-pilot/sprint-state.json
+          boardFile: docs/todo/sprint.md
+          runJournalFile: docs/todo/run-journal.md
+        qualityGate:
+          buildCommand: test -f AP-001.txt -o -f AP-002.txt
+          reviewCommand: /bin/echo REVIEW_STATUS_PASS
+          acceptanceTestCommand: test -f AP-001.txt -o -f AP-002.txt
+        EOF
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {
+          "projectPrefix": "AP",
+          "tasks": [
+            {"id":"AP-001","title":"First unattended artifact","priority":"P0","state":"Backlog","owner":"","source":"unattended-fixture","createdAt":"2026-07-01","startedAt":"","completedAt":"","lastFailedAt":"","failCount":0,"reason":"","verification":"","notes":"","review":{},"testing":{},"dependsOn":[]},
+            {"id":"AP-002","title":"Second unattended artifact","priority":"P0","state":"Backlog","owner":"","source":"unattended-fixture","createdAt":"2026-07-02","startedAt":"","completedAt":"","lastFailedAt":"","failCount":0,"reason":"","verification":"","notes":"","review":{},"testing":{},"dependsOn":[]}
+          ]
+        }
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        cat > "$tmpdir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/sprint-board.mjs" render >/dev/null
+        git init -q
+        git config user.email dogfood@example.invalid
+        git config user.name "VA Auto-Pilot Dogfood"
+        git add .
+        git commit -q -m "chore: seed unattended fixture"
+
+        node "$repo/scripts/auto-pilot.mjs" orchestrate run-unattended --waive-approvals --max-cycles 2 --max-parallel 0 --no-colony --agent-template "node $repo/e2e/stubs/deterministic-agent.mjs" > "$evidence/run.log"
+        git log --oneline --decorate -8 > "$evidence/git-log.txt"
+        git status --short > "$evidence/git-status.txt"
+
+        node - <<'NODE' "$tmpdir" "$evidence"
+        const fs = require('fs');
+        const path = require('path');
+        const tmpdir = process.argv[2];
+        const evidence = process.argv[3];
+        const state = JSON.parse(fs.readFileSync(path.join(tmpdir, '.va-auto-pilot/sprint-state.json'), 'utf8'));
+        const log = fs.readFileSync(path.join(evidence, 'git-log.txt'), 'utf8');
+        const status = fs.readFileSync(path.join(evidence, 'git-status.txt'), 'utf8');
+        const runLog = fs.readFileSync(path.join(evidence, 'run.log'), 'utf8');
+        const assert = (condition, message) => { if (!condition) throw new Error(message); };
+        assert(state.tasks.every((task) => task.state === 'Done'), 'unattended did not complete both tasks');
+        assert(fs.readFileSync(path.join(tmpdir, 'AP-001.txt'), 'utf8') === 'done\n', 'first artifact missing');
+        assert(fs.readFileSync(path.join(tmpdir, 'AP-002.txt'), 'utf8') === 'done\n', 'second artifact missing');
+        assert(log.includes('close cycle 2'), 'second cycle journal commit missing');
+        assert(log.includes('finish run'), 'final run control commit missing');
+        assert(!runLog.includes('STALE_CONTEXT'), 'unattended reused a stale checkpoint');
+        assert(status.trim() === '', `fixture repo dirty after unattended run: ${status}`);
+        NODE
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
+  - name: "orchestrate: commit failure clears stale approval"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        evidence="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/config.yaml" <<'EOF'
+        version: 1
+        projectPrefix: AP
+        sprint:
+          stateFile: .va-auto-pilot/sprint-state.json
+          boardFile: docs/todo/sprint.md
+          runJournalFile: docs/todo/run-journal.md
+        qualityGate:
+          buildCommand: test -f AP-001.txt -o -f AP-002.txt
+          reviewCommand: /bin/echo REVIEW_STATUS_PASS
+          acceptanceTestCommand: test -f AP-001.txt -o -f AP-002.txt
+          planReviewCommand: "/bin/echo WARNING: dogfood-plan-reviewed"
+        EOF
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[{"id":"AP-001","title":"Commit failure artifact","priority":"P0","state":"Backlog","owner":"","source":"commit-failure-fixture","createdAt":"2026-07-01","startedAt":"","completedAt":"","lastFailedAt":"","failCount":0,"reason":"","verification":"","notes":"","review":{},"testing":{},"dependsOn":[]},{"id":"AP-002","title":"Do not commit after failure","priority":"P0","state":"Backlog","owner":"","source":"commit-failure-fixture","createdAt":"2026-07-02","startedAt":"","completedAt":"","lastFailedAt":"","failCount":0,"reason":"","verification":"","notes":"","review":{},"testing":{},"dependsOn":[]}]}
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        cat > "$tmpdir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/sprint-board.mjs" render >/dev/null
+        git init -q
+        git config user.email dogfood@example.invalid
+        git config user.name "VA Auto-Pilot Dogfood"
+        git add .
+        git commit -q -m "chore: seed commit failure fixture"
+
+        node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --max-parallel 1 --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate await-workers --no-colony --agent-template "node $repo/e2e/stubs/deterministic-agent.mjs" >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-commit --tasks AP-001,AP-002 --json >/dev/null
+
+        cat > .git/hooks/pre-commit <<'EOF'
+        #!/bin/sh
+        echo forced commit failure >&2
+        exit 1
+        EOF
+        chmod +x .git/hooks/pre-commit
+        set +e
+        node "$repo/scripts/auto-pilot.mjs" orchestrate commit --json > "$evidence/commit-fail.json" 2> "$evidence/commit-fail.err"
+        commit_status=$?
+        node "$repo/scripts/auto-pilot.mjs" orchestrate commit --json > "$evidence/second-commit.json" 2> "$evidence/second-commit.err"
+        second_status=$?
+        set -e
+        test "$commit_status" -ne 0
+        test "$second_status" -ne 0
+        grep -q APPROVAL_REQUIRED "$evidence/second-commit.err"
+
+        node - <<'NODE' "$evidence" "$tmpdir"
+        const fs = require('fs');
+        const path = require('path');
+        const evidence = process.argv[2];
+        const tmpdir = process.argv[3];
+        const failed = JSON.parse(fs.readFileSync(path.join(evidence, 'commit-fail.json'), 'utf8'));
+        const run = JSON.parse(fs.readFileSync(path.join(tmpdir, '.va-auto-pilot/orchestration/run.json'), 'utf8'));
+        const state = JSON.parse(fs.readFileSync(path.join(tmpdir, '.va-auto-pilot/sprint-state.json'), 'utf8'));
+        const assert = (condition, message) => { if (!condition) throw new Error(message); };
+        assert(failed.ok === false, 'first commit failure did not report ok=false');
+        assert(failed.phase === 'awaiting-commit-approval', 'commit failure did not return to approval phase');
+        assert(failed.commits.length === 1 && failed.commits[0].taskId === 'AP-001', 'commit continued after the first failed task');
+        assert(Array.isArray(run.approvedCommitTasks) && run.approvedCommitTasks.length === 0, 'stale approvedCommitTasks were not cleared');
+        assert(state.tasks.find((task) => task.id === 'AP-001').state === 'Failed', 'failed commit did not roll task back to Failed');
+        assert(state.tasks.find((task) => task.id === 'AP-002').state === 'Done', 'unattempted task should remain Done for fresh approval');
+        NODE
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
   - name: "observe: empty backlog suggests goal capture"
     command: "bash"
     args:

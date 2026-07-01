@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-07-01T15:51:51.827Z",
+  "updatedAt": "2026-07-01T16:17:56.593Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -3082,16 +3082,16 @@
       "id": "AP-102",
       "title": "Dogfood orchestrated mode end-to-end with observable evidence",
       "priority": "P0",
-      "state": "Backlog",
-      "owner": "",
+      "state": "Done",
+      "owner": "codex",
       "source": "human-board validation goal",
       "createdAt": "2026-07-01",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-07-01T16:14:18.136Z",
+      "completedAt": "2026-07-01T16:17:56.593Z",
       "lastFailedAt": "",
       "failCount": 0,
-      "reason": "",
-      "verification": "",
+      "reason": "Dogfood governed orchestrate path exposed commit/journal dirty control-plane state; implementing runtime fix and executable regression.",
+      "verification": "Verified full governed orchestrated dogfood with deterministic worker, captured observe JSON, gate log, journal output, checkpoint/event-log paths, task commit, journal control commit, and final clean temp git status. Regressions: full governed cycle with external journal path skipped from git pathspecs, unattended two-cycle replanning after journal commits, commit failure clearing stale approval without processing later approved tasks. Gates: typecheck, check:units, check:cli-flows, check:all, check:e2e all PASS.",
       "notes": "Acceptance: run the governed orchestrate path init -> plan -> review-plan -> approve-plan -> dispatch -> observe -> await-workers -> approve-commit -> commit -> journal on a real scoped task or deterministic fixture; capture observe --json, journal entries, gate output, and evidence paths; fix any broken phase before marking Done.",
       "review": {
         "implementer": "",

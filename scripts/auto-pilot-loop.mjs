@@ -1373,6 +1373,12 @@ async function listChangedFiles(opts) {
   ]);
 }
 
+function isOrchestrationRuntimeFile(file) {
+  const normalized = String(file ?? "").replace(/\\/g, "/");
+  return normalized.startsWith(".va-auto-pilot/orchestration/")
+    || normalized === ".va-auto-pilot/evidence/events.jsonl";
+}
+
 function snapshotFileState(filePath, opts) {
   const absolutePath = path.join(opts.workDir ?? process.cwd(), filePath);
   if (!fs.existsSync(absolutePath)) {
@@ -1453,7 +1459,7 @@ async function ensureTaskBaseline(task, opts) {
     return opts.taskBaselines.get(task.id);
   }
 
-  const files = await listChangedFiles(opts);
+  const files = new Set([...(await listChangedFiles(opts))].filter((file) => !isOrchestrationRuntimeFile(file)));
   const snapshots = new Map();
   for (const file of files) {
     snapshots.set(file, snapshotFileState(file, opts));
@@ -1487,7 +1493,7 @@ function isAutoPilotControlFile(file, opts) {
 
 async function listTaskDeltaFiles(task, opts) {
   const baseline = opts.taskBaselines.get(task.id) ?? { files: new Set(), snapshots: new Map(), head: "" };
-  const currentFiles = await listChangedFiles(opts);
+  const currentFiles = new Set([...(await listChangedFiles(opts))].filter((file) => !isOrchestrationRuntimeFile(file)));
   const candidates = new Set([
     ...baseline.files,
     ...currentFiles
@@ -1788,7 +1794,9 @@ async function autoCommitTask(task, opts) {
   }
 
   const header = buildCommitHeader(task);
-  const taskFiles = [...(await listChangedFiles(opts))].sort();
+  const taskFiles = [...(await listChangedFiles(opts))]
+    .filter((file) => !isOrchestrationRuntimeFile(file))
+    .sort();
   let taskCommit;
   try {
     taskCommit = await commitPaths(header, taskFiles, opts);

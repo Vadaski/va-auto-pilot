@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 import { readQualityGateConfig } from "./lib/sprint-utils.mjs";
 import { readHumanBoardInstructions, resolveHumanBoardPath } from "./lib/human-board.mjs";
@@ -49,11 +51,81 @@ import {
 } from "./lib/plan-review.mjs";
 import { appendEventLog, buildEvent, observabilityPaths } from "./lib/observability.mjs";
 
+const execFileAsync = promisify(execFile);
+
 function planTaskIds(plan) {
   if (!plan) {
     return [];
   }
   return [plan.primaryTaskId, ...(Array.isArray(plan.parallelTracks) ? plan.parallelTracks : [])].filter(Boolean);
+}
+
+function hasPendingTasks(state) {
+  return (state.tasks ?? []).some((task) => task.state !== "Done");
+}
+
+async function git(args, opts, cwd = opts.workDir) {
+  return execFileAsync("git", args, {
+    cwd,
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+}
+
+function toRepoPath(filePath, repoRoot) {
+  const relativePath = path.relative(repoRoot, path.resolve(filePath));
+  if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return "";
+  }
+  return relativePath.replace(/\\/g, "/");
+}
+
+async function commitControlFiles(files, header, opts) {
+  if (opts.dryRun) {
+    return { committed: false, skipped: true, reason: "dry-run", files: [], hash: "", header };
+  }
+  if (opts.noCommit) {
+    return { committed: false, skipped: true, reason: "disabled by --no-commit", files: [], hash: "", header };
+  }
+
+  let repoRoot = opts.workDir;
+  try {
+    await git(["rev-parse", "--is-inside-work-tree"], opts);
+    const root = await git(["rev-parse", "--show-toplevel"], opts);
+    repoRoot = root.stdout.trim() || opts.workDir;
+  } catch {
+    return { committed: false, skipped: true, reason: "not a git repository", files: [], hash: "", header };
+  }
+
+  const repoFiles = [...new Set(files.map((file) => toRepoPath(file, repoRoot)).filter(Boolean))].sort();
+  if (repoFiles.length === 0) {
+    return { committed: false, skipped: true, reason: "no repo-local files", files: [], hash: "", header };
+  }
+
+  await git(["add", "--all", "--force", "--", ...repoFiles], opts, repoRoot);
+  const staged = await git(["diff", "--cached", "--name-only", "--relative", "--", ...repoFiles], opts, repoRoot);
+  const stagedFiles = staged.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (stagedFiles.length === 0) {
+    return { committed: false, skipped: true, reason: "no staged changes", files: [], hash: "", header };
+  }
+
+  await git([
+    "commit",
+    "-m", header,
+    "-m", "Co-Authored-By: Claude <noreply@anthropic.com>",
+    "--only",
+    "--",
+    ...stagedFiles,
+  ], opts, repoRoot);
+  const head = await git(["rev-parse", "HEAD"], opts, repoRoot);
+  return {
+    committed: true,
+    skipped: false,
+    reason: "",
+    files: stagedFiles,
+    hash: head.stdout.trim(),
+    header,
+  };
 }
 
 async function appendGovernanceEvent(opts, run, eventType, payload) {
@@ -569,12 +641,17 @@ async function orchestrateCommit(opts) {
   const run = readRun(opts.workDir);
   assertRunnablePhase(run, opts);
 
+  if (!opts.waiveApprovals && run.phase !== "commit-approved") {
+    fail(opts, "APPROVAL_REQUIRED", "approve-commit required before commit", { phase: run.phase }, 2);
+  }
+
   if (!opts.waiveApprovals && (!Array.isArray(run.approvedCommitTasks) || run.approvedCommitTasks.length === 0)) {
     fail(opts, "APPROVAL_REQUIRED", "approve-commit required before commit", {}, 2);
   }
 
   const approved = new Set(run.approvedCommitTasks ?? []);
   const state = readSprintState(opts.stateFile);
+  const tasksToCommit = [];
   const commits = [];
 
   for (const taskId of approved) {
@@ -589,16 +666,38 @@ async function orchestrateCommit(opts) {
       commits.push({ taskId, dryRun: true });
       continue;
     }
+    tasksToCommit.push({ taskId, task });
+  }
+
+  for (const { taskId, task } of tasksToCommit) {
     const result = await finalizeDoneTaskCommit(task, opts);
     commits.push({ taskId, ok: result.ok, details: result.details, hash: result.commitResult?.hash });
+    if (!result.ok) {
+      run.phase = "awaiting-commit-approval";
+      run.approvedCommitTasks = [];
+      run.updatedAt = new Date().toISOString();
+      await writeRun(opts.workDir, run);
+      await refreshSnapshot(opts);
+      return emitResult(opts, { ok: false, phase: run.phase, runId: run.runId, commits }, 1);
+    }
+  }
+
+  const failedCommits = commits.filter((commit) => commit.ok === false);
+  if (failedCommits.length > 0) {
+    run.phase = "awaiting-commit-approval";
+    run.approvedCommitTasks = [];
+    run.updatedAt = new Date().toISOString();
+    await writeRun(opts.workDir, run);
+    await refreshSnapshot(opts);
+    return emitResult(opts, { ok: false, phase: run.phase, runId: run.runId, commits }, 1);
   }
 
   run.phase = "committed";
   run.updatedAt = new Date().toISOString();
   await writeRun(opts.workDir, run);
+  await refreshSnapshot(opts);
 
   const payload = { ok: true, phase: run.phase, runId: run.runId, commits };
-  await refreshSnapshot(opts);
   return emitResult(opts, payload);
 }
 
@@ -619,10 +718,61 @@ async function orchestrateJournal(opts) {
   run.phase = "cycle-closed";
   run.updatedAt = new Date().toISOString();
   await writeRun(opts.workDir, run);
+  await appendGovernanceEvent(opts, run, "journal", {
+    summary,
+    cycle: run.cycle,
+    stopCondition,
+  });
+  const snapshot = await refreshSnapshot(opts);
 
-  const payload = { ok: true, phase: run.phase, runId: run.runId, cycle: run.cycle, stopCondition };
-  await refreshSnapshot(opts);
+  const paths = path.join(opts.workDir, ".va-auto-pilot", "orchestration");
+  const eventsLog = snapshot.checkpoint?.observability?.eventLogPath ?? observabilityPaths(opts.workDir).eventsLog;
+  const journalCommit = await commitControlFiles(
+    [
+      path.join(paths, "run.json"),
+      path.join(paths, "snapshot.json"),
+      opts.journalFile,
+      eventsLog,
+    ],
+    `chore(orchestration): close cycle ${run.cycle}`,
+    opts
+  );
+
+  const payload = { ok: true, phase: run.phase, runId: run.runId, cycle: run.cycle, stopCondition, journalCommit };
   return emitResult(opts, payload);
+}
+
+async function approveCurrentPlanForUnattended(opts) {
+  const run = readRun(opts.workDir);
+  if (!run?.candidatePlan?.primaryTaskId) {
+    fail(opts, "NO_CANDIDATE_PLAN", "run orchestrate plan first", {}, 2);
+  }
+
+  const planId = createPlanId();
+  run.approvedPlanId = planId;
+  run.phase = "plan-approved";
+  run.updatedAt = new Date().toISOString();
+  await writeRun(opts.workDir, run);
+
+  const checkpoint = buildCheckpoint({
+    stateFile: opts.stateFile,
+    workDir: opts.workDir,
+    approvedPlanId: planId,
+    candidatePlan: run.candidatePlan,
+  });
+  await writeCheckpoint(opts.workDir, checkpoint);
+  await appendGovernanceEvent(opts, run, "plan.approved", {
+    planId,
+    checkpointId: checkpoint.governance.checkpointId,
+    candidatePlan: run.candidatePlan,
+    approvalScope: checkpoint.governance.approvalScope,
+    invalidatesOn: checkpoint.governance.invalidatesOn,
+    stalePolicy: checkpoint.governance.stalePolicy,
+    approvalMode: "waive-approvals",
+  });
+  await refreshSnapshot(opts);
+
+  return { run, checkpoint };
 }
 
 async function orchestrateRunUnattended(opts) {
@@ -637,32 +787,31 @@ async function orchestrateRunUnattended(opts) {
   }
 
   await initRun(opts);
-  await orchestratePlan(opts);
-  const run = readRun(opts.workDir);
-  run.approvedPlanId = createPlanId();
-  await writeRun(opts.workDir, run);
-  await writeCheckpoint(
-    opts.workDir,
-    buildCheckpoint({
-      stateFile: opts.stateFile,
-      workDir: opts.workDir,
-      approvedPlanId: run.approvedPlanId,
-      candidatePlan: run.candidatePlan,
-    })
-  );
 
   const maxCycles = Number.parseInt(opts.parsed?.options?.["max-cycles"] ?? "50", 10);
   for (let cycle = 0; cycle < maxCycles; cycle += 1) {
+    const stateBeforePlan = readSprintState(opts.stateFile);
+    const stopBeforePlan = detectStopCondition(stateBeforePlan);
+    if (stopBeforePlan.stop || !hasPendingTasks(stateBeforePlan)) {
+      break;
+    }
+
+    await orchestratePlan({ ...opts, json: false });
+    const { run } = await approveCurrentPlanForUnattended(opts);
+    const plannedTaskIds = new Set(planTaskIds(run.candidatePlan));
+
     await orchestrateDispatch({ ...opts, json: false });
     await orchestrateAwaitWorkers({ ...opts, json: false });
     const state = readSprintState(opts.stateFile);
-    const doneTasks = (state.tasks ?? []).filter((task) => task.state === "Done").map((task) => task.id);
+    const doneTasks = (state.tasks ?? [])
+      .filter((task) => plannedTaskIds.has(task.id) && task.state === "Done")
+      .map((task) => task.id);
     if (doneTasks.length > 0) {
       await orchestrateApproveCommit({ ...opts, tasks: doneTasks.join(","), json: false });
       await orchestrateCommit({ ...opts, waiveApprovals: true, json: false });
     }
     await orchestrateJournal({ ...opts, json: false });
-    const stop = detectStopCondition(state);
+    const stop = detectStopCondition(readSprintState(opts.stateFile));
     if (stop.stop) {
       break;
     }
@@ -670,8 +819,19 @@ async function orchestrateRunUnattended(opts) {
 
   const finalRun = readRun(opts.workDir);
   finalRun.phase = "done";
+  finalRun.updatedAt = new Date().toISOString();
   await writeRun(opts.workDir, finalRun);
-  return emitResult(opts, { ok: true, phase: "done", runId: finalRun.runId });
+  await refreshSnapshot(opts);
+  const paths = path.join(opts.workDir, ".va-auto-pilot", "orchestration");
+  const finalCommit = await commitControlFiles(
+    [
+      path.join(paths, "run.json"),
+      path.join(paths, "snapshot.json"),
+    ],
+    `chore(orchestration): finish run ${finalRun.runId}`,
+    opts
+  );
+  return emitResult(opts, { ok: true, phase: "done", runId: finalRun.runId, finalCommit });
 }
 
 export async function runOrchestrateCommand(subcommand, argv) {

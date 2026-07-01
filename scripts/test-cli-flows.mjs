@@ -8,6 +8,7 @@
  *   command           - CLI binary (e.g. "node")
  *   args              - argument list
  *   env               - additional environment variables
+ *   timeout_ms        - per-flow timeout in ms (default: 15000)
  *   isolated_state    - if true, copy the sprint state to a temp file, pass
  *                       --state-file pointing to the copy, and route generated
  *                       sprint board writes to the same temp root
@@ -153,6 +154,7 @@ function makeTempPitfallsFile() {
 
 function runFlow(flow) {
   const { command, args = [], env = {}, assert: assertions = {} } = flow;
+  const timeoutMs = Number.parseInt(String(flow.timeout_ms ?? "15000"), 10);
 
   // Build the final args list, injecting temp file paths when isolation is requested.
   let finalArgs = [...args];
@@ -180,7 +182,7 @@ function runFlow(flow) {
 
   const result = spawnSync(command, finalArgs, {
     encoding: "utf8",
-    timeout: 15_000,
+    timeout: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15_000,
     cwd: ROOT,
     env: spawnEnv
   });

@@ -2649,3 +2649,34 @@
   - validate-distribution
   - typecheck
 ---
+
+## 2026-07-01T16:14:24.021Z - AP-102
+- Summary: Dogfood attempt found two runtime issues before completion: malformed YAML around an unquoted planReviewCommand value made review-plan fall back to the default reviewer, and the governed commit/journal path left orchestration control files dirty after the cycle. Implemented a deterministic full-cycle fixture and changed commit/journal sequencing so committed run state, snapshot, journal event, and cycle-boundary closure are captured in git.
+- Files: `scripts/auto-pilot-orchestrate.mjs`, `test-flows/orchestrate-cli.yaml`, `docs/todo/run-journal.md`
+- Signals:
+  - orchestrate-dogfood
+  - review-plan-config
+  - control-plane-commit
+  - cycle-closed-clean
+---
+
+## 2026-07-01T16:18:03.087Z - AP-102
+- Summary: Completed governed orchestrate dogfood proof. Added a regression flow that captures init/plan/review-plan/approve-plan/dispatch/observe/await-workers/approve-commit/commit/journal artifacts, verifies gate output, checkpoint evidence paths, event log entries, deterministic worker artifact, task commit, journal control commit, and final clean temp git status. Fixed commit sequencing so committed run state and snapshot are included in the approved task commit, and journal now records a journal event plus a scoped cycle-close control commit.
+- Files: `scripts/auto-pilot-orchestrate.mjs`, `test-flows/orchestrate-cli.yaml`, `.va-auto-pilot/sprint-state.json`, `docs/todo/sprint.md`, `docs/todo/run-journal.md`
+- Signals:
+  - AP-102:done
+  - orchestrate-full-cycle
+  - gate-output
+  - evidence-paths
+  - clean-cycle
+---
+
+## 2026-07-01T16:52:00Z - AP-102
+- Summary: Post-implementation review found two edge-case regressions in the dogfood fix: external `--journal-file` paths were being handed to git pathspecs, and a multi-task approved commit batch could continue after the first task commit failed. Fixed both and extended the orchestrate CLI flow to prove external journals are updated without leaking into control commits, and failed commit approval is cleared before later approved tasks are processed.
+- Files: `scripts/auto-pilot-orchestrate.mjs`, `test-flows/orchestrate-cli.yaml`, `.va-auto-pilot/sprint-state.json`, `docs/todo/sprint.md`
+- Signals:
+  - AP-102:review-fix
+  - external-journal
+  - commit-approval-short-circuit
+  - orchestrate-cli-pass
+---

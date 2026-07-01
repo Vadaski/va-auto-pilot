@@ -395,6 +395,7 @@ test("formatConstraintsForPrompt sorts multiple constraints and appends blind sp
 });
 
 test("dispatchTask injects constraint prompt sections when bridge returns content", async () => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-dispatch-constraints-"));
   const task = {
     id: "AP-CI-1",
     title: "Inject constraints into the delegate prompt",
@@ -414,6 +415,7 @@ test("dispatchTask injects constraint prompt sections when bridge returns conten
   await dispatchTask(task, bridge, pitfallContext, humanBoardBlock, {
     agentTemplate: "echo {taskId}",
     trackTimeout: 1_000,
+    workDir,
     constraintBridge: {
       collectConstraints: async () => ({
         engineAvailable: true,
@@ -444,6 +446,7 @@ test("dispatchTask injects constraint prompt sections when bridge returns conten
 });
 
 test("dispatchTask keeps the legacy prompt layout when constraint injection is empty", async () => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-dispatch-legacy-"));
   const task = {
     id: "AP-CI-2",
     title: "Leave the prompt unchanged",
@@ -463,6 +466,7 @@ test("dispatchTask keeps the legacy prompt layout when constraint injection is e
   await dispatchTask(task, bridge, pitfallContext, humanBoardBlock, {
     agentTemplate: "echo {taskId}",
     trackTimeout: 1_000,
+    workDir,
     constraintBridge: {
       collectConstraints: async () => ({
         engineAvailable: false,
@@ -478,6 +482,47 @@ test("dispatchTask keeps the legacy prompt layout when constraint injection is e
   assert.match(capturedTrack.notes, /^Task note\n\nBoard instruction\n\n## Permission Scope/);
   assert.match(capturedTrack.notes, /File boundaries:/);
   assert.equal(capturedTrack.metadata.permissionPolicy.schemaVersion, 1);
+});
+
+test("dispatchTask blocks destructive worker commands before bridge dispatch", async () => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-dispatch-permission-"));
+  const task = {
+    id: "AP-PERM-1",
+    title: "Block destructive worker command",
+    notes: "",
+    priority: "P1",
+    dependsOn: [],
+    source: "safe.txt",
+  };
+  let dispatched = false;
+  const bridge = {
+    async dispatch() {
+      dispatched = true;
+      return { taskId: task.id, success: true, durationMs: 1 };
+    }
+  };
+
+  const result = await dispatchTask(task, bridge, "", "", {
+    agentTemplate: "rm -rf forbidden-dir",
+    trackTimeout: 1_000,
+    json: true,
+    workDir,
+    constraintBridge: {
+      collectConstraints: async () => ({
+        engineAvailable: false,
+        constraints: [],
+        blindSpots: [],
+        durationMs: 0,
+      }),
+      formatConstraintsForPrompt: () => "",
+    },
+  });
+
+  assert.equal(dispatched, false);
+  assert.equal(result.success, false);
+  assert.equal(result.exitCode, 126);
+  assert.match(result.stderr, /Permission scope blocked worker command/);
+  assert.equal(result.permissionDecision.action, "requires-opt-in");
 });
 
 // ---------------------------------------------------------------------------

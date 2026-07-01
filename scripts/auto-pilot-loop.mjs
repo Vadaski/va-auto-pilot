@@ -48,7 +48,10 @@ import {
 } from "./lib/constraint-bridge.mjs";
 import {
   buildDefaultPermissionPolicy,
+  classifyCommandPermission,
+  detectOutOfScopeFiles,
   formatPermissionPolicyForPrompt,
+  normalizePermissionPolicy,
 } from "./lib/permission-scope.mjs";
 import {
   evaluateBudget,
@@ -169,6 +172,10 @@ function mapGateToFailureType(gateName) {
   if (gateName === "review") return "review";
   if (gateName === "acceptance" || gateName === "smoke-test") return "acceptance";
   return "gate";
+}
+
+function resolveTaskPermissionPolicy(task) {
+  return normalizePermissionPolicy(task.permissionPolicy ?? buildDefaultPermissionPolicy(task), task);
 }
 
 function createLoopRunId() {
@@ -1183,7 +1190,7 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
   const formatTaskConstraints = constraintBridge.formatConstraintsForPrompt ?? defaultFormatConstraintsForPrompt;
   const constraintResult = await collectTaskConstraints(`${task.title}\n${task.notes ?? ""}`, { maxFactors: 5 });
   const constraintBlock = formatTaskConstraints(constraintResult);
-  const permissionPolicy = task.permissionPolicy ?? buildDefaultPermissionPolicy(task);
+  const permissionPolicy = resolveTaskPermissionPolicy(task);
   const permissionBlock = formatPermissionPolicyForPrompt(permissionPolicy);
 
   if (constraintBlock) {
@@ -1222,6 +1229,33 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
       log(opts, humanBoardBlock);
     }
     return { taskId: task.id, success: true, dryRun: true };
+  }
+
+  const commandPermission = classifyCommandPermission(template, permissionPolicy);
+  await appendTaskEvent(task, "task.command", "dispatch", {
+    command: template,
+    commandType: "worker",
+    permissionAction: commandPermission.action,
+    permissionReason: commandPermission.reason,
+  }, opts);
+  if (commandPermission.action !== "allow") {
+    const details = `Permission scope blocked worker command (${commandPermission.action}): ${commandPermission.reason}`;
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.writeFileSync(logFile, `[${nowIso()}] task=${task.id}\ncommand: ${template}\n${details}\n`, "utf8");
+    log(opts, `  ${details}`);
+    return {
+      taskId: task.id,
+      command: template,
+      success: false,
+      exitCode: 126,
+      signal: "",
+      durationMs: 0,
+      timedOut: false,
+      logFile,
+      stderr: details,
+      output: details,
+      permissionDecision: commandPermission,
+    };
   }
 
   log(opts, `  dispatching ${task.id} via: ${template}`);
@@ -1869,6 +1903,16 @@ async function detectPartialDispatchSuccess(task, result, opts, evidenceText = c
   return latest;
 }
 
+async function detectPermissionScopeViolation(task, opts, changedFiles = null) {
+  const permissionPolicy = resolveTaskPermissionPolicy(task);
+  if (permissionPolicy.review?.warnOnOutOfScopeDiff === false) {
+    return { changedFiles: [], outOfScopeFiles: [] };
+  }
+  const deltaFiles = Array.isArray(changedFiles) ? changedFiles : await listTaskDeltaFiles(task, opts);
+  const outOfScopeFiles = detectOutOfScopeFiles(deltaFiles, permissionPolicy);
+  return { changedFiles: deltaFiles, outOfScopeFiles };
+}
+
 function deriveCommitType(task) {
   const source = `${task.source ?? ""} ${task.title ?? ""}`.toLowerCase();
 
@@ -2129,6 +2173,34 @@ async function executeTaskAction(selection, bridge, pitfalls, gateConfig, opts) 
         : { partial: false, reason: "dispatch succeeded", changedFiles: [], evidenceText: dispatchEvidenceText };
 
       if (result.dryRun || result.success || partialDispatch.partial) {
+        if (!result.dryRun) {
+          const permissionScope = await detectPermissionScopeViolation(
+            task,
+            opts,
+            partialDispatch.partial ? partialDispatch.changedFiles : null
+          );
+          if (permissionScope.outOfScopeFiles.length > 0) {
+            const details = `Permission scope blocked out-of-scope file changes: ${permissionScope.outOfScopeFiles.join(", ")}`;
+            await transitionToFailedWithRecovery(task, "permission", {
+              exitCode: 126,
+              stdout: details,
+              stderr: details,
+              output: details,
+              gateId: "permission",
+            }, opts, "In Progress");
+            await journalEntry(task, details, opts, {
+              files: permissionScope.outOfScopeFiles,
+              signals: ["permission-scope:out-of-scope"],
+            });
+            return {
+              done: false,
+              task,
+              action: "permission-failed",
+              details,
+              logFile: result.logFile ?? "",
+            };
+          }
+        }
         if (!result.dryRun && humanBoardInstructions.length > 0) {
           const acknowledgmentSource = bridge.colony ? result : result.logFile;
           const acknowledgments = extractHumanBoardAcknowledgments(acknowledgmentSource, humanBoardInstructions);

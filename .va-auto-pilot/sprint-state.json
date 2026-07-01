@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-07-01T17:16:33.602Z",
+  "updatedAt": "2026-07-01T17:26:07.151Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -3175,16 +3175,16 @@
       "id": "AP-105",
       "title": "Runtime proof for governance checkpoints and permission scope enforcement",
       "priority": "P1",
-      "state": "Backlog",
+      "state": "Done",
       "owner": "",
       "source": "human-board validation goal",
       "createdAt": "2026-07-01",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-07-01T17:16:49.186Z",
+      "completedAt": "2026-07-01T17:26:07.151Z",
       "lastFailedAt": "",
       "failCount": 0,
-      "reason": "",
-      "verification": "",
+      "reason": "Runtime governance proof: validating checkpoint invalidation, plan-review gating, permission prompt injection, and command-scope classifiers with executable coverage.",
+      "verification": "Runtime governance and permission proof landed. Plan-review gating remains enforced; orchestrate CLI flow now proves stale checkpoint dispatch blocks for sprint-state, human-board, and git HEAD drift with checkpoint.stale event-log evidence. Worker dispatch now emits task.command permission decisions, blocks destructive worker commands before spawn, and fails out-of-scope worker diffs before Review. Governed flow captures worker prompt permission scope, asserts out-of-scope/destructive enforcement, journal signals, and event-log permission decisions. Gates PASS: typecheck, check:units, targeted orchestrate-cli flow, check:all, check:e2e, git diff --check.",
       "notes": "Acceptance: exercise plan-review gating, stale checkpoint invalidation on human-board/sprint-state/git-head changes, permission block injection into worker prompts, and destructive/out-of-scope command classifiers using unit/e2e or deterministic CLI flows. Broken or unobservable behavior must be fixed before Done.",
       "review": {
         "implementer": "",

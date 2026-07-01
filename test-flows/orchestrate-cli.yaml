@@ -153,6 +153,92 @@ flows:
         - exit_code: 0
       should: []
 
+  - name: "orchestrate: stale checkpoint blocks sprint-state human-board and git-head drift"
+    command: "bash"
+    timeout_ms: 30000
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        repo="$(cd "$ROOT" && pwd)"
+        evidence="$(mktemp -d)"
+
+        setup_case() {
+          local dir="$1"
+          mkdir -p "$dir/.va-auto-pilot" "$dir/docs/todo"
+          cat > "$dir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[{"id":"AP-001","title":"governed task","priority":"P1","state":"Backlog","dependsOn":[],"failCount":0}]}
+        EOF
+          cat > "$dir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+          cat > "$dir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        EOF
+          echo "seed" > "$dir/seed.txt"
+          (cd "$dir" && node "$repo/scripts/sprint-board.mjs" render >/dev/null)
+          (cd "$dir" && git init -q && git config user.email stale@example.invalid && git config user.name "Stale Checkpoint" && git add . && git commit -q -m "chore: seed")
+        }
+
+        approve_case() {
+          local dir="$1"
+          (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null)
+          (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null)
+          (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --dry-run --json >/dev/null)
+          (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null)
+        }
+
+        assert_stale_dispatch() {
+          local dir="$1"
+          local name="$2"
+          local reason="$3"
+          local out="$evidence/$name-dispatch.txt"
+          if (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json > "$out" 2>&1); then
+            echo "dispatch unexpectedly succeeded for $name" >&2
+            exit 1
+          fi
+          grep -q "STALE_CONTEXT" "$out"
+          grep -q "$reason" "$out"
+          grep -q "checkpoint.stale" "$dir/.va-auto-pilot/evidence/events.jsonl"
+          grep -q "$reason" "$dir/.va-auto-pilot/evidence/events.jsonl"
+        }
+
+        sprint_dir="$(mktemp -d)"
+        setup_case "$sprint_dir"
+        approve_case "$sprint_dir"
+        node - <<'NODE' "$sprint_dir/.va-auto-pilot/sprint-state.json"
+        const fs = require('fs');
+        const stateFile = process.argv[2];
+        const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+        state.tasks[0].failCount = 1;
+        fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+        NODE
+        assert_stale_dispatch "$sprint_dir" "sprint-state" "sprint-state changed since approve-plan"
+
+        human_dir="$(mktemp -d)"
+        setup_case "$human_dir"
+        approve_case "$human_dir"
+        cat >> "$human_dir/docs/todo/human-board.md" <<'EOF'
+        - [ ] Re-check the plan before dispatch
+        EOF
+        assert_stale_dispatch "$human_dir" "human-board" "human intent changed since approve-plan"
+
+        git_dir="$(mktemp -d)"
+        setup_case "$git_dir"
+        approve_case "$git_dir"
+        (cd "$git_dir" && echo "changed" >> seed.txt && git add seed.txt && git commit -q -m "chore: move head")
+        assert_stale_dispatch "$git_dir" "git-head" "git HEAD changed since approve-plan"
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
   - name: "orchestrate: full governed cycle commits deterministic worker output"
     command: "bash"
     args:
@@ -198,6 +284,16 @@ flows:
               "reason": "",
               "verification": "AP-001.txt exists and is committed after explicit approve-commit",
               "notes": "Worker must create AP-001.txt; gates must verify the file exists.",
+              "permissionPolicy": {
+                "schemaVersion": 1,
+                "fileScopes": [
+                  {"path": "AP-001.txt", "access": "read-write", "reason": "worker artifact"},
+                  {"path": "AP-001-prompt.txt", "access": "read-write", "reason": "runtime prompt capture"}
+                ],
+                "commands": {"allow": [], "deny": [], "destructiveRequiresOptIn": true, "destructiveAllow": []},
+                "network": {"mode": "none", "allowlist": []},
+                "review": {"warnOnOutOfScopeDiff": true}
+              },
               "review": {},
               "testing": {},
               "dependsOn": []
@@ -237,7 +333,7 @@ flows:
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json > "$evidence/approve-plan.json"
         node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json > "$evidence/dispatch.json"
         node "$repo/scripts/auto-pilot.mjs" observe --json > "$evidence/observe-after-dispatch.json"
-        node "$repo/scripts/auto-pilot.mjs" orchestrate await-workers --no-colony --agent-template "node $repo/e2e/stubs/deterministic-agent.mjs" > "$evidence/await-workers.log"
+        AGENT_CAPTURE_PROMPT=1 node "$repo/scripts/auto-pilot.mjs" orchestrate await-workers --no-colony --agent-template "node $repo/e2e/stubs/deterministic-agent.mjs" > "$evidence/await-workers.log"
         node "$repo/scripts/auto-pilot.mjs" observe --json > "$evidence/observe-after-await.json"
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-commit --tasks AP-001 --json > "$evidence/approve-commit.json"
         node "$repo/scripts/auto-pilot.mjs" orchestrate commit --json > "$evidence/commit.json"
@@ -303,7 +399,124 @@ flows:
         assert(fs.existsSync(path.join(bundleDir, manifest.redactedShareable)), 'task evidence bundle redacted manifest missing');
         assert(text('tracked-evidence-files.txt').includes(`${runId}/AP-001/manifest.json`), 'task evidence manifest was not committed');
         assert(fs.readFileSync(path.join(tmpdir, 'AP-001.txt'), 'utf8') === 'done\n', 'worker artifact missing');
+        const promptCapture = fs.readFileSync(path.join(tmpdir, 'AP-001-prompt.txt'), 'utf8');
+        assert(promptCapture.includes('## Permission Scope'), 'permission scope block missing from worker prompt');
+        assert(promptCapture.includes('read-write: AP-001.txt'), 'permission scope did not include worker artifact');
+        assert(promptCapture.includes('Network: none'), 'permission network boundary missing from worker prompt');
         assert(text('git-status.txt').trim() === '', `fixture repo dirty after cycle: ${text('git-status.txt')}`);
+        NODE
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
+  - name: "orchestrate: permission scope blocks out-of-scope and destructive worker paths"
+    command: "bash"
+    timeout_ms: 30000
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        repo="$(cd "$ROOT" && pwd)"
+        evidence="$(mktemp -d)"
+
+        out_scope_dir="$(mktemp -d)"
+        mkdir -p "$out_scope_dir/.va-auto-pilot" "$out_scope_dir/docs/todo"
+        cat > "$out_scope_dir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {
+          "projectPrefix": "AP",
+          "tasks": [
+            {"id":"AP-001","title":"Respect permission file scope","priority":"P1","state":"Backlog","owner":"","source":"allowed.txt","createdAt":"2026-07-01","startedAt":"","completedAt":"","lastFailedAt":"","failCount":0,"reason":"","verification":"","notes":"Worker may only edit allowed.txt.","review":{},"testing":{},"dependsOn":[]}
+          ]
+        }
+        EOF
+        cat > "$out_scope_dir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        cat > "$out_scope_dir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        EOF
+        cat > "$out_scope_dir/write-outside.mjs" <<'EOF'
+        import fs from "node:fs";
+        fs.writeFileSync("outside.txt", "outside\n", "utf8");
+        process.stdout.write("worker wrote outside.txt\n");
+        EOF
+        cd "$out_scope_dir"
+        node "$repo/scripts/sprint-board.mjs" render >/dev/null
+        git init -q
+        git config user.email permission@example.invalid
+        git config user.name "Permission Scope"
+        git add .
+        git commit -q -m "chore: seed permission fixture"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --dry-run --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate await-workers --no-colony --agent-template "node write-outside.mjs" --json > "$evidence/out-of-scope-await.json"
+
+        node - <<'NODE' "$out_scope_dir" "$evidence/out-of-scope-await.json"
+        const fs = require('fs');
+        const path = require('path');
+        const dir = process.argv[2];
+        const payload = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+        const state = JSON.parse(fs.readFileSync(path.join(dir, '.va-auto-pilot/sprint-state.json'), 'utf8'));
+        const journal = fs.readFileSync(path.join(dir, 'docs/todo/run-journal.md'), 'utf8');
+        const events = fs.readFileSync(path.join(dir, '.va-auto-pilot/evidence/events.jsonl'), 'utf8');
+        const assert = (condition, message) => { if (!condition) throw new Error(message); };
+        assert(payload.results.some((item) => item.action === 'permission-failed'), 'await-workers did not report permission-failed');
+        assert(state.tasks[0].state === 'Failed', 'out-of-scope worker did not fail the task');
+        assert(fs.existsSync(path.join(dir, 'outside.txt')), 'fixture did not create outside file before enforcement');
+        assert(journal.includes('permission-scope:out-of-scope'), 'permission scope signal missing from journal');
+        assert(journal.includes('outside.txt'), 'out-of-scope file missing from journal');
+        assert(events.includes('"permissionAction":"allow"'), 'worker command permission decision missing from event log');
+        assert(events.includes('"firstFailingGate":"permission"'), 'permission failure event missing from event log');
+        NODE
+
+        destructive_dir="$(mktemp -d)"
+        mkdir -p "$destructive_dir/.va-auto-pilot" "$destructive_dir/docs/todo" "$destructive_dir/forbidden-dir"
+        echo "keep" > "$destructive_dir/forbidden-dir/keep.txt"
+        cat > "$destructive_dir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[{"id":"AP-001","title":"Block destructive command","priority":"P1","state":"Backlog","source":"safe.txt","dependsOn":[],"failCount":0}]}
+        EOF
+        cat > "$destructive_dir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        cat > "$destructive_dir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        EOF
+        cd "$destructive_dir"
+        node "$repo/scripts/sprint-board.mjs" render >/dev/null
+        git init -q
+        git config user.email permission@example.invalid
+        git config user.name "Permission Scope"
+        git add .
+        git commit -q -m "chore: seed destructive fixture"
+        node "$repo/scripts/auto-pilot-loop.mjs" --no-colony --no-commit --max-cycles 1 --agent-template "rm -rf forbidden-dir" --json > "$evidence/destructive-loop.json"
+
+        node - <<'NODE' "$destructive_dir" "$evidence/destructive-loop.json"
+        const fs = require('fs');
+        const path = require('path');
+        const dir = process.argv[2];
+        const payload = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+        const state = JSON.parse(fs.readFileSync(path.join(dir, '.va-auto-pilot/sprint-state.json'), 'utf8'));
+        const events = fs.readFileSync(path.join(dir, '.va-auto-pilot/evidence/events.jsonl'), 'utf8');
+        const assert = (condition, message) => { if (!condition) throw new Error(message); };
+        assert(fs.existsSync(path.join(dir, 'forbidden-dir/keep.txt')), 'destructive command was executed');
+        assert(state.tasks[0].state === 'Failed', 'destructive command did not fail the task');
+        assert(JSON.stringify(payload).includes('dispatch-failed'), 'loop did not report dispatch failure');
+        assert(JSON.stringify(payload).includes('Permission scope blocked worker command'), 'permission block reason missing from loop output');
+        assert(events.includes('"permissionAction":"requires-opt-in"'), 'destructive command decision missing from event log');
         NODE
     env:
       ROOT: "."

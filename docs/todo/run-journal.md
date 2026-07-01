@@ -2699,3 +2699,10 @@
 - Signals:
   - check:observability PASS; orchestrate-cli flow PASS; cycle-restart flow PASS; typecheck PASS; check:units PASS; check:all PASS; check:e2e PASS; git diff --check PASS
 ---
+
+## 2026-07-01T17:26:13.456Z - AP-105
+- Summary: Runtime governance and permission proof completed. Added runtime permission enforcement before worker spawn and before Review transition: destructive worker commands are blocked, worker command permission decisions are emitted as task.command events, and out-of-scope worker diffs fail the task with permission-scope journal/event evidence. Extended orchestrate CLI flow to prove plan-review gating, stale checkpoint invalidation for sprint-state/human-board/git-head drift, worker prompt permission-scope injection, out-of-scope diff blocking, and destructive command non-execution.
+- Files: `scripts/auto-pilot-loop.mjs`, `scripts/test-units.mjs`, `test-flows/orchestrate-cli.yaml`, `docs/operations/design-validation-matrix.md`, `.va-auto-pilot/sprint-state.json`, `docs/todo/sprint.md`
+- Signals:
+  - check:units PASS; orchestrate-cli flow PASS; typecheck PASS; check:all PASS; check:e2e PASS; git diff --check PASS
+---

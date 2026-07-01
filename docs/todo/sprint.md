@@ -1,6 +1,6 @@
 # Sprint Board
 
-> Last updated: 2026-06-27 by VA Auto-Pilot
+> Last updated: 2026-07-01 by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:
@@ -146,4 +146,10 @@
 ## Backlog
 | Priority | ID | Task | Depends On | Owner | Source |
 |----------|----|------|------------|-------|--------|
-| - | - | - | - | - | - |
+| P0 | AP-101 | Validation matrix: inventory every design surface and map each to executable proof | - | - | human-board validation goal |
+| P0 | AP-102 | Dogfood orchestrated mode end-to-end with observable evidence | AP-101 | - | human-board validation goal |
+| P0 | AP-103 | CI parity audit: prove required local gates are represented by GitHub Actions | AP-101 | - | human-board validation goal |
+| P1 | AP-104 | Runtime proof for observability events and evidence bundles | AP-101 | - | human-board validation goal |
+| P1 | AP-105 | Runtime proof for governance checkpoints and permission scope enforcement | AP-101 | - | human-board validation goal |
+| P1 | AP-106 | Runtime proof for budget guardrails and eval gate history | AP-101 | - | human-board validation goal |
+| P1 | AP-107 | Runtime proof for MCP read-only resources and smoke-test runner paths | AP-101 | - | human-board validation goal |

@@ -2618,3 +2618,12 @@
 - Signals:
   - human-intent:risk
 ---
+
+## 2026-07-01T15:41:32.134Z - human-intent
+- Summary: Validation goal folded into executable backlog AP-101..AP-107: design matrix first, then orchestrated dogfood, CI parity, observability/evidence, governance/permission, budget/eval, and MCP/smoke runtime proof.
+- Files: `.va-auto-pilot/sprint-state.json`, `docs/todo/sprint.md`, `docs/todo/human-board.md`
+- Signals:
+  - validation-goal-decomposed
+  - backlog-seeded
+  - AP-101
+---

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-06-27T00:17:32.188Z",
+  "updatedAt": "2026-07-01T15:41:06.673Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -3048,6 +3048,221 @@
         "shouldPassRate": ""
       },
       "dependsOn": []
+    },
+    {
+      "id": "AP-101",
+      "title": "Validation matrix: inventory every design surface and map each to executable proof",
+      "priority": "P0",
+      "state": "Backlog",
+      "owner": "",
+      "source": "human-board validation goal",
+      "createdAt": "2026-07-01",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Acceptance: create a design-validation matrix covering docs/operations designs, schemas, CLI paths, e2e/quality gates, CI workflow, and evidence artifacts; every row must have a real command or an explicit gap/fix task. Verify with npm run typecheck, npm run check:all, npm run check:e2e.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "AP-102",
+      "title": "Dogfood orchestrated mode end-to-end with observable evidence",
+      "priority": "P0",
+      "state": "Backlog",
+      "owner": "",
+      "source": "human-board validation goal",
+      "createdAt": "2026-07-01",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Acceptance: run the governed orchestrate path init -> plan -> review-plan -> approve-plan -> dispatch -> observe -> await-workers -> approve-commit -> commit -> journal on a real scoped task or deterministic fixture; capture observe --json, journal entries, gate output, and evidence paths; fix any broken phase before marking Done.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-101"
+      ]
+    },
+    {
+      "id": "AP-103",
+      "title": "CI parity audit: prove required local gates are represented by GitHub Actions",
+      "priority": "P0",
+      "state": "Backlog",
+      "owner": "",
+      "source": "human-board validation goal",
+      "createdAt": "2026-07-01",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Acceptance: compare .github/workflows/ci.yml with the human acceptance gates and package scripts; CI must run npm ci, npm run check:all, npm run check:e2e, and doc-store PR checks or record an explicit risk with a fix task. Verify local equivalents and preserve green check:all/e2e.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-101"
+      ]
+    },
+    {
+      "id": "AP-104",
+      "title": "Runtime proof for observability events and evidence bundles",
+      "priority": "P1",
+      "state": "Backlog",
+      "owner": "",
+      "source": "human-board validation goal",
+      "createdAt": "2026-07-01",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Acceptance: generate or refresh completed/failed evidence bundles from real scripts, validate schemas, prove event log paths and evidence bundle dirs are referenced by checkpoints/observe output, and add regression coverage for any missing runtime link. Gates: check:observability, check:protocol-fixtures, check:all, check:e2e as applicable.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-101"
+      ]
+    },
+    {
+      "id": "AP-105",
+      "title": "Runtime proof for governance checkpoints and permission scope enforcement",
+      "priority": "P1",
+      "state": "Backlog",
+      "owner": "",
+      "source": "human-board validation goal",
+      "createdAt": "2026-07-01",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Acceptance: exercise plan-review gating, stale checkpoint invalidation on human-board/sprint-state/git-head changes, permission block injection into worker prompts, and destructive/out-of-scope command classifiers using unit/e2e or deterministic CLI flows. Broken or unobservable behavior must be fixed before Done.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-101"
+      ]
+    },
+    {
+      "id": "AP-106",
+      "title": "Runtime proof for budget guardrails and eval gate history",
+      "priority": "P1",
+      "state": "Backlog",
+      "owner": "",
+      "source": "human-board validation goal",
+      "createdAt": "2026-07-01",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Acceptance: run budget soft/hard stop paths and eval pass/fail/ambiguous paths through real CLI/unit/e2e flows; verify journal summaries and .va-auto-pilot/evidence/eval-history.jsonl behavior are observable; add/fix gates so ambiguous eval output blocks required evals.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-101"
+      ]
+    },
+    {
+      "id": "AP-107",
+      "title": "Runtime proof for MCP read-only resources and smoke-test runner paths",
+      "priority": "P1",
+      "state": "Backlog",
+      "owner": "",
+      "source": "human-board validation goal",
+      "createdAt": "2026-07-01",
+      "startedAt": "",
+      "completedAt": "",
+      "lastFailedAt": "",
+      "failCount": 0,
+      "reason": "",
+      "verification": "",
+      "notes": "Acceptance: prove all MCP read-only resources can be listed/read against current repo state, and smoke-test runner enabled/disabled/invalid-config paths have executable coverage with clear evidence. If smoke remains disabled, gateTrust must explain why and no required gate may be a placeholder.",
+      "review": {
+        "implementer": "",
+        "security": "",
+        "qa": "",
+        "domain": "",
+        "architect": ""
+      },
+      "testing": {
+        "flow": "",
+        "mustPassRate": "",
+        "shouldPassRate": ""
+      },
+      "dependsOn": [
+        "AP-101"
+      ]
     }
   ],
   "sprintStartCommit": "05306ecac0be8f24461b1832797612976ec70b86"

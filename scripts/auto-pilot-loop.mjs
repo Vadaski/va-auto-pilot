@@ -2485,6 +2485,27 @@ async function appendCycleBoundaryEntry(cycle, result, pendingTasks, stopConditi
   );
 }
 
+async function commitFinalCycleBoundaryIfNeeded(cycleResult, opts) {
+  if (opts.dryRun || opts.noCommit) {
+    return { committed: false, skipped: true, reason: "not required", files: [], hash: "" };
+  }
+
+  const journalFile = normalizeRelativeToWorkDir(opts.journalFile, opts);
+  const changedFiles = await listChangedFiles(opts);
+  if (!changedFiles.has(journalFile)) {
+    return { committed: false, skipped: true, reason: "journal clean", files: [], hash: "" };
+  }
+  if (!cycleResult.completedTask && (changedFiles.size !== 1 || !changedFiles.has(journalFile))) {
+    return { committed: false, skipped: true, reason: "non-journal changes present", files: [], hash: "" };
+  }
+
+  const commitResult = await commitPaths("chore(journal): record cycle boundary", [journalFile], opts);
+  if (commitResult.committed) {
+    log(opts, `  final cycle-boundary journal committed ${commitResult.hash}`);
+  }
+  return commitResult;
+}
+
 function extractReviewerReport(raw) {
   const parsed = tryParseJson(String(raw ?? "").trim());
   if (parsed.parsed && parsed.value && typeof parsed.value === "object") {
@@ -2761,6 +2782,7 @@ async function runLoop(opts) {
             steps: []
           };
           await appendCycleBoundaryEntry(cycle, cycleResult, pendingTasks, stopCondition, opts);
+          cycleResult.cycleBoundaryCommit = await commitFinalCycleBoundaryIfNeeded(cycleResult, opts);
           results.push(cycleResult);
           if (review.cleared) {
             log(opts, `\nLoop finished: ${review.details}`);
@@ -2789,6 +2811,7 @@ async function runLoop(opts) {
             steps: []
           };
           await appendCycleBoundaryEntry(cycle, cycleResult, pendingTasks, stopCondition, opts);
+          cycleResult.cycleBoundaryCommit = await commitFinalCycleBoundaryIfNeeded(cycleResult, opts);
           results.push(cycleResult);
           if (review.cleared) {
             log(opts, `\nLoop finished: ${review.details}`);
@@ -2864,6 +2887,16 @@ async function runLoop(opts) {
       }
 
       await appendCycleBoundaryEntry(cycle, cycleResult, cycleResult.pendingTasks, cycleResult.stopCondition, opts);
+      const willExitAfterCycle = cycleResult.done
+        || opts.dryRun
+        || opts.singleCycle
+        || cycle >= opts.maxCycles
+        || cycleResult.pendingTasks <= 0
+        || cycleResult.stopCondition?.stop
+        || cycleResult.budget?.stop;
+      if (willExitAfterCycle) {
+        cycleResult.cycleBoundaryCommit = await commitFinalCycleBoundaryIfNeeded(cycleResult, opts);
+      }
       results.push(cycleResult);
 
       const last = results[results.length - 1];

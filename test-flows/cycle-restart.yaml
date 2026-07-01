@@ -78,6 +78,7 @@ flows:
             - "Cycle 2 of 2 (max)"
             - "STATES=Done,Done"
             - "CYCLE_BOUNDARIES=2"
+            - "WORKTREE=clean"
             - "EVIDENCE_MANIFESTS=2"
             - "EVENT_LOG_TRACKED=1"
       should: []
@@ -130,13 +131,15 @@ flows:
         states="$(node -e 'const fs=require("node:fs"); const state=JSON.parse(fs.readFileSync(".va-auto-pilot/sprint-state.json","utf8")); console.log(state.tasks.map((task) => task.state).join(","));')"
         echo "HEAD_COUNT=$(git rev-list --count HEAD)"
         echo "STATES=$states"
+        echo "WORKTREE=$(test -z "$(git status --short)" && echo clean || echo dirty)"
     assert:
       must:
         - exit_code: 0
         - stdout_contains:
             - "Cycle 1 of 1 (max)"
-            - "HEAD_COUNT=3"
+            - "HEAD_COUNT=4"
             - "STATES=Done,Backlog"
+            - "WORKTREE=clean"
             - "Single-cycle mode enabled. Stopping after one cycle."
       should: []
 
@@ -188,12 +191,14 @@ flows:
         states="$(node -e 'const fs=require("node:fs"); const state=JSON.parse(fs.readFileSync(".va-auto-pilot/sprint-state.json","utf8")); console.log(state.tasks.map((task) => task.state).join(","));')"
         echo "HEAD_COUNT=$(git rev-list --count HEAD)"
         echo "STATES=$states"
+        echo "WORKTREE=$(test -z "$(git status --short)" && echo clean || echo dirty)"
     assert:
       must:
         - exit_code: 0
         - stdout_contains:
             - "Cycle 1 of 1 (max)"
-            - "HEAD_COUNT=3"
+            - "HEAD_COUNT=4"
             - "STATES=Done,Backlog"
+            - "WORKTREE=clean"
             - "Max cycles (1) reached. Stopping."
       should: []

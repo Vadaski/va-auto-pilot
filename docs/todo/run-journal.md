@@ -2733,3 +2733,12 @@
   - smoke-invalid-config
   - structured-gateresult
 ---
+
+## 2026-07-01T18:01:00.442Z - AP-108
+- Summary: Closed AP-108 by committing final cycle-boundary journal entries before loop exit when the journal is the only remaining dirty file, preventing successful regular loop runs from leaving stray journal diffs.
+- Files: `scripts/auto-pilot-loop.mjs`, `test-flows/cycle-restart.yaml`, `test-flows/auto-pilot-loop-cli.yaml`, `docs/operations/design-validation-matrix.md`
+- Signals:
+  - final-cycle-boundary
+  - worktree-clean
+  - observable-journal
+---

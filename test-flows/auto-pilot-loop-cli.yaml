@@ -94,6 +94,7 @@ flows:
         states="$(node -e 'const fs=require("node:fs"); const state=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(state.tasks.map((task) => task.state).join(","));' "$tmpdir/.va-auto-pilot/sprint-state.json")"
         echo "elapsed=${elapsed}"
         echo "states=${states}"
+        echo "worktree=$(git -C "$tmpdir" status --short | wc -l | tr -d ' ')"
     assert:
       must:
         - exit_code: 0
@@ -101,6 +102,7 @@ flows:
             - "--- Cycle: AP-001 (Backlog) action=start-task ---"
             - "--- Cycle: AP-002 (Backlog) action=start-task ---"
             - "states=Done,Done"
+            - "worktree=0"
         - stdout_not_contains: ["track-error"]
       should: []
 

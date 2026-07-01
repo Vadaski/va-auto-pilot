@@ -2680,3 +2680,15 @@
   - commit-approval-short-circuit
   - orchestrate-cli-pass
 ---
+
+## 2026-07-01T17:02:56.511Z - AP-103
+- Summary: CI parity closed: added explicit GitHub Actions typecheck, folded typecheck and public narrative scan into check:all, added docs/operations/ci-parity.md to classify CI-required vs release/manual gates, and verified DocStore PR equivalents locally.
+- Files: `.github/workflows/ci.yml`, `package.json`, `scripts/validate-public-narrative.mjs`, `docs/operations/ci-parity.md`, `docs/operations/design-validation-matrix.md`, `docs/operations/open-source-readiness-checklist.md`, `.va-auto-pilot/sprint-state.json`, `docs/todo/sprint.md`
+- Signals:
+  - ci-parity
+  - typecheck
+  - check-public-narrative
+  - check-all
+  - check-e2e
+  - doc-store-pr
+---

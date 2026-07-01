@@ -13,7 +13,7 @@ Last checked: 2026-06-26.
 ```text
 Quality gate: npm run check:all PASS
 Distribution: npm run validate:distribution PASS
-Public wording scan: PASS (no matches)
+Public wording scan: PASS (`npm run check:public-narrative`)
 Clean install smoke: PASS (local npm tarball install + npx va-auto-pilot init + npm run validate:distribution)
 First-run empty backlog: PASS (summary/next readable; orchestrate plan returns controlled PLAN_EMPTY)
 Package dry-run: 122 files, 215.7 kB package, 828.7 kB unpacked
@@ -37,10 +37,10 @@ Known limitations: requires a capable CLI coding agent for autonomous implementa
 Verification:
 
 ```bash
-rg -n "Co-creators|共创作者|超越时代两个版本|protocol engineering|weak model|弱模型|vs MCP|vs A2A|MCP \\(Anthropic\\)|A2A \\(Google\\)|返回值 = 结果|验证机制.*弱|Codex-only|Claude-only|Powered by va-agent-protocol|Claude Opus|GPT-5|gpt-5\\.[0-9]|composer-2\\.5|templates/scripts|human-out-of-the-loop|codex review|Codex & Claude|Built by Vadaski|default: Codex|<review-agent>|<agent>" README.md README.zh.md website docs --glob '!docs/todo/**' --glob '!docs/operations/public-narrative-spec.md' --glob '!docs/operations/public-positioning-audit.md' --glob '!docs/operations/open-source-readiness-checklist.md'
+npm run check:public-narrative
 ```
 
-Expected result: no matches.
+Expected result: pass with no stale public-positioning matches.
 
 ## 2. Install Paths
 
@@ -138,7 +138,7 @@ Attach this evidence to the release PR or release notes:
 
 - [x] latest commit SHA
 - [x] `npm run check:all` output summary
-- [x] stale-expression scan result
+- [x] `npm run check:public-narrative` result
 - [x] `npm run validate:distribution` result
 - [x] clean temporary repo distribution smoke result
 - [ ] website preview URL or screenshot
@@ -150,7 +150,7 @@ Minimum release evidence block:
 Commit: release PR/head commit
 Quality gate: npm run check:all PASS
 Distribution: npm run validate:distribution PASS
-Public wording scan: PASS
+Public wording scan: npm run check:public-narrative PASS
 Clean install smoke: PASS (local npm tarball)
 Website preview: not captured in this CLI-only verification pass
 Known limitations: requires a capable CLI coding agent; npm smoke used local tarball before publish

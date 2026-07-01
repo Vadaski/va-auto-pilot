@@ -57,6 +57,12 @@ function formatAudit(payload) {
       lines.push(`- ${signal}`);
     }
   }
+  if ((payload.gateTrust.maintenanceNotes ?? []).length > 0) {
+    lines.push("Maintenance notes:");
+    for (const note of payload.gateTrust.maintenanceNotes) {
+      lines.push(`- ${note}`);
+    }
+  }
   if (payload.maintenance.actions.length > 0) {
     lines.push(`Maintenance actions: ${payload.maintenance.actions.length}`);
     for (const action of payload.maintenance.actions) {

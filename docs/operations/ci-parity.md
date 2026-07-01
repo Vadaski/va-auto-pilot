@@ -13,6 +13,7 @@ GitHub Actions or explicitly classified as release/manual checks.
 | Behavioral end-to-end checks | `npm run check:e2e` | `.github/workflows/ci.yml` check job | CI required |
 | DocStore PR hygiene | `npm run doc-store:doctor`; `npm run doc-store:enforce-staged -- --base main` | `.github/workflows/ci.yml` `doc-store` PR job | PR CI required |
 | Public narrative scan | `npm run check:public-narrative` | included in `npm run check:all` | CI required |
+| Runtime proof for current repo resources and smoke/gateTrust paths | `npm run check:runtime-proof` | included in `npm run check:all` | CI required |
 | Distribution manifest/package validation | `npm run validate:distribution` | included in `npm run check:all` | CI required |
 
 ## Release/Manual Gates

@@ -24,7 +24,8 @@ node scripts/auto-pilot.mjs cockpit --json
 Treat `cockpit.humanJudgment.evidence.summary` as the human evidence layer.
 It compresses journal memory into recent completions, failures, gates, and
 decisions. Its `gateTrust` field summarizes missing or weak evidence gates as
-evidence trust signals. Do not ask the human to read raw journal entries or
+evidence trust signals and carries maintenance notes such as why optional smoke
+tests are disabled. Do not ask the human to read raw journal entries or
 `qualityGate` config for normal approval.
 If `gateTrust` reports stale weak adaptive gates, use
 `node scripts/auto-pilot.mjs gates audit --json` and, when the linked pitfall is

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "projectPrefix": "AP",
-  "updatedAt": "2026-07-01T17:35:15.038Z",
+  "updatedAt": "2026-07-01T17:45:59.520Z",
   "tasks": [
     {
       "id": "AP-001",
@@ -3237,16 +3237,16 @@
       "id": "AP-107",
       "title": "Runtime proof for MCP read-only resources and smoke-test runner paths",
       "priority": "P1",
-      "state": "Backlog",
+      "state": "Done",
       "owner": "",
       "source": "human-board validation goal",
       "createdAt": "2026-07-01",
-      "startedAt": "",
-      "completedAt": "",
+      "startedAt": "2026-07-01T17:35:40.651Z",
+      "completedAt": "2026-07-01T17:42:42.946Z",
       "lastFailedAt": "",
       "failCount": 0,
-      "reason": "",
-      "verification": "",
+      "reason": "Runtime proof for MCP read-only resources and smoke-test runner paths: prove list/read behavior against current repo state, smoke enabled/disabled/invalid-config paths, and gateTrust placeholder safety.",
+      "verification": "Runtime proof added via npm run check:runtime-proof: reads every MCP read-only resource against current repo state, parses JSON payloads, reasserts sprint-summary dispatch authority, proves smoke disabled/current path plus enabled deterministic runner path and real invalid-config/malformed-YAML structured GateResult failures, and audits gateTrust for disabled-smoke maintenanceNotes plus no weak required placeholder commands. Validation: npm run check:runtime-proof; node scripts/auto-pilot.mjs gates audit --json; npm run check:units; npm run typecheck; npm run validate:distribution; npm run check:public-narrative; npm run check:all; npm run check:e2e.",
       "notes": "Acceptance: prove all MCP read-only resources can be listed/read against current repo state, and smoke-test runner enabled/disabled/invalid-config paths have executable coverage with clear evidence. If smoke remains disabled, gateTrust must explain why and no required gate may be a placeholder.",
       "review": {
         "implementer": "",

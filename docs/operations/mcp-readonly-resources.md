@@ -71,6 +71,16 @@ The gate validates the descriptor set, read-only metadata, fixture payloads,
 summary dispatch-authority fields, pitfall filtering, orchestration snapshot
 payload shape, and fail-closed behavior for unknown resource URIs.
 
+Current repository state is covered by the runtime proof gate:
+
+```bash
+npm run check:runtime-proof
+```
+
+That gate reads every listed resource against the current working tree, parses
+JSON payloads, and reasserts that `va-auto-pilot://sprint-summary` is only a
+preview, with dispatch authority left to `sprint-board.mjs next --json --strict`.
+
 The core resource helpers are also covered by unit tests in
 `scripts/test-units.mjs`.
 Run:
@@ -78,6 +88,7 @@ Run:
 ```bash
 npm run typecheck
 npm run check:mcp-resources
+npm run check:runtime-proof
 npm run check:units
 ```
 

@@ -2715,3 +2715,21 @@
   - eval-history-runtime-proof
   - ambiguous-eval-blocks-done
 ---
+
+## 2026-07-01T17:42:43.004Z - AP-107
+- Summary: Closed AP-107 with deterministic runtime proof for current-repo MCP resource reads, smoke enabled/disabled/invalid-config paths, gateTrust disabled-smoke explanation, and required placeholder audit.
+- Files: `scripts/validate-runtime-proof.mjs`, `scripts/lib/gate-trust.mjs`, `docs/operations/design-validation-matrix.md`
+- Signals:
+  - runtime-proof
+  - mcp-current-repo
+  - smoke-runner
+  - gateTrust
+---
+
+## 2026-07-01T17:45:59.577Z - AP-107
+- Summary: Follow-up from read-only scan: smoke-test-runner now emits structured JSON GateResult for pre-browser invalid config and malformed YAML failures; runtime proof asserts both paths.
+- Files: `scripts/smoke-test-runner.mjs`, `scripts/validate-runtime-proof.mjs`
+- Signals:
+  - smoke-invalid-config
+  - structured-gateresult
+---

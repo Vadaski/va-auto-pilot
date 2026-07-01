@@ -71,8 +71,7 @@ const projectRoot = process.cwd();
 
 function assertWithinProject(resolvedPath) {
   if (!resolvedPath.startsWith(projectRoot + path.sep) && resolvedPath !== projectRoot) {
-    console.error(`Error: Path escapes project directory: ${resolvedPath}`);
-    process.exit(1);
+    throw new Error(`Path escapes project directory: ${resolvedPath}`);
   }
 }
 
@@ -251,60 +250,74 @@ function setupCrashDetection(page) {
 
 async function run() {
   const opts = parseArgs(process.argv);
-
-  if (!opts.config) {
-    console.error("Error: --config <path> is required");
-    process.exit(1);
-  }
-
-  // Load YAML config
-  const configPath = path.resolve(opts.config);
-  if (!fs.existsSync(configPath)) {
-    console.error(`Error: Config file not found: ${configPath}`);
-    process.exit(1);
-  }
-
-  // Path traversal protection
-  assertWithinProject(configPath);
-
-  const configText = fs.readFileSync(configPath, "utf8");
-  const config = parseYaml(configText);
-
-  // YAML config validation
-  if (!config || typeof config !== "object") {
-    console.error("Error: Invalid YAML config — expected an object");
-    process.exit(1);
-  }
-  if (config.steps && !Array.isArray(config.steps)) {
-    console.error("Error: config.steps must be an array");
-    process.exit(1);
-  }
-  if (config.launch && typeof config.launch.command !== "string") {
-    console.error("Error: config.launch.command must be a string");
-    process.exit(1);
-  }
-
-  // Set up screenshot directory
-  const screenshotDir = path.resolve(
-    opts.screenshotDir || ".va-auto-pilot/screenshots"
-  );
-  assertWithinProject(screenshotDir);
-  fs.mkdirSync(screenshotDir, { recursive: true });
-
   const startTime = Date.now();
-
-  // Result structure
   const gateResult = {
     gate: "smoke-test",
     type: "smoke-test",
     passed: false,
-    criticalPath: config.name || "unnamed",
+    criticalPath: "unnamed",
     hangDetected: false,
     crashDetected: false,
     stepResults: [],
     durationMs: 0,
     output: "",
   };
+
+  const failBeforeBrowser = (message) => {
+    gateResult.passed = false;
+    gateResult.output = `Fatal error: ${message}`;
+    gateResult.durationMs = Date.now() - startTime;
+    console.log(JSON.stringify(gateResult, null, 2));
+    process.exit(1);
+  };
+
+  if (!opts.config) {
+    failBeforeBrowser("--config <path> is required");
+  }
+
+  // Load YAML config
+  const configPath = path.resolve(opts.config);
+  if (!fs.existsSync(configPath)) {
+    failBeforeBrowser(`Config file not found: ${configPath}`);
+  }
+
+  // Path traversal protection
+  try {
+    assertWithinProject(configPath);
+  } catch (err) {
+    failBeforeBrowser(err.message);
+  }
+
+  const configText = fs.readFileSync(configPath, "utf8");
+  let config;
+  try {
+    config = parseYaml(configText);
+  } catch (err) {
+    failBeforeBrowser(err.message);
+  }
+
+  // YAML config validation
+  if (!config || typeof config !== "object") {
+    failBeforeBrowser("Invalid YAML config: expected an object");
+  }
+  gateResult.criticalPath = config.name || "unnamed";
+  if (config.steps && !Array.isArray(config.steps)) {
+    failBeforeBrowser("config.steps must be an array");
+  }
+  if (config.launch && typeof config.launch.command !== "string") {
+    failBeforeBrowser("config.launch.command must be a string");
+  }
+
+  // Set up screenshot directory
+  const screenshotDir = path.resolve(
+    opts.screenshotDir || ".va-auto-pilot/screenshots"
+  );
+  try {
+    assertWithinProject(screenshotDir);
+    fs.mkdirSync(screenshotDir, { recursive: true });
+  } catch (err) {
+    failBeforeBrowser(err.message);
+  }
 
   // Launch the application
   let appProcess = null;

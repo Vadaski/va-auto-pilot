@@ -45,8 +45,9 @@ Cockpit evidence must be shown through `humanJudgment.evidence.summary`, which
 compresses journal memory into recent completions, failures, gates, and critical
 decisions.
 Its `gateTrust` field summarizes whether configured gates look trustworthy
-enough for acceptance. Humans see this as risk and evidence-trust context, not
-as raw `qualityGate` mechanics.
+enough for acceptance, including maintenance notes for deliberately disabled
+optional gates such as smoke tests. Humans see this as risk and evidence-trust
+context, not as raw `qualityGate` mechanics.
 The session agent may run `node scripts/auto-pilot.mjs gates audit --json` to
 inspect gate trust and `node scripts/auto-pilot.mjs gates maintain --apply --json`
 to downgrade resolved placeholder adaptive gates from required to advisory.

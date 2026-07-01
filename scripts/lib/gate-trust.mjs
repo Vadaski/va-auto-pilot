@@ -35,6 +35,7 @@ function gateEntry(name, command, { required = true } = {}) {
 }
 
 export function buildGateTrustSummary(qualityGate = {}) {
+  const maintenanceNotes = [];
   const gates = [
     gateEntry("build", qualityGate.buildCommand),
     gateEntry("review", qualityGate.reviewCommand, {
@@ -95,6 +96,12 @@ export function buildGateTrustSummary(qualityGate = {}) {
   if (qualityGate.smokeTest?.enabled === true && (qualityGate.smokeTest.criticalPaths?.length ?? 0) === 0) {
     weakSignals.push("smoke test enabled with no critical paths");
   }
+  if (qualityGate.smokeTest && qualityGate.smokeTest.enabled !== true) {
+    const reason = normalizeCommand(qualityGate.smokeTest.maintenanceReason);
+    if (reason) {
+      maintenanceNotes.push(`smoke: ${reason}`);
+    }
+  }
 
   const status = missingRequired.length > 0
     ? "missing-required-gates"
@@ -110,6 +117,7 @@ export function buildGateTrustSummary(qualityGate = {}) {
     configuredCount: gates.length,
     missingRequired: uniqueStrings(missingRequired),
     weakSignals: uniqueStrings(weakSignals),
+    maintenanceNotes: uniqueStrings(maintenanceNotes),
     confirmed: qualityGate.confirmed === true || Boolean(qualityGate.confirmedAt),
   };
 }

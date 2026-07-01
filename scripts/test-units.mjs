@@ -4570,6 +4570,27 @@ test("gate trust: flags weak required commands and missing smoke command", () =>
   assert.ok(result.weakSignals.some((signal) => signal.includes("no critical paths")));
 });
 
+test("gate trust: explains disabled smoke gate without downgrading trust", () => {
+  const result = buildGateTrustSummary({
+    buildCommand: "npm run check",
+    reviewCommand: "codex review --uncommitted",
+    acceptanceTestCommand: "npm test",
+    smokeTestCommand: "node scripts/smoke-test-runner.mjs --config",
+    smokeTest: {
+      enabled: false,
+      criticalPaths: [],
+      maintenanceReason: "disabled because no smoke critical paths are configured",
+    },
+  });
+
+  assert.equal(result.status, "configured");
+  assert.deepEqual(result.missingRequired, []);
+  assert.deepEqual(result.weakSignals, []);
+  assert.deepEqual(result.maintenanceNotes, [
+    "smoke: disabled because no smoke critical paths are configured",
+  ]);
+});
+
 test("gate maintenance: downgrades only resolved weak adaptive gates", () => {
   const config = {
     qualityGate: {

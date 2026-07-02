@@ -10,6 +10,7 @@
 
 import { pathToFileURL } from "node:url";
 import path from "node:path";
+import fs from "node:fs";
 
 import { runOrchestrateCommand } from "./auto-pilot-orchestrate.mjs";
 import { runCockpit, runObserve } from "./auto-pilot-observe.mjs";
@@ -124,7 +125,22 @@ async function main() {
   process.exit(1);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+function isMainModule() {
+  if (!process.argv[1]) {
+    return false;
+  }
+  const argvPath = path.resolve(process.argv[1]);
+  if (import.meta.url === pathToFileURL(argvPath).href) {
+    return true;
+  }
+  try {
+    return import.meta.url === pathToFileURL(fs.realpathSync(argvPath)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   main().catch((error) => {
     console.error(`auto-pilot error: ${error.message}`);
     process.exit(1);

@@ -783,13 +783,15 @@ flows:
         node "$repo/bin/va-auto-pilot.mjs" cockpit > "$tmpdir/cockpit.txt"
         grep -q "Goal Cockpit" "$tmpdir/cockpit.txt"
         grep -q "Objective: Ship this project to a releasable state" "$tmpdir/cockpit.txt"
+        grep -q "^Progress:" "$tmpdir/cockpit.txt"
         grep -q "^Risk:" "$tmpdir/cockpit.txt"
+        grep -q "^Evidence trust:" "$tmpdir/cockpit.txt"
         grep -q "^Evidence:" "$tmpdir/cockpit.txt"
         grep -q "^Approval:" "$tmpdir/cockpit.txt"
         grep -q "^Manager next:" "$tmpdir/cockpit.txt"
         ! grep -Eiq "sprint-state|run-journal|pitfalls|quality gates|checkpoints|orchestration phases" "$tmpdir/cockpit.txt"
         node "$repo/bin/va-auto-pilot.mjs" cockpit --json \
-          | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); const e=j.cockpit?.humanJudgment?.evidence?.summary; const c=j.cockpit?.nextCommands; process.exit(e?.gateTrust && e?.recoveryStatus && e?.staleStatus && e?.commitReadiness && Array.isArray(c) && c.length > 0 ? 0 : 1)"
+          | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); const e=j.cockpit?.humanJudgment?.evidence?.summary; const c=j.cockpit?.nextCommands; process.exit(j.cockpit?.progress && j.cockpit?.evidenceTrust && e?.gateTrust && e?.recoveryStatus && e?.staleStatus && e?.commitReadiness && Array.isArray(c) && c.length > 0 ? 0 : 1)"
     env:
       ROOT: "."
     assert:

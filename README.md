@@ -179,6 +179,28 @@ is shown to humans, with gate trust compressed into evidence-risk signals.
 Agents can maintain stale placeholder gates with `va-auto-pilot gates audit` and
 `va-auto-pilot gates maintain --apply`.
 
+Default cockpit output starts with the decisions a human needs:
+
+```text
+Goal Cockpit
+Objective: Ship this project to a releasable state (human goal; needs-human-intent-processing)
+Progress: NEEDS MANAGER ACTION - New human intent must be incorporated before worker dispatch. (dispatch blocked)
+Risk: MEDIUM - NO_ACTIVE_RUN: No active orchestration run exists.
+Evidence trust: TRUSTED - Required evidence gates are configured and no evidence risk signals are active.
+Evidence: collecting
+  Gate trust: configured
+  Recent completions: none
+  Recent failures: none
+  Known unresolved problems: none
+  Recovery: recoverable
+  Approval freshness: current
+  Commit readiness: not-ready - No completed worker results are waiting to commit.
+Approval: No human approval needed now. Manager action required: New human intent must be incorporated before worker dispatch.
+Manager next:
+1. Start run: node scripts/auto-pilot.mjs orchestrate init - No active orchestration run exists.
+2. Plan next cycle: node scripts/auto-pilot.mjs orchestrate plan - Pending sprint tasks are available.
+```
+
 Use `va-auto-pilot cockpit --json` when a manager agent or debugger needs the
 machine-readable audit surface and executable `nextCommands`.
 
@@ -263,8 +285,9 @@ No list of files. No sequence of steps. No prescribed approach. You define the d
 - Default path is model-native parallel tool orchestration
 - Replace `review-agent` with your configured reviewer command or wrapper
 
-Humans normally see this through `cockpit --json`; the planner and board
-commands below are internal/debug surfaces for the manager agent:
+Humans normally see this through the default `cockpit` output. Manager agents
+and debuggers can use `cockpit --json`; the planner and board commands below
+are internal/debug surfaces:
 
 ```bash
 node scripts/sprint-board.mjs plan --json --max-parallel 3 > .va-auto-pilot/parallel-plan.json
@@ -284,7 +307,8 @@ npx va-auto-pilot init .
 npm install
 
 # Then capture the goal and inspect the human-facing cockpit
-node scripts/auto-pilot.mjs goal --text "Ship a reliable release" --json
+node scripts/auto-pilot.mjs goal --text "Ship a reliable release"
+node scripts/auto-pilot.mjs cockpit
 
 # A capable CLI agent can then run the governed loop internally
 $va-auto-pilot run one full loop in this repo with highest standards; keep humans on goal, risk, and evidence

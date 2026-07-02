@@ -17,6 +17,8 @@
   },
   "files": [
     "bin/",
+    "scripts/auto-pilot-gates.mjs",
+    "scripts/auto-pilot-goal.mjs",
     "scripts/auto-pilot-intervene.mjs",
     "scripts/auto-pilot-loop.mjs",
     "scripts/auto-pilot-intent.mjs",

@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { spawnSync } from "node:child_process";
 
 const root = process.cwd();
@@ -67,6 +68,8 @@ function validatePackContents() {
   const fileSet = new Set(files);
   const requiredPackedFiles = [
     "bin/va-auto-pilot.mjs",
+    "scripts/auto-pilot-gates.mjs",
+    "scripts/auto-pilot-goal.mjs",
     "scripts/auto-pilot-loop.mjs",
     "scripts/generate-observability-examples.mjs",
     "scripts/sprint-board.mjs",
@@ -141,6 +144,153 @@ function validatePackContents() {
   }
 }
 
+function spawnChecked(command, args, { cwd = root, timeout = 30_000, label = command } = {}) {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: "utf8",
+    timeout,
+  });
+  if (result.status !== 0) {
+    fail(`${label} failed with exit ${result.status}: ${String(result.stderr || result.stdout || "").slice(0, 800)}`);
+    return null;
+  }
+  return result;
+}
+
+function validatePackedQuickStart() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-packed-quick-start-"));
+  try {
+    const pack = spawnChecked("npm", ["pack", "--json", "--pack-destination", tmpDir], {
+      timeout: 60_000,
+      label: "npm pack quick-start artifact",
+    });
+    if (!pack) {
+      return;
+    }
+
+    let packInfo;
+    try {
+      const parsed = JSON.parse(pack.stdout);
+      packInfo = Array.isArray(parsed) ? parsed[0] : parsed;
+    } catch (error) {
+      fail(`Cannot parse npm pack quick-start JSON output: ${error.message}`);
+      return;
+    }
+
+    const tarball = path.join(tmpDir, String(packInfo?.filename || ""));
+    if (!fs.existsSync(tarball)) {
+      fail(`npm pack quick-start tarball was not created: ${tarball}`);
+      return;
+    }
+
+    const installDir = path.join(tmpDir, "installed");
+    fs.mkdirSync(installDir, { recursive: true });
+    if (!spawnChecked("npm", ["install", "--prefix", installDir, "--ignore-scripts", "--no-audit", "--no-fund", tarball], {
+      timeout: 120_000,
+      label: "npm install packed artifact",
+    })) {
+      return;
+    }
+
+    const execVaAutoPilot = (args, options = {}) => spawnChecked("npm", [
+      "--prefix",
+      installDir,
+      "exec",
+      "--",
+      "va-auto-pilot",
+      ...args,
+    ], {
+      cwd: options.cwd ?? tmpDir,
+      timeout: options.timeout ?? 30_000,
+      label: `installed va-auto-pilot ${args.join(" ")}`,
+    });
+
+    const requiredHumanLines = [
+      "Goal Cockpit",
+      "Objective: Ship this project to a releasable state",
+      "Progress:",
+      "Risk:",
+      "Evidence trust:",
+      "Evidence:",
+      "Approval:",
+      "Manager next:",
+    ];
+
+    const assertHumanCockpit = (cockpit, label) => {
+      for (const line of requiredHumanLines) {
+        if (!cockpit.stdout.includes(line)) {
+          fail(`${label} output missing: ${line}; stdout=${JSON.stringify(String(cockpit.stdout ?? "").slice(0, 300))}; stderr=${JSON.stringify(String(cockpit.stderr ?? "").slice(0, 300))}`);
+        }
+      }
+      if (/sprint-state|run-journal|pitfalls|quality gates|checkpoints|orchestration phases/i.test(cockpit.stdout)) {
+        fail(`${label} output leaked internal mechanics`);
+      }
+    };
+
+    const demoDir = path.join(tmpDir, "auto-pilot-demo");
+    if (!execVaAutoPilot(["init", demoDir, "--demo"])) {
+      return;
+    }
+    if (!execVaAutoPilot(["goal", "--text", "Ship this project to a releasable state"], { cwd: demoDir })) {
+      return;
+    }
+    const installedCockpit = execVaAutoPilot(["cockpit"], { cwd: demoDir });
+    if (!installedCockpit) {
+      return;
+    }
+    assertHumanCockpit(installedCockpit, "packed quick-start cockpit");
+
+    if (!spawnChecked("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], {
+      cwd: demoDir,
+      timeout: 120_000,
+      label: "npm install scaffolded demo dependencies",
+    })) {
+      return;
+    }
+
+    const localAutoPilot = path.join(demoDir, "scripts", "auto-pilot.mjs");
+    if (!spawnChecked(process.execPath, [localAutoPilot, "goal", "--text", "Ship this project to a releasable state"], {
+      cwd: demoDir,
+      label: "scaffolded auto-pilot goal",
+    })) {
+      return;
+    }
+    const cockpit = spawnChecked(process.execPath, [localAutoPilot, "cockpit"], {
+      cwd: demoDir,
+      label: "scaffolded auto-pilot cockpit",
+    });
+    if (!cockpit) {
+      return;
+    }
+    assertHumanCockpit(cockpit, "scaffolded auto-pilot cockpit");
+
+    const cockpitJson = spawnChecked(process.execPath, [localAutoPilot, "cockpit", "--json"], {
+      cwd: demoDir,
+      label: "scaffolded auto-pilot cockpit --json",
+    });
+    if (!cockpitJson) {
+      return;
+    }
+    let parsedCockpit;
+    try {
+      parsedCockpit = JSON.parse(cockpitJson.stdout);
+    } catch (error) {
+      fail(`packed quick-start cockpit --json did not parse: ${error.message}`);
+      return;
+    }
+    const cockpitView = parsedCockpit.cockpit ?? {};
+    const evidence = cockpitView.humanJudgment?.evidence?.summary ?? {};
+    if (!cockpitView.progress || !cockpitView.evidenceTrust || !Array.isArray(cockpitView.nextCommands)) {
+      fail("packed quick-start cockpit --json missing progress, evidenceTrust, or nextCommands");
+    }
+    if (!evidence.gateTrust || !evidence.recoveryStatus || !evidence.staleStatus || !evidence.commitReadiness) {
+      fail("packed quick-start cockpit --json missing audit evidence summary fields");
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
 function validateProjectInstall() {
   const requiredProjectFiles = [
     ".va-auto-pilot/config.yaml",
@@ -152,6 +302,8 @@ function validateProjectInstall() {
     "docs/todo/human-board.md",
     "docs/todo/run-journal.md",
     "scripts/auto-pilot.mjs",
+    "scripts/auto-pilot-gates.mjs",
+    "scripts/auto-pilot-goal.mjs",
     "scripts/auto-pilot-loop.mjs",
     "scripts/sprint-board.mjs",
     "scripts/lib/sprint-utils.mjs",
@@ -194,6 +346,8 @@ if (!isSourcePackage) {
     "skills/va-auto-pilot/claude-command.md",
     "scripts/sprint-board.mjs",
     "scripts/auto-pilot.mjs",
+    "scripts/auto-pilot-gates.mjs",
+    "scripts/auto-pilot-goal.mjs",
     "scripts/auto-pilot-orchestrate.mjs",
     "scripts/auto-pilot-observe.mjs",
     "scripts/auto-pilot-intervene.mjs",
@@ -331,6 +485,7 @@ if (fs.existsSync(sprintBoardPath)) {
 
 if (isSourcePackage) {
   validatePackContents();
+  validatePackedQuickStart();
 }
 
 // ---------------------------------------------------------------------------

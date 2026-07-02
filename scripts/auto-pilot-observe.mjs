@@ -330,9 +330,16 @@ function buildEvidenceTrust(gateTrust) {
   const risks = Array.isArray(gateTrust?.evidenceRisks) ? gateTrust.evidenceRisks : [];
   const status = gateTrust?.status ?? "not-configured";
   const trustedProof = status === "configured" && risks.length === 0;
+  const reason = trustedProof
+    ? "Required evidence gates are configured and no evidence risk signals are active."
+    : risks.length > 0
+      ? "Evidence has risk signals; do not treat it as trusted proof."
+      : "Evidence gates are not ready to support trusted proof.";
   return {
     status: trustedProof ? "trusted" : "evidence-risk",
     trustedProof,
+    blocksAcceptance: ["missing-required-gates", "not-configured"].includes(status),
+    reason,
     risks,
   };
 }
@@ -494,6 +501,227 @@ function buildApprovalState({ pendingApproval, uncheckedCount, staleStatus, comm
   };
 }
 
+function buildProgressState({ run, pendingTasks, uncheckedCount, approval, evidenceView, directives, stopCondition, anomalies }) {
+  const staleStatus = evidenceView.staleStatus ?? {};
+  const recovery = evidenceView.recoveryStatus ?? {};
+  const commitReadiness = evidenceView.commitReadiness ?? {};
+
+  if (staleStatus.blocksDispatch) {
+    return {
+      status: "blocked",
+      permitsProgress: false,
+      permitsDispatch: false,
+      blocksDispatch: true,
+      needsApproval: true,
+      needsManagerAction: true,
+      reason: `Previous approval is stale: ${staleStatus.humanReason || "context changed after approval"}.`,
+    };
+  }
+
+  if (recovery.criticalIssues?.length > 0) {
+    return {
+      status: "blocked",
+      permitsProgress: false,
+      permitsDispatch: false,
+      blocksDispatch: true,
+      needsApproval: false,
+      needsManagerAction: true,
+      reason: "Critical recovery issues must be repaired before continuing.",
+    };
+  }
+
+  if (directives?.halt) {
+    return {
+      status: "blocked",
+      permitsProgress: false,
+      permitsDispatch: false,
+      blocksDispatch: true,
+      needsApproval: false,
+      needsManagerAction: true,
+      reason: "A halt directive is active.",
+    };
+  }
+
+  if (stopCondition?.stop) {
+    return {
+      status: "blocked",
+      permitsProgress: false,
+      permitsDispatch: false,
+      blocksDispatch: true,
+      needsApproval: false,
+      needsManagerAction: true,
+      reason: stopCondition.reason || "A stop condition is active.",
+    };
+  }
+
+  if (commitReadiness.status === "invalid-approval") {
+    return {
+      status: "blocked",
+      permitsProgress: false,
+      permitsDispatch: false,
+      blocksDispatch: false,
+      needsApproval: true,
+      needsManagerAction: true,
+      reason: commitReadiness.reason || "Commit approval references incomplete work.",
+    };
+  }
+
+  if (approval?.required) {
+    return {
+      status: "needs-approval",
+      permitsProgress: false,
+      permitsDispatch: false,
+      blocksDispatch: approval.blocksDispatch === true,
+      needsApproval: true,
+      needsManagerAction: true,
+      reason: approval.reason,
+    };
+  }
+
+  if (uncheckedCount > 0 || approval?.managerActionRequired) {
+    return {
+      status: "needs-manager-action",
+      permitsProgress: true,
+      permitsDispatch: false,
+      blocksDispatch: true,
+      needsApproval: false,
+      needsManagerAction: true,
+      reason: approval?.reason || "New human intent must be incorporated before worker dispatch.",
+    };
+  }
+
+  if (anomalies?.some((item) => item.code === "STALE_RUN_PHASE")) {
+    return {
+      status: "needs-manager-action",
+      permitsProgress: true,
+      permitsDispatch: false,
+      blocksDispatch: false,
+      needsApproval: false,
+      needsManagerAction: true,
+      reason: "Stale run state should be closed before starting the next cycle.",
+    };
+  }
+
+  if (!run || isTerminalRunPhase(run.phase)) {
+    if (pendingTasks > 0) {
+      return {
+        status: "ready",
+        permitsProgress: true,
+        permitsDispatch: false,
+        blocksDispatch: false,
+        needsApproval: false,
+        needsManagerAction: true,
+        reason: run ? "Start a new run and plan the pending work." : "Start a run and plan the pending work.",
+      };
+    }
+    return {
+      status: "needs-goal",
+      permitsProgress: false,
+      permitsDispatch: false,
+      blocksDispatch: false,
+      needsApproval: false,
+      needsManagerAction: true,
+      reason: "No objective or pending work is available.",
+    };
+  }
+
+  switch (run.phase) {
+    case "initialized":
+    case "cycle-closed":
+      return {
+        status: pendingTasks > 0 ? "ready-to-plan" : "needs-goal",
+        permitsProgress: pendingTasks > 0,
+        permitsDispatch: false,
+        blocksDispatch: false,
+        needsApproval: false,
+        needsManagerAction: true,
+        reason: pendingTasks > 0 ? "Run is ready for planning." : "Capture a goal before planning.",
+      };
+    case "awaiting-plan-approval":
+    case "plan-reviewed":
+      return {
+        status: "needs-approval",
+        permitsProgress: false,
+        permitsDispatch: false,
+        blocksDispatch: true,
+        needsApproval: true,
+        needsManagerAction: true,
+        reason: approval?.reason || "Plan approval is required before dispatch.",
+      };
+    case "plan-approved":
+      return {
+        status: "ready-to-dispatch",
+        permitsProgress: true,
+        permitsDispatch: true,
+        blocksDispatch: false,
+        needsApproval: false,
+        needsManagerAction: true,
+        reason: "Approved plan can be dispatched.",
+      };
+    case "dispatch-queued":
+    case "running":
+      return {
+        status: "in-progress",
+        permitsProgress: true,
+        permitsDispatch: false,
+        blocksDispatch: false,
+        needsApproval: false,
+        needsManagerAction: true,
+        reason: "Worker results are still settling.",
+      };
+    case "dry-run-preview":
+      return {
+        status: "ready",
+        permitsProgress: true,
+        permitsDispatch: false,
+        blocksDispatch: false,
+        needsApproval: false,
+        needsManagerAction: true,
+        reason: "Previewed work can be run or closed.",
+      };
+    case "awaiting-commit-approval":
+      return {
+        status: "needs-approval",
+        permitsProgress: false,
+        permitsDispatch: false,
+        blocksDispatch: false,
+        needsApproval: true,
+        needsManagerAction: true,
+        reason: approval?.reason || "Commit approval is required before finalizing completed work.",
+      };
+    case "commit-approved":
+      return {
+        status: "ready-to-commit",
+        permitsProgress: true,
+        permitsDispatch: false,
+        blocksDispatch: false,
+        needsApproval: false,
+        needsManagerAction: true,
+        reason: commitReadiness.reason || "Approved results can be committed.",
+      };
+    case "committed":
+      return {
+        status: "needs-manager-action",
+        permitsProgress: true,
+        permitsDispatch: false,
+        blocksDispatch: false,
+        needsApproval: false,
+        needsManagerAction: true,
+        reason: "Committed work needs journal closure.",
+      };
+    default:
+      return {
+        status: "needs-manager-action",
+        permitsProgress: true,
+        permitsDispatch: false,
+        blocksDispatch: false,
+        needsApproval: false,
+        needsManagerAction: true,
+        reason: `Run is in ${run.phase || "unknown"} state.`,
+      };
+  }
+}
+
 function buildEvidenceStatus({ evidenceView, pendingTasks, phase }) {
   if (evidenceView.staleStatus?.blocksDispatch || evidenceView.recoveryStatus?.criticalIssues?.length > 0) {
     return "blocked";
@@ -548,11 +776,22 @@ export function buildCockpit(snapshot) {
     staleStatus: evidenceView.staleStatus,
     commitReadiness: evidenceView.commitReadiness,
   });
+  const progress = buildProgressState({
+    run: snapshot.run,
+    pendingTasks,
+    uncheckedCount: unchecked.length,
+    approval,
+    evidenceView,
+    directives: snapshot.directives,
+    stopCondition: snapshot.sprint?.stopCondition,
+    anomalies: snapshot.anomalies ?? [],
+  });
   const evidenceStatus = buildEvidenceStatus({
     evidenceView,
     pendingTasks,
     phase,
   });
+  const evidenceTrust = evidenceView.trust;
 
   return {
     schemaVersion: 1,
@@ -580,6 +819,7 @@ export function buildCockpit(snapshot) {
       },
       risk: {
         level: riskLevel,
+        progress,
         question: riskLevel === "high"
           ? "Risk is above the normal operating range; should the agent pause, replan, or continue with explicit approval?"
           : "Is the current risk level acceptable?",
@@ -598,6 +838,7 @@ export function buildCockpit(snapshot) {
       },
       evidence: {
         status: evidenceStatus,
+        trust: evidenceTrust,
         question: phase === "awaiting-commit-approval"
           ? "Is the completion evidence trustworthy enough to approve commit?"
           : "Is more evidence needed before accepting the current direction?",
@@ -606,6 +847,8 @@ export function buildCockpit(snapshot) {
       },
     },
     pendingApproval,
+    progress,
+    evidenceTrust,
     approval,
     recommendedActions: snapshot.recommendedActions ?? [],
     nextCommands: snapshot.nextCommands ?? [],
@@ -998,6 +1241,26 @@ function formatApproval(approval) {
   return approval?.reason ?? "No approval is currently required.";
 }
 
+function displayStatus(value) {
+  return cleanOneLine(value || "unknown").replace(/-/g, " ").toUpperCase();
+}
+
+function formatProgress(progress) {
+  const reason = cleanOneLine(progress?.reason);
+  const dispatch = progress?.permitsDispatch
+    ? "dispatch permitted"
+    : progress?.blocksDispatch
+      ? "dispatch blocked"
+      : "dispatch not active";
+  return `${displayStatus(progress?.status)}${reason ? ` - ${reason}` : ""} (${dispatch})`;
+}
+
+function formatEvidenceTrust(trust) {
+  const riskCount = Array.isArray(trust?.risks) ? trust.risks.length : 0;
+  const suffix = riskCount > 0 ? `; ${riskCount} risk signal(s)` : "";
+  return `${displayStatus(trust?.status)} - ${trust?.reason ?? "Evidence trust is unknown."}${suffix}`;
+}
+
 function humanizeDisplaySignal(value) {
   return cleanOneLine(value)
     .replace(/sprint-state changed since approve-plan/gi, "work items changed after approval")
@@ -1013,19 +1276,22 @@ export function formatCockpitHuman(cockpit) {
   const risk = cockpit.humanJudgment?.risk ?? {};
   const evidence = cockpit.humanJudgment?.evidence ?? {};
   const summary = evidence.summary ?? {};
-  const trust = summary.trust ?? {};
   const gateTrust = summary.gateTrust ?? {};
   const staleStatus = summary.staleStatus ?? {};
   const recovery = summary.recoveryStatus ?? {};
   const commitReadiness = summary.commitReadiness ?? {};
+  const progress = cockpit.progress ?? risk.progress ?? {};
+  const evidenceTrust = cockpit.evidenceTrust ?? evidence.trust ?? summary.trust ?? {};
   const approval = cockpit.approval ?? {};
   const nextCommands = Array.isArray(cockpit.nextCommands) ? cockpit.nextCommands : [];
 
   const lines = [
     "Goal Cockpit",
     `Objective: ${goal.objective ?? "No objective captured yet"} (${goal.source ?? "unknown"}; ${goal.status ?? "unknown"})`,
+    `Progress: ${formatProgress(progress)}`,
     `Risk: ${String(risk.level ?? "unknown").toUpperCase()}${risk.signals?.length ? ` - ${shortList(risk.signals, { limit: 2, map: humanizeDisplaySignal })}` : ""}`,
-    `Evidence: ${evidence.status ?? "unknown"}; trust=${trust.status ?? gateTrust.status ?? "unknown"}`,
+    `Evidence trust: ${formatEvidenceTrust(evidenceTrust)}`,
+    `Evidence: ${evidence.status ?? "unknown"}`,
     `  Gate trust: ${gateTrust.status ?? "unknown"}${(gateTrust.evidenceRisks ?? []).length > 0 ? ` (${gateTrust.evidenceRisks.length} risk signal(s))` : ""}`,
     `  Recent completions: ${shortList(summary.completions)}`,
     `  Recent failures: ${shortList(summary.failures)}`,

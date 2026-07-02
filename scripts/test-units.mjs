@@ -6075,6 +6075,22 @@ test("auto-pilot observe: writes snapshot.json", () => {
   assert.ok(payload.snapshot.cockpit.hiddenMechanics.includes("sprint-state"));
 });
 
+test("auto-pilot CLI: runs when invoked through a symlinked script path", (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-autopilot-symlink-"));
+  const repoLink = path.join(tmpDir, "repo-link");
+  try {
+    fs.symlinkSync(process.cwd(), repoLink, "dir");
+  } catch (error) {
+    t.skip(`symlink unavailable: ${error.message}`);
+    return;
+  }
+
+  const script = path.join(repoLink, "scripts", "auto-pilot.mjs");
+  const result = spawnSync(process.execPath, [script, "--help"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /auto-pilot/);
+});
+
 test("auto-pilot intent: appends human intent and cockpit exposes goal judgment", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-intent-"));
   const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
@@ -6188,6 +6204,13 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
   assert.ok(evidence.summary.recoveryStatus);
   assert.ok(evidence.summary.staleStatus);
   assert.ok(evidence.summary.commitReadiness);
+  assert.equal(payload.cockpit.progress.status, "ready-to-plan");
+  assert.equal(payload.cockpit.progress.permitsProgress, true);
+  assert.equal(payload.cockpit.progress.permitsDispatch, false);
+  assert.equal(payload.cockpit.evidenceTrust.status, "evidence-risk");
+  assert.equal(payload.cockpit.evidenceTrust.trustedProof, false);
+  assert.equal(payload.cockpit.evidenceTrust.blocksAcceptance, false);
+  assert.equal(evidence.trust.status, "evidence-risk");
   assert.equal(payload.cockpit.approval.blocksDispatch, false);
   assert.ok(payload.cockpit.internalAudit);
   assert.ok(payload.cockpit.humanJudgment.risk.signals.some((item) => item.includes("gate trust")));
@@ -6212,7 +6235,9 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
   assert.equal(human.status, 0, human.stderr);
   assert.match(human.stdout, /Goal Cockpit/);
   assert.match(human.stdout, /Objective:/);
+  assert.match(human.stdout, /Progress:/);
   assert.match(human.stdout, /Risk:/);
+  assert.match(human.stdout, /Evidence trust:/);
   assert.match(human.stdout, /Evidence:/);
   assert.match(human.stdout, /Approval:/);
   assert.match(human.stdout, /Manager next:/);
@@ -6257,6 +6282,9 @@ test("auto-pilot cockpit: stale approval blocks dispatch until reapproved", () =
   assert.equal(cockpitView.approval.required, true);
   assert.equal(cockpitView.approval.type, "plan-reapproval");
   assert.equal(cockpitView.approval.blocksDispatch, true);
+  assert.equal(cockpitView.progress.status, "blocked");
+  assert.equal(cockpitView.progress.permitsProgress, false);
+  assert.equal(cockpitView.progress.blocksDispatch, true);
   assert.equal(cockpitView.humanJudgment.risk.level, "high");
   assert.equal(cockpitView.humanJudgment.evidence.summary.staleStatus.blocksDispatch, true);
   assert.match(cockpitView.humanJudgment.evidence.summary.staleStatus.humanReason, /human intent changed after approval/);
@@ -6312,9 +6340,51 @@ test("auto-pilot cockpit: invalid commit approval does not recommend commit", ()
   assert.equal(cockpit.status, 0, cockpit.stderr);
   const payload = JSON.parse(cockpit.stdout);
   assert.equal(payload.cockpit.humanJudgment.evidence.summary.commitReadiness.status, "invalid-approval");
+  assert.equal(payload.cockpit.progress.status, "blocked");
   assert.equal(payload.cockpit.humanJudgment.risk.level, "high");
   assert.equal(payload.cockpit.nextCommands.some((item) => item.argv.includes("commit") && !item.argv.includes("approve-commit")), false);
   assert.ok(payload.cockpit.nextCommands.some((item) => item.argv.includes("approve-commit")));
+});
+
+test("auto-pilot cockpit: quick start human output matches golden first screen", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-cockpit-golden-"));
+  const demoDir = path.join(tmpDir, "auto-pilot-demo");
+  const bin = path.join(process.cwd(), "bin", "va-auto-pilot.mjs");
+
+  const init = spawnSync(process.execPath, [bin, "init", demoDir, "--demo"], { encoding: "utf8" });
+  assert.equal(init.status, 0, init.stderr);
+  const goal = spawnSync(process.execPath, [bin, "goal", "--text", "Ship this project to a releasable state"], {
+    cwd: demoDir,
+    encoding: "utf8",
+  });
+  assert.equal(goal.status, 0, goal.stderr);
+  const cockpit = spawnSync(process.execPath, [bin, "cockpit"], {
+    cwd: demoDir,
+    encoding: "utf8",
+  });
+  assert.equal(cockpit.status, 0, cockpit.stderr);
+  assert.equal(cockpit.stdout, [
+    "Goal Cockpit",
+    "Objective: Ship this project to a releasable state (human goal; needs-human-intent-processing)",
+    "Progress: NEEDS MANAGER ACTION - New human intent must be incorporated before worker dispatch. (dispatch blocked)",
+    "Risk: MEDIUM - NO_ACTIVE_RUN: No active orchestration run exists.",
+    "Evidence trust: TRUSTED - Required evidence gates are configured and no evidence risk signals are active.",
+    "Evidence: collecting",
+    "  Gate trust: configured",
+    "  Recent completions: none",
+    "  Recent failures: none",
+    "  Known unresolved problems: none",
+    "  Recovery: recoverable",
+    "  Approval freshness: current",
+    "  Commit readiness: not-ready - No completed worker results are waiting to commit.",
+    "Approval: No human approval needed now. Manager action required: New human intent must be incorporated before worker dispatch.",
+    "Manager next:",
+    "1. Start run: node scripts/auto-pilot.mjs orchestrate init - No active orchestration run exists.",
+    "2. Plan next cycle: node scripts/auto-pilot.mjs orchestrate plan - Pending sprint tasks are available.",
+    "",
+    "",
+  ].join("\n"));
+  assert.doesNotMatch(cockpit.stdout, /sprint-state|run-journal|pitfalls|quality gates|checkpoints|orchestration phases/i);
 });
 
 test("auto-pilot cockpit: sprint-derived objective follows execution priority", () => {

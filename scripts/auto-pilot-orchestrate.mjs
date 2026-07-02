@@ -4,7 +4,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { readQualityGateConfig } from "./lib/sprint-utils.mjs";
-import { readHumanBoardInstructions, resolveHumanBoardPath } from "./lib/human-board.mjs";
 import { ColonyBridge } from "./lib/colony-bridge.mjs";
 import {
   buildOrchestrationOpts,
@@ -179,12 +178,6 @@ async function validatePreDispatch(run, opts) {
     fail(opts, "STALE_CONTEXT", stale.reason, { checkpoint }, 2);
   }
 
-  const boardPath = resolveHumanBoardPath(opts.stateFile);
-  const unchecked = readHumanBoardInstructions(boardPath);
-  if (unchecked.length > 0) {
-    fail(opts, "HUMAN_BOARD_BLOCKED", `human-board has ${unchecked.length} unchecked instruction(s)`, { unchecked }, 2);
-  }
-
   if (run.locks?.executorPid && isProcessAlive(run.locks.executorPid)) {
     fail(opts, "RUN_LOCKED", `another executor pid is active: ${run.locks.executorPid}`, {}, 2);
   }
@@ -295,13 +288,15 @@ async function orchestrateRecover(opts) {
   });
   const application = run ? await applyRecoveryPlan(plan, run, tracksDoc, opts) : { applied: false, mutations: [] };
   const snapshot = await refreshSnapshot(opts);
+  const recovered = application.applied && application.mutations.length > 0;
+  const ok = plan.ok || recovered;
   return emitResult(opts, {
-    ok: plan.ok,
+    ok,
     action: "recover",
     applied: application.applied,
     plan,
     snapshot,
-  }, plan.ok ? 0 : 1);
+  }, ok ? 0 : 1);
 }
 
 async function initRun(opts) {

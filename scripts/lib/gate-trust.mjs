@@ -67,6 +67,7 @@ export function buildGateTrustSummary(qualityGate = {}) {
   const requiredGates = gates.filter((gate) => gate.required);
   const weakSignals = [];
   const missingRequired = [];
+  const advisorySignals = [];
 
   if (!normalizeCommand(qualityGate.buildCommand)) {
     missingRequired.push("build");
@@ -87,6 +88,11 @@ export function buildGateTrustSummary(qualityGate = {}) {
   const weakRequiredGates = requiredGates.filter((gate) => isWeakGateCommand(gate.command));
   for (const gateName of uniqueStrings(weakRequiredGates.map((item) => item.name)).slice(0, 5)) {
     weakSignals.push(`${gateName}: weak placeholder command`);
+  }
+
+  const advisoryGates = gates.filter((gate) => !gate.required);
+  for (const gateName of uniqueStrings(advisoryGates.map((item) => item.name)).slice(0, 5)) {
+    advisorySignals.push(`${gateName}: advisory gate is evidence risk, not trusted proof`);
   }
 
   if (qualityGate.allowAdvisoryReview === true || qualityGate.reviewRequired === false || qualityGate.review?.required === false) {
@@ -117,6 +123,12 @@ export function buildGateTrustSummary(qualityGate = {}) {
     configuredCount: gates.length,
     missingRequired: uniqueStrings(missingRequired),
     weakSignals: uniqueStrings(weakSignals),
+    advisorySignals: uniqueStrings(advisorySignals),
+    evidenceRisks: uniqueStrings([
+      ...missingRequired.map((name) => `${name}: missing required evidence gate`),
+      ...weakSignals,
+      ...advisorySignals,
+    ]),
     maintenanceNotes: uniqueStrings(maintenanceNotes),
     confirmed: qualityGate.confirmed === true || Boolean(qualityGate.confirmedAt),
   };

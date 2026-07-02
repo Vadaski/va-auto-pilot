@@ -534,14 +534,14 @@ function runInit(parsed) {
 
   if (!dryRun) {
     console.log("\nNext steps:");
-    console.log("1. Run npm install");
-    console.log('2. Capture the first objective with node scripts/auto-pilot.mjs goal --text "..."');
-    console.log("3. Inspect the control summary with node scripts/auto-pilot.mjs cockpit --json");
+    console.log('1. Capture the first objective with va-auto-pilot goal --text "..."');
+    console.log("2. Open the human cockpit with va-auto-pilot cockpit");
+    console.log("3. Use va-auto-pilot cockpit --json for agent/debug auditability");
     if (demo) {
       console.log(`4. Run ${DEMO_GATE_COMMAND}`);
-      console.log("5. Start orchestrated mode with node scripts/auto-pilot.mjs orchestrate init");
+      console.log("5. Start governed execution with va-auto-pilot orchestrate init");
     } else {
-      console.log("4. Start orchestrated mode with node scripts/auto-pilot.mjs orchestrate init");
+      console.log("4. Start governed execution with va-auto-pilot orchestrate init");
       console.log("5. Run your first acceptance flow with scripts/test-runner.ts");
       console.log(
         "6. Keep humans on goal, risk, and evidence decisions; leave sprint-state, journal, pitfalls, and phases to the agent"

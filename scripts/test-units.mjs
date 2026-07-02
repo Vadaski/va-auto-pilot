@@ -4586,6 +4586,8 @@ test("gate trust: explains disabled smoke gate without downgrading trust", () =>
   assert.equal(result.status, "configured");
   assert.deepEqual(result.missingRequired, []);
   assert.deepEqual(result.weakSignals, []);
+  assert.ok(result.advisorySignals.some((signal) => signal.includes("smoke")));
+  assert.ok(result.evidenceRisks.some((signal) => signal.includes("advisory gate is evidence risk")));
   assert.deepEqual(result.maintenanceNotes, [
     "smoke: disabled because no smoke critical paths are configured",
   ]);
@@ -6180,6 +6182,14 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
   assert.equal(evidence.summary.gateTrust.status, "needs-agent-attention");
   assert.ok(evidence.summary.gateTrust.weakSignals.some((item) => item.includes("weak placeholder command")));
   assert.ok(evidence.summary.gateTrust.weakSignals.some((item) => item.includes("no critical paths")));
+  assert.equal(evidence.summary.trust.trustedProof, false);
+  assert.ok(evidence.summary.gateTrust.evidenceRisks.some((item) => item.includes("weak placeholder command")));
+  assert.ok(Array.isArray(evidence.summary.unresolvedPitfalls));
+  assert.ok(evidence.summary.recoveryStatus);
+  assert.ok(evidence.summary.staleStatus);
+  assert.ok(evidence.summary.commitReadiness);
+  assert.equal(payload.cockpit.approval.blocksDispatch, false);
+  assert.ok(payload.cockpit.internalAudit);
   assert.ok(payload.cockpit.humanJudgment.risk.signals.some((item) => item.includes("gate trust")));
   assert.ok(evidence.signals.some((item) => item.includes("Dispatch failed")));
   assert.ok(evidence.signals.some((item) => item.includes("review gate PASS")));
@@ -6190,6 +6200,153 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
   ));
   assert.ok(payload.cockpit.nextCommands.some((item) => item.argv.includes("orchestrate")));
   assert.ok(!Object.hasOwn(payload, "snapshot"));
+
+  const human = spawnSync(process.execPath, [
+    script,
+    "cockpit",
+    "--state-file",
+    stateFile,
+    "--journal-file",
+    journalFile,
+  ], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(human.status, 0, human.stderr);
+  assert.match(human.stdout, /Goal Cockpit/);
+  assert.match(human.stdout, /Objective:/);
+  assert.match(human.stdout, /Risk:/);
+  assert.match(human.stdout, /Evidence:/);
+  assert.match(human.stdout, /Approval:/);
+  assert.match(human.stdout, /Manager next:/);
+  assert.doesNotMatch(human.stdout, /sprint-state|run-journal|pitfalls|quality gates|checkpoints|orchestration phases/i);
+});
+
+test("auto-pilot cockpit: stale approval blocks dispatch until reapproved", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-cockpit-stale-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  const journalFile = path.join(tmpDir, "docs", "todo", "run-journal.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    tasks: [{ id: "AP-001", title: "governed task", priority: "P1", state: "Backlog", dependsOn: [] }],
+  }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n", "utf8");
+
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  spawnSync(process.execPath, [script, "orchestrate", "init", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
+  spawnSync(process.execPath, [script, "orchestrate", "plan", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
+  spawnSync(process.execPath, [script, "orchestrate", "review-plan", "--dry-run", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
+  const approve = spawnSync(process.execPath, [script, "orchestrate", "approve-plan", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(approve.status, 0, approve.stderr);
+
+  fs.appendFileSync(humanBoard, "- [ ] [objective] Re-check the goal before dispatch _(source: human, 2026-07-01T00:00:00.000Z)_\n", "utf8");
+  const cockpit = spawnSync(process.execPath, [
+    script,
+    "cockpit",
+    "--json",
+    "--state-file",
+    stateFile,
+    "--journal-file",
+    journalFile,
+  ], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(cockpit.status, 0, cockpit.stderr);
+  const payload = JSON.parse(cockpit.stdout);
+  const cockpitView = payload.cockpit;
+  assert.equal(cockpitView.pendingApproval, "plan-reapproval");
+  assert.equal(cockpitView.approval.required, true);
+  assert.equal(cockpitView.approval.type, "plan-reapproval");
+  assert.equal(cockpitView.approval.blocksDispatch, true);
+  assert.equal(cockpitView.humanJudgment.risk.level, "high");
+  assert.equal(cockpitView.humanJudgment.evidence.summary.staleStatus.blocksDispatch, true);
+  assert.match(cockpitView.humanJudgment.evidence.summary.staleStatus.humanReason, /human intent changed after approval/);
+  assert.ok(cockpitView.nextCommands.some((item) => item.argv.includes("recover") && item.argv.includes("--apply")));
+  assert.ok(cockpitView.nextCommands.some((item) => item.argv.includes("review-plan")));
+  assert.ok(cockpitView.nextCommands.some((item) => item.argv.includes("approve-plan")));
+  assert.equal(cockpitView.nextCommands.some((item) => item.argv.includes("dispatch")), false);
+
+  const recover = spawnSync(process.execPath, [script, "orchestrate", "recover", "--apply", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(recover.status, 0, recover.stderr);
+  const review = spawnSync(process.execPath, [script, "orchestrate", "review-plan", "--dry-run", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(review.status, 0, review.stderr);
+  const reapprove = spawnSync(process.execPath, [script, "orchestrate", "approve-plan", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(reapprove.status, 0, reapprove.stderr);
+  const dispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(dispatch.status, 0, dispatch.stderr);
+});
+
+test("auto-pilot cockpit: invalid commit approval does not recommend commit", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-cockpit-invalid-commit-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const orchestrationDir = path.join(tmpDir, ".va-auto-pilot", "orchestration");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  const journalFile = path.join(tmpDir, "docs", "todo", "run-journal.md");
+  fs.mkdirSync(orchestrationDir, { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    tasks: [{ id: "AP-001", title: "not done", priority: "P1", state: "Backlog", dependsOn: [] }],
+  }), "utf8");
+  fs.writeFileSync(path.join(orchestrationDir, "run.json"), JSON.stringify({
+    schemaVersion: 1,
+    runId: "run-invalid-commit",
+    phase: "commit-approved",
+    candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
+    approvedPlanId: "plan-x",
+    approvedCommitTasks: ["AP-001"],
+    locks: { executorPid: null },
+  }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n", "utf8");
+
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  const cockpit = spawnSync(process.execPath, [
+    script,
+    "cockpit",
+    "--json",
+    "--state-file",
+    stateFile,
+    "--journal-file",
+    journalFile,
+  ], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(cockpit.status, 0, cockpit.stderr);
+  const payload = JSON.parse(cockpit.stdout);
+  assert.equal(payload.cockpit.humanJudgment.evidence.summary.commitReadiness.status, "invalid-approval");
+  assert.equal(payload.cockpit.humanJudgment.risk.level, "high");
+  assert.equal(payload.cockpit.nextCommands.some((item) => item.argv.includes("commit") && !item.argv.includes("approve-commit")), false);
+  assert.ok(payload.cockpit.nextCommands.some((item) => item.argv.includes("approve-commit")));
+});
+
+test("auto-pilot cockpit: sprint-derived objective follows execution priority", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-cockpit-objective-order-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  const journalFile = path.join(tmpDir, "docs", "todo", "run-journal.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    tasks: [
+      { id: "AP-001", title: "later backlog", priority: "P0", state: "Backlog", dependsOn: [], createdAt: "2026-07-01" },
+      { id: "AP-002", title: "fix failing gate first", priority: "P3", state: "Failed", dependsOn: [], createdAt: "2026-07-02" },
+    ],
+  }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n", "utf8");
+
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  const cockpit = spawnSync(process.execPath, [
+    script,
+    "cockpit",
+    "--json",
+    "--state-file",
+    stateFile,
+    "--journal-file",
+    journalFile,
+  ], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(cockpit.status, 0, cockpit.stderr);
+  const payload = JSON.parse(cockpit.stdout);
+  assert.match(payload.cockpit.humanJudgment.goal.objective, /AP-002 - fix failing gate first/);
 });
 
 test("auto-pilot gates maintain: applies resolved weak gate downgrade", () => {

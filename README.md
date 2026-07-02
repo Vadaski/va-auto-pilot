@@ -161,11 +161,13 @@ node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
 rm -rf "$tmp"
 ```
 
-Capture the first goal through the agent-facing intent channel, then inspect
-the cockpit summary:
+Try the default human workflow:
 
 ```bash
-node scripts/auto-pilot.mjs goal --text "Ship this project to a releasable state" --json
+va-auto-pilot init ./auto-pilot-demo --demo
+cd ./auto-pilot-demo
+va-auto-pilot goal --text "Ship this project to a releasable state"
+va-auto-pilot cockpit
 ```
 
 The cockpit is the daily control surface. It keeps human attention on whether
@@ -176,6 +178,9 @@ is summarized into recent completions, failures, gates, and decisions before it
 is shown to humans, with gate trust compressed into evidence-risk signals.
 Agents can maintain stale placeholder gates with `va-auto-pilot gates audit` and
 `va-auto-pilot gates maintain --apply`.
+
+Use `va-auto-pilot cockpit --json` when a manager agent or debugger needs the
+machine-readable audit surface and executable `nextCommands`.
 
 ---
 

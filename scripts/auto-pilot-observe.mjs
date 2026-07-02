@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 import { buildGateTrustSummary } from "./lib/gate-trust.mjs";
 import { readHumanBoardInstructions, resolveHumanBoardPath } from "./lib/human-board.mjs";
@@ -7,7 +8,9 @@ import { buildOrchestrationOpts, emitResult, sprintBoardExec, tryParseJson } fro
 import { readQualityGateConfig } from "./lib/sprint-utils.mjs";
 import {
   hasHaltDirective,
+  buildRecoveryPlan,
   isTerminalRunPhase,
+  isCheckpointStale,
   readCheckpoint,
   readDirectives,
   readRun,
@@ -38,6 +41,210 @@ function uniqueStrings(items) {
 
 function matchesAny(text, patterns) {
   return patterns.some((pattern) => pattern.test(text));
+}
+
+const DISPATCH_APPROVAL_PHASES = new Set(["plan-approved", "dispatch-queued", "running"]);
+const TASK_STATE_ORDER = new Map([
+  ["Failed", 0],
+  ["Testing", 1],
+  ["Review", 2],
+  ["In Progress", 3],
+  ["Backlog", 4],
+]);
+const TASK_PRIORITY_WEIGHT = { P0: 0, P1: 1, P2: 2, P3: 3 };
+
+function cleanOneLine(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function parseIntentText(value) {
+  const text = cleanOneLine(value).replace(/^\[[ xX]\]\s+/, "");
+  const match = text.match(/^\[([a-z][a-z0-9-]*)\]\s+(.+?)(?:\s+_\(.+\)_\s*)?$/);
+  if (!match) {
+    return { type: "", text };
+  }
+  return {
+    type: match[1],
+    text: cleanOneLine(match[2]),
+  };
+}
+
+function summarizeTask(task) {
+  const id = cleanOneLine(task?.id);
+  const title = cleanOneLine(task?.title);
+  const state = cleanOneLine(task?.state);
+  const priority = cleanOneLine(task?.priority);
+  return {
+    id,
+    title,
+    state,
+    priority,
+    label: [id, title].filter(Boolean).join(" - "),
+  };
+}
+
+function compareActiveTasks(a, b) {
+  const stateA = TASK_STATE_ORDER.get(a?.state) ?? 99;
+  const stateB = TASK_STATE_ORDER.get(b?.state) ?? 99;
+  if (stateA !== stateB) {
+    return stateA - stateB;
+  }
+  const priorityA = TASK_PRIORITY_WEIGHT[a?.priority] ?? 99;
+  const priorityB = TASK_PRIORITY_WEIGHT[b?.priority] ?? 99;
+  if (priorityA !== priorityB) {
+    return priorityA - priorityB;
+  }
+  const createdA = cleanOneLine(a?.createdAt);
+  const createdB = cleanOneLine(b?.createdAt);
+  if (createdA !== createdB) {
+    return createdA.localeCompare(createdB);
+  }
+  return cleanOneLine(a?.id).localeCompare(cleanOneLine(b?.id));
+}
+
+function buildActiveTaskSummary(state) {
+  return (Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((task) => task?.state !== "Done")
+    .sort(compareActiveTasks)
+    .map(summarizeTask)
+    .slice(0, 5);
+}
+
+function humanizeStaleReason(reason) {
+  const normalized = cleanOneLine(reason);
+  if (!normalized) {
+    return "";
+  }
+  if (/sprint-state/i.test(normalized)) {
+    return "work items changed after approval";
+  }
+  if (/human intent|human-board/i.test(normalized)) {
+    return "human intent changed after approval";
+  }
+  if (/git HEAD/i.test(normalized)) {
+    return "code changed after approval";
+  }
+  if (/no checkpoint/i.test(normalized)) {
+    return "the approval record is missing";
+  }
+  return normalized;
+}
+
+function buildCheckpointStatus(run, checkpoint, opts) {
+  if (checkpoint) {
+    const status = isCheckpointStale(checkpoint, { stateFile: opts.stateFile, workDir: opts.workDir });
+    return {
+      exists: true,
+      stale: status.stale,
+      reason: status.reason,
+      humanReason: humanizeStaleReason(status.reason),
+      blocksDispatch: status.stale && DISPATCH_APPROVAL_PHASES.has(run?.phase),
+      requiresReapproval: status.stale && DISPATCH_APPROVAL_PHASES.has(run?.phase),
+    };
+  }
+
+  const missingApprovalRecord = Boolean(run?.approvedPlanId) && DISPATCH_APPROVAL_PHASES.has(run?.phase);
+  const reason = missingApprovalRecord ? "no checkpoint" : "";
+  return {
+    exists: false,
+    stale: missingApprovalRecord,
+    reason,
+    humanReason: humanizeStaleReason(reason),
+    blocksDispatch: missingApprovalRecord,
+    requiresReapproval: missingApprovalRecord,
+  };
+}
+
+function readGitStatus(workDir) {
+  try {
+    const stdout = execFileSync("git", ["status", "--porcelain"], {
+      cwd: workDir,
+      encoding: "utf8",
+      timeout: 10_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const files = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    return {
+      available: true,
+      clean: files.length === 0,
+      dirtyCount: files.length,
+      dirtyFiles: files.slice(0, 10),
+    };
+  } catch {
+    return {
+      available: false,
+      clean: false,
+      dirtyCount: null,
+      dirtyFiles: [],
+    };
+  }
+}
+
+function planTaskIds(plan) {
+  if (!plan) {
+    return [];
+  }
+  return [plan.primaryTaskId, ...(Array.isArray(plan.parallelTracks) ? plan.parallelTracks : [])]
+    .filter(Boolean);
+}
+
+function buildCommitReadiness({ run, state, trackList, workDir }) {
+  const phase = run?.phase ?? "idle";
+  const tasks = Array.isArray(state.tasks) ? state.tasks : [];
+  const plannedTaskIds = planTaskIds(run?.candidatePlan);
+  const plannedDoneTaskIds = tasks
+    .filter((task) => plannedTaskIds.includes(task.id) && task.state === "Done")
+    .map((task) => task.id);
+  const approvedCommitTasks = Array.isArray(run?.approvedCommitTasks) ? run.approvedCommitTasks : [];
+  const invalidApprovedTasks = approvedCommitTasks.filter((taskId) => {
+    const task = tasks.find((item) => item.id === taskId);
+    return !task || task.state !== "Done";
+  });
+  const unsettledTracks = (Array.isArray(trackList) ? trackList : [])
+    .filter((track) => ["queued", "running"].includes(track?.state))
+    .map((track) => track.taskId)
+    .filter(Boolean);
+  const git = readGitStatus(workDir);
+
+  let status = "not-ready";
+  let ready = false;
+  let approvalRequired = false;
+  let reason = "No completed worker results are waiting to commit.";
+
+  if (phase === "awaiting-commit-approval") {
+    status = "needs-approval";
+    approvalRequired = true;
+    reason = "Completed work needs an evidence trust check before commit.";
+  } else if (phase === "commit-approved") {
+    status = invalidApprovedTasks.length > 0 ? "invalid-approval" : "ready-to-commit";
+    ready = invalidApprovedTasks.length === 0;
+    reason = ready
+      ? "Commit approval is present for completed work."
+      : "Commit approval includes tasks that are not complete.";
+  } else if (phase === "committed") {
+    status = "committed";
+    ready = false;
+    reason = "The approved results have already been committed.";
+  } else if (unsettledTracks.length > 0) {
+    status = "waiting-for-workers";
+    reason = "Worker results are still settling.";
+  } else if (plannedDoneTaskIds.length > 0) {
+    status = "done-work-waiting";
+    approvalRequired = true;
+    reason = "Completed planned work is present but commit approval is not active.";
+  }
+
+  return {
+    status,
+    ready,
+    approvalRequired,
+    reason,
+    candidateTaskIds: plannedDoneTaskIds,
+    approvedTaskIds: approvedCommitTasks,
+    invalidApprovedTaskIds: invalidApprovedTasks,
+    unsettledTaskIds: unsettledTracks,
+    git,
+  };
 }
 
 function buildEvidenceSummary(entries) {
@@ -98,7 +305,98 @@ function buildEvidenceSummary(entries) {
   };
 }
 
+function summarizePitfalls(pitfalls) {
+  return (Array.isArray(pitfalls) ? pitfalls : []).map((pitfall) => ({
+    id: cleanOneLine(pitfall?.id),
+    taskId: cleanOneLine(pitfall?.taskId),
+    failureType: cleanOneLine(pitfall?.failureType),
+    hypothesis: cleanOneLine(pitfall?.hypothesis),
+    attempted: cleanOneLine(pitfall?.attempted),
+  })).slice(0, 5);
+}
+
+function buildStaleStatus(snapshot) {
+  const checkpointStatus = snapshot.checkpointStatus ?? {};
+  return {
+    stale: checkpointStatus.stale === true,
+    blocksDispatch: checkpointStatus.blocksDispatch === true,
+    requiresReapproval: checkpointStatus.requiresReapproval === true,
+    reason: checkpointStatus.reason ?? "",
+    humanReason: checkpointStatus.humanReason ?? humanizeStaleReason(checkpointStatus.reason),
+  };
+}
+
+function buildEvidenceTrust(gateTrust) {
+  const risks = Array.isArray(gateTrust?.evidenceRisks) ? gateTrust.evidenceRisks : [];
+  const status = gateTrust?.status ?? "not-configured";
+  const trustedProof = status === "configured" && risks.length === 0;
+  return {
+    status: trustedProof ? "trusted" : "evidence-risk",
+    trustedProof,
+    risks,
+  };
+}
+
+function buildEvidenceView(snapshot, evidenceSummary) {
+  const gateTrust = snapshot.gateTrust ?? buildGateTrustSummary({});
+  const unresolvedPitfalls = summarizePitfalls(snapshot.pitfalls);
+  const staleStatus = buildStaleStatus(snapshot);
+  const recoveryStatus = snapshot.recovery ?? {};
+  const commitReadiness = snapshot.commitReadiness ?? {};
+  const trust = buildEvidenceTrust(gateTrust);
+
+  return {
+    ...evidenceSummary,
+    gateTrust,
+    trust,
+    unresolvedPitfalls,
+    recoveryStatus: {
+      status: recoveryStatus.status ?? "unknown",
+      ok: recoveryStatus.ok !== false,
+      issueCount: Array.isArray(recoveryStatus.issues) ? recoveryStatus.issues.length : 0,
+      criticalIssues: (recoveryStatus.issues ?? []).filter((issue) => issue?.severity === "critical"),
+      issues: recoveryStatus.issues ?? [],
+      mutations: recoveryStatus.mutations ?? [],
+    },
+    staleStatus,
+    commitReadiness,
+  };
+}
+
+function deriveGoal(snapshot) {
+  const unchecked = snapshot.humanBoard?.unchecked ?? [];
+  const intents = unchecked
+    .map((item) => parseIntentText(item.text))
+    .filter((item) => item.text);
+  const objective = [...intents].reverse().find((item) => item.type === "objective");
+  if (objective) {
+    return {
+      objective: objective.text,
+      source: "human goal",
+      status: "needs-manager-processing",
+    };
+  }
+
+  const activeTasks = snapshot.sprint?.activeTasks ?? [];
+  if (activeTasks.length > 0) {
+    return {
+      objective: activeTasks[0].label || activeTasks[0].title || "Complete pending work",
+      source: activeTasks.length === 1 ? "pending work" : `${activeTasks.length} pending work items`,
+      status: "active",
+    };
+  }
+
+  return {
+    objective: "No objective captured yet",
+    source: "none",
+    status: "needs-objective",
+  };
+}
+
 function riskLevelFromSnapshot(snapshot) {
+  if (snapshot.checkpointStatus?.blocksDispatch || snapshot.recovery?.issues?.some((issue) => issue.severity === "critical")) {
+    return "high";
+  }
   if (snapshot.anomalies?.some((item) => item.code?.includes("STALE") || item.severity === "critical")) {
     return "high";
   }
@@ -108,7 +406,16 @@ function riskLevelFromSnapshot(snapshot) {
   if (snapshot.directives?.halt || snapshot.sprint?.stopCondition?.stop) {
     return "high";
   }
+  if (snapshot.commitReadiness?.status === "invalid-approval") {
+    return "high";
+  }
   if (snapshot.gateTrust?.status === "needs-agent-attention" || snapshot.gateTrust?.status === "not-configured") {
+    return "medium";
+  }
+  if ((snapshot.gateTrust?.evidenceRisks ?? []).length > 0) {
+    return "medium";
+  }
+  if ((snapshot.pitfalls ?? []).length > 0) {
     return "medium";
   }
   const phase = snapshot.run?.phase ?? "idle";
@@ -121,26 +428,131 @@ function riskLevelFromSnapshot(snapshot) {
   return "low";
 }
 
+function buildApprovalState({ pendingApproval, uncheckedCount, staleStatus, commitReadiness }) {
+  if (staleStatus?.requiresReapproval) {
+    return {
+      required: true,
+      type: "plan-reapproval",
+      humanApprovalNeeded: true,
+      managerActionRequired: true,
+      blocksDispatch: true,
+      reason: `Previous approval is stale: ${staleStatus.humanReason || "context changed after approval"}.`,
+    };
+  }
+
+  if (pendingApproval === "plan-review-and-approval") {
+    return {
+      required: true,
+      type: "plan-review-and-approval",
+      humanApprovalNeeded: true,
+      managerActionRequired: true,
+      blocksDispatch: true,
+      reason: "A plan exists, but it needs review and approval before work can be dispatched.",
+    };
+  }
+
+  if (pendingApproval === "plan-approval") {
+    return {
+      required: true,
+      type: "plan-approval",
+      humanApprovalNeeded: true,
+      managerActionRequired: true,
+      blocksDispatch: true,
+      reason: "The plan has been reviewed and needs approval before work can be dispatched.",
+    };
+  }
+
+  if (pendingApproval === "commit-approval" || commitReadiness?.approvalRequired) {
+    return {
+      required: true,
+      type: "commit-approval",
+      humanApprovalNeeded: true,
+      managerActionRequired: true,
+      blocksDispatch: false,
+      reason: commitReadiness?.reason || "Completed work needs approval before commit.",
+    };
+  }
+
+  if (uncheckedCount > 0) {
+    return {
+      required: false,
+      type: "manager-intent-processing",
+      humanApprovalNeeded: false,
+      managerActionRequired: true,
+      blocksDispatch: true,
+      reason: "New human intent must be incorporated before worker dispatch.",
+    };
+  }
+
+  return {
+    required: false,
+    type: "none",
+    humanApprovalNeeded: false,
+    managerActionRequired: false,
+    blocksDispatch: false,
+    reason: "No approval is currently required.",
+  };
+}
+
+function buildEvidenceStatus({ evidenceView, pendingTasks, phase }) {
+  if (evidenceView.staleStatus?.blocksDispatch || evidenceView.recoveryStatus?.criticalIssues?.length > 0) {
+    return "blocked";
+  }
+  if (phase === "awaiting-commit-approval") {
+    return "needs-human-trust-check";
+  }
+  if (evidenceView.gateTrust?.status === "missing-required-gates") {
+    return "missing-required-evidence";
+  }
+  if (evidenceView.trust?.trustedProof === false) {
+    return "evidence-risk";
+  }
+  if (evidenceView.unresolvedPitfalls.length > 0 || evidenceView.failures.length > 0) {
+    return "needs-review";
+  }
+  return pendingTasks === 0 ? "idle" : "collecting";
+}
+
 export function buildCockpit(snapshot) {
   const pendingTasks = snapshot.sprint?.pendingTasks ?? 0;
   const unchecked = snapshot.humanBoard?.unchecked ?? [];
   const phase = snapshot.run?.phase ?? "idle";
   const evidenceSummary = buildEvidenceSummary(snapshot.journalTail ?? []);
+  const evidenceView = buildEvidenceView(snapshot, evidenceSummary);
+  const goal = deriveGoal(snapshot);
   const evidenceSignals = uniqueStrings([
+    ...((evidenceView.trust?.risks ?? []).map((signal) => `evidence risk: ${signal}`)),
     ...((snapshot.gateTrust?.weakSignals ?? []).map((signal) => `gate trust: ${signal}`)),
     ...((snapshot.gateTrust?.missingRequired ?? []).map((gate) => `gate trust: missing ${gate}`)),
+    ...((snapshot.gateTrust?.advisorySignals ?? []).map((signal) => `gate trust: ${signal}`)),
+    ...(evidenceView.staleStatus?.blocksDispatch ? [`stale approval: ${evidenceView.staleStatus.humanReason}`] : []),
+    ...((evidenceView.recoveryStatus?.issues ?? []).map((issue) => `recovery: ${issue.code} ${issue.message}`)),
+    ...((evidenceView.unresolvedPitfalls ?? []).map((pitfall) => `unresolved problem: ${pitfall.id || pitfall.failureType || pitfall.hypothesis}`)),
+    ...(evidenceView.commitReadiness?.reason ? [`commit readiness: ${evidenceView.commitReadiness.reason}`] : []),
     ...evidenceSummary.failures,
     ...evidenceSummary.gates,
     ...evidenceSummary.completions,
     ...evidenceSummary.decisions,
     ...evidenceSummary.recent,
-  ]).slice(0, 5);
+  ]).slice(0, 10);
   const pendingApproval =
-    phase === "awaiting-plan-approval" ? "plan-review-and-approval"
+    evidenceView.staleStatus?.requiresReapproval ? "plan-reapproval"
+      : phase === "awaiting-plan-approval" ? "plan-review-and-approval"
       : phase === "plan-reviewed" ? "plan-approval"
         : phase === "awaiting-commit-approval" ? "commit-approval"
           : null;
   const riskLevel = riskLevelFromSnapshot(snapshot);
+  const approval = buildApprovalState({
+    pendingApproval,
+    uncheckedCount: unchecked.length,
+    staleStatus: evidenceView.staleStatus,
+    commitReadiness: evidenceView.commitReadiness,
+  });
+  const evidenceStatus = buildEvidenceStatus({
+    evidenceView,
+    pendingTasks,
+    phase,
+  });
 
   return {
     schemaVersion: 1,
@@ -157,6 +569,8 @@ export function buildCockpit(snapshot) {
     humanJudgment: {
       goal: {
         status: unchecked.length > 0 ? "needs-human-intent-processing" : pendingTasks > 0 ? "active" : "needs-objective",
+        objective: goal.objective,
+        source: goal.source,
         question: unchecked.length > 0
           ? "Are these new or changed objectives, constraints, or overrides still correct?"
           : pendingTasks > 0
@@ -171,27 +585,48 @@ export function buildCockpit(snapshot) {
           : "Is the current risk level acceptable?",
         signals: [
           ...((snapshot.anomalies ?? []).map((item) => `${item.code}: ${item.message}`)),
+          ...(evidenceView.staleStatus?.blocksDispatch ? [`approval stale: ${evidenceView.staleStatus.humanReason}`] : []),
+          ...((snapshot.recovery?.issues ?? []).map((issue) => `${issue.code}: ${issue.message}`)),
           ...((snapshot.gateTrust?.weakSignals ?? []).map((signal) => `gate trust: ${signal}`)),
           ...((snapshot.gateTrust?.missingRequired ?? []).map((gate) => `gate trust: missing ${gate}`)),
+          ...((snapshot.gateTrust?.advisorySignals ?? []).map((signal) => `gate trust: ${signal}`)),
           ...(snapshot.directives?.halt ? ["halt directive active"] : []),
           ...(snapshot.sprint?.stopCondition?.stop ? [`stop condition: ${snapshot.sprint.stopCondition.reason}`] : []),
+          ...(evidenceView.unresolvedPitfalls.length > 0 ? [`${evidenceView.unresolvedPitfalls.length} unresolved known problem(s)`] : []),
+          ...(evidenceView.commitReadiness?.status === "invalid-approval" ? ["commit approval includes incomplete work"] : []),
         ].filter(Boolean),
       },
       evidence: {
-        status: phase === "awaiting-commit-approval" ? "needs-human-trust-check" : pendingTasks === 0 ? "idle" : "collecting",
+        status: evidenceStatus,
         question: phase === "awaiting-commit-approval"
           ? "Is the completion evidence trustworthy enough to approve commit?"
           : "Is more evidence needed before accepting the current direction?",
-        summary: {
-          ...evidenceSummary,
-          gateTrust: snapshot.gateTrust ?? buildGateTrustSummary({}),
-        },
+        summary: evidenceView,
         signals: evidenceSignals,
       },
     },
     pendingApproval,
+    approval,
     recommendedActions: snapshot.recommendedActions ?? [],
     nextCommands: snapshot.nextCommands ?? [],
+    internalAudit: {
+      run: snapshot.run
+        ? {
+          runId: snapshot.run.runId,
+          phase: snapshot.run.phase,
+          approvedPlanId: snapshot.run.approvedPlanId ?? null,
+          approvedCommitTasks: snapshot.run.approvedCommitTasks ?? [],
+        }
+        : null,
+      sprint: snapshot.sprint,
+      checkpointStatus: snapshot.checkpointStatus,
+      checkpointGovernance: snapshot.checkpoint?.governance ?? null,
+      directives: snapshot.directives,
+      anomalies: snapshot.anomalies ?? [],
+      pitfalls: snapshot.pitfalls ?? [],
+      recovery: snapshot.recovery ?? null,
+      commitReadiness: snapshot.commitReadiness ?? null,
+    },
   };
 }
 
@@ -217,6 +652,21 @@ export async function refreshSnapshot(opts) {
     : 0;
 
   const trackList = tracks?.tracks ?? [];
+  const checkpointStatus = buildCheckpointStatus(run, checkpoint, opts);
+  const recovery = buildRecoveryPlan({
+    run,
+    tracksDoc: tracks,
+    state,
+    checkpointStatus,
+    halt: hasHaltDirective(directives),
+    trackTimeoutMs: opts.trackTimeout,
+  });
+  const commitReadiness = buildCommitReadiness({
+    run,
+    state,
+    trackList,
+    workDir: opts.workDir,
+  });
   const anomalies = buildAnomalies({
     run,
     trackList,
@@ -239,6 +689,7 @@ export async function refreshSnapshot(opts) {
       pendingTasks,
       stopCondition,
       taskCount: state.tasks?.length ?? 0,
+      activeTasks: buildActiveTaskSummary(state),
     },
     humanBoard: {
       uncheckedCount: uncheckedBoard.length,
@@ -248,6 +699,9 @@ export async function refreshSnapshot(opts) {
     summaryText: summaryResult.stdout.trim(),
     pitfalls: pitfallsParsed.parsed ? pitfallsParsed.value : [],
     gateTrust,
+    checkpointStatus,
+    recovery,
+    commitReadiness,
     anomalies,
     recommendedActions: buildRecommendedActions({
       run,
@@ -257,6 +711,8 @@ export async function refreshSnapshot(opts) {
       pendingTasks,
       anomalies,
       gateTrust,
+      checkpointStatus,
+      recovery,
     }),
     nextCommands: buildNextCommands({
       run,
@@ -266,6 +722,9 @@ export async function refreshSnapshot(opts) {
       pendingTasks,
       anomalies,
       gateTrust,
+      checkpointStatus,
+      recovery,
+      commitReadiness,
     }),
   };
 
@@ -311,12 +770,21 @@ function buildAnomalies({ run, trackList, state, pendingTasks, stopCondition }) 
   return anomalies;
 }
 
-function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies, gateTrust }) {
+function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies, gateTrust, checkpointStatus, recovery }) {
   const actions = [];
   if (gateTrust?.status === "missing-required-gates") {
     actions.push("configure required evidence gates");
   } else if (gateTrust?.status === "needs-agent-attention" || gateTrust?.status === "not-configured") {
     actions.push("strengthen evidence gates before relying on acceptance");
+  }
+  if ((gateTrust?.evidenceRisks ?? []).length > 0 && gateTrust?.status === "configured") {
+    actions.push("treat advisory evidence as risk, not proof");
+  }
+  if (checkpointStatus?.blocksDispatch) {
+    actions.push("recover stale approval and re-approve plan before dispatch");
+  }
+  if ((recovery?.issues ?? []).some((issue) => issue.severity === "critical")) {
+    actions.push("run recovery before continuing");
   }
   if (!run) {
     actions.push("start agent run");
@@ -349,6 +817,9 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
   }
   if (stopCondition.stop) {
     actions.push("intervene replan or capture updated intent before continue");
+  }
+  if (checkpointStatus?.blocksDispatch) {
+    return actions;
   }
   if (pendingTasks === 0 && uncheckedBoard.length === 0 && ["initialized", "cycle-closed"].includes(run.phase)) {
     actions.push("capture next goal from human");
@@ -397,18 +868,40 @@ function command(label, args, reason) {
   };
 }
 
-function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies, gateTrust }) {
+function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies, gateTrust, checkpointStatus, recovery, commitReadiness }) {
   const commands = [];
 
-  if (["missing-required-gates", "needs-agent-attention", "not-configured"].includes(gateTrust?.status)) {
+  if (["missing-required-gates", "needs-agent-attention", "not-configured"].includes(gateTrust?.status)
+    || (gateTrust?.evidenceRisks ?? []).length > 0) {
     commands.push(command("Audit gate trust", ["gates", "audit", "--json"], "Gate trust needs agent attention before relying on acceptance evidence."));
     commands.push(command("Maintain gates", ["gates", "maintain", "--apply", "--json"], "Apply conservative maintenance for resolved weak adaptive gates, if any."));
+  }
+
+  if (checkpointStatus?.blocksDispatch) {
+    commands.push(command("Recover stale approval", ["orchestrate", "recover", "--apply", "--json"], "Approved context changed; return to plan approval before dispatch."));
+    commands.push(command("Review plan again", ["orchestrate", "review-plan", "--json"], "Re-check the plan against current goal, code, and work items."));
+    commands.push(command("Approve plan again", ["orchestrate", "approve-plan", "--json"], "Use after review passes and risk is acceptable."));
+    return commands;
+  }
+
+  if ((recovery?.mutations ?? []).length > 0) {
+    commands.push(command("Recover interrupted run", ["orchestrate", "recover", "--apply", "--json"], "Conservative recovery can repair stale locks or interrupted worker state."));
+  }
+
+  if (commitReadiness?.status === "invalid-approval") {
+    commands.push(command("Review commit approval", ["cockpit", "--json"], "Commit approval references work that is not complete."));
+    commands.push(command(
+      "Approve completed tasks",
+      ["orchestrate", "approve-commit", "--tasks", commitReadiness.candidateTaskIds?.join(",") || "<ids>"],
+      "Re-approve only completed tasks before committing."
+    ));
+    return commands;
   }
 
   if (anomalies?.some((a) => a.code === "STALE_RUN_PHASE")) {
     commands.push(command("Close stale run", ["orchestrate", "close"], "Run phase is stale after sprint work settled."));
   }
-  if (uncheckedBoard.length > 0) {
+  if (uncheckedBoard.length > 0 && run && !isTerminalRunPhase(run.phase)) {
     commands.push(command("Review cockpit", ["cockpit", "--json"], "Unchecked human intent may affect dispatch decisions."));
   }
   if (hasHaltDirective(directives)) {
@@ -478,6 +971,85 @@ function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pen
   return commands;
 }
 
+function shellCommand(argv) {
+  return (Array.isArray(argv) ? argv : []).map((part) => {
+    const value = String(part);
+    return /\s/.test(value) ? JSON.stringify(value) : value;
+  }).join(" ");
+}
+
+function shortList(items, { limit = 2, fallback = "none", map = (item) => item } = {}) {
+  const values = (Array.isArray(items) ? items : []).map(map).map(cleanOneLine).filter(Boolean);
+  if (values.length === 0) {
+    return fallback;
+  }
+  const shown = values.slice(0, limit);
+  const suffix = values.length > shown.length ? `; +${values.length - shown.length} more` : "";
+  return `${shown.join("; ")}${suffix}`;
+}
+
+function formatApproval(approval) {
+  if (approval?.required) {
+    return `Needed: ${approval.reason}`;
+  }
+  if (approval?.managerActionRequired) {
+    return `No human approval needed now. Manager action required: ${approval.reason}`;
+  }
+  return approval?.reason ?? "No approval is currently required.";
+}
+
+function humanizeDisplaySignal(value) {
+  return cleanOneLine(value)
+    .replace(/sprint-state changed since approve-plan/gi, "work items changed after approval")
+    .replace(/human-board changed since approve-plan/gi, "human intent changed after approval")
+    .replace(/human intent changed since approve-plan/gi, "human intent changed after approval")
+    .replace(/git HEAD changed since approve-plan/gi, "code changed after approval")
+    .replace(/checkpoint/gi, "approval record")
+    .replace(/run phase/gi, "run status");
+}
+
+export function formatCockpitHuman(cockpit) {
+  const goal = cockpit.humanJudgment?.goal ?? {};
+  const risk = cockpit.humanJudgment?.risk ?? {};
+  const evidence = cockpit.humanJudgment?.evidence ?? {};
+  const summary = evidence.summary ?? {};
+  const trust = summary.trust ?? {};
+  const gateTrust = summary.gateTrust ?? {};
+  const staleStatus = summary.staleStatus ?? {};
+  const recovery = summary.recoveryStatus ?? {};
+  const commitReadiness = summary.commitReadiness ?? {};
+  const approval = cockpit.approval ?? {};
+  const nextCommands = Array.isArray(cockpit.nextCommands) ? cockpit.nextCommands : [];
+
+  const lines = [
+    "Goal Cockpit",
+    `Objective: ${goal.objective ?? "No objective captured yet"} (${goal.source ?? "unknown"}; ${goal.status ?? "unknown"})`,
+    `Risk: ${String(risk.level ?? "unknown").toUpperCase()}${risk.signals?.length ? ` - ${shortList(risk.signals, { limit: 2, map: humanizeDisplaySignal })}` : ""}`,
+    `Evidence: ${evidence.status ?? "unknown"}; trust=${trust.status ?? gateTrust.status ?? "unknown"}`,
+    `  Gate trust: ${gateTrust.status ?? "unknown"}${(gateTrust.evidenceRisks ?? []).length > 0 ? ` (${gateTrust.evidenceRisks.length} risk signal(s))` : ""}`,
+    `  Recent completions: ${shortList(summary.completions)}`,
+    `  Recent failures: ${shortList(summary.failures)}`,
+    `  Known unresolved problems: ${shortList(summary.unresolvedPitfalls, {
+      map: (item) => [item.id, item.failureType, item.hypothesis].filter(Boolean).join(" "),
+    })}`,
+    `  Recovery: ${recovery.status ?? "unknown"}${recovery.criticalIssues?.length ? ` - ${shortList(recovery.criticalIssues, { map: (item) => humanizeDisplaySignal(`${item.code}: ${item.message}`) })}` : ""}`,
+    `  Approval freshness: ${staleStatus.blocksDispatch ? `blocked - ${staleStatus.humanReason}` : "current"}`,
+    `  Commit readiness: ${commitReadiness.status ?? "unknown"}${commitReadiness.reason ? ` - ${commitReadiness.reason}` : ""}`,
+    `Approval: ${formatApproval(approval)}`,
+    "Manager next:",
+  ];
+
+  if (nextCommands.length === 0) {
+    lines.push("1. No immediate command. Ask for the next objective if the goal is empty.");
+  } else {
+    nextCommands.slice(0, 5).forEach((item, index) => {
+      lines.push(`${index + 1}. ${item.label}: ${shellCommand(item.argv)} - ${item.reason}`);
+    });
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
 export async function runObserve(argv) {
   const opts = buildOrchestrationOpts(argv);
   const snapshot = await refreshSnapshot(opts);
@@ -487,5 +1059,10 @@ export async function runObserve(argv) {
 export async function runCockpit(argv) {
   const opts = buildOrchestrationOpts(argv);
   const snapshot = await refreshSnapshot(opts);
-  return emitResult(opts, { ok: true, cockpit: snapshot.cockpit });
+  return emitResult(opts, {
+    ok: true,
+    cockpit: snapshot.cockpit,
+    nextCommands: snapshot.cockpit.nextCommands,
+    message: formatCockpitHuman(snapshot.cockpit),
+  });
 }

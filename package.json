@@ -91,6 +91,14 @@
     "tsx": "^4.22.4",
     "yaml": "^2.8.3"
   },
+  "peerDependencies": {
+    "va-agent-protocol": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "va-agent-protocol": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^25.3.1",

@@ -296,7 +296,8 @@ node scripts/va-parallel-runner.mjs spawn \
 ColonyBridge integrates with `va-agent-protocol` Colony for intelligent agent routing instead of raw subprocess spawn.
 
 ```bash
-# Enable Colony dispatch (requires va-agent-protocol built at ../va-agent-protocol/)
+# Enable Colony dispatch (optional: npm install va-agent-protocol, set
+# VA_AGENT_PROTOCOL_PATH, or keep a built sibling checkout at ../va-agent-protocol/)
 node scripts/va-parallel-runner.mjs spawn \
   --plan-file /tmp/plan.json \
   --agent-cmd 'implement task {taskId}' \
@@ -305,7 +306,7 @@ node scripts/va-parallel-runner.mjs spawn \
 ```
 
 **How ColonyBridge works**:
-1. On `init()`, it dynamically imports `va-agent-protocol` from `../va-agent-protocol/dist/index.js`
+1. On `init()`, it dynamically imports `va-agent-protocol` (resolution: `VA_AGENT_PROTOCOL_PATH` env → npm package → sibling checkout)
 2. Auto-detects available CLI agents on `$PATH` (codex, claude, gemini)
 3. Creates adapters for each detected agent and registers them with a Colony
 4. `dispatch()` routes through Colony (smart agent selection) instead of raw spawn

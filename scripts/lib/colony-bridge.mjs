@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { DEFAULT_AGENT_TEMPLATE, nowIso } from "./sprint-utils.mjs";
@@ -23,7 +24,12 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-// Dynamic import of va-agent-protocol — graceful fallback if missing
+// Dynamic import of va-agent-protocol — an OPTIONAL Colony enhancement.
+// Resolution order keeps the package standalone with zero install:
+//   1. VA_AGENT_PROTOCOL_PATH env  — explicit override (file or package dir)
+//   2. "va-agent-protocol"          — installed npm package (the standard path)
+//   3. monorepo sibling checkout   — back-compat for the local dev layout
+// Any miss falls back to raw agent spawn, so Auto-Pilot runs fine without it.
 let Colony = null;
 let CodexAdapter = null;
 let ClaudeCodeAdapter = null;
@@ -32,20 +38,32 @@ let KimiAdapter = null;
 let GlmAdapter = null;
 let noopLogger = null;
 
-try {
-  const p = await import(
-    new URL("../../../va-agent-protocol/dist/index.js", import.meta.url).href
-  );
-  Colony = p.Colony ?? null;
-  CodexAdapter = p.CodexAdapter ?? null;
-  ClaudeCodeAdapter = p.ClaudeCodeAdapter ?? null;
-  GeminiAdapter = p.GeminiAdapter ?? null;
-  KimiAdapter = p.KimiAdapter ?? null;
-  GlmAdapter = p.GlmAdapter ?? null;
-  noopLogger = p.noopLogger ?? null;
-} catch {
-  // va-agent-protocol not available
+async function resolveProtocolModule() {
+  const targets = [];
+  if (process.env.VA_AGENT_PROTOCOL_PATH) {
+    targets.push(pathToFileURL(path.resolve(process.env.VA_AGENT_PROTOCOL_PATH)).href);
+  }
+  targets.push("va-agent-protocol");
+  targets.push(new URL("../../../va-agent-protocol/dist/index.js", import.meta.url).href);
+  for (const target of targets) {
+    try {
+      const mod = await import(target);
+      if (mod?.Colony) return mod;
+    } catch {
+      // try next resolution strategy
+    }
+  }
+  return null;
 }
+
+const protocol = await resolveProtocolModule();
+Colony = protocol?.Colony ?? null;
+CodexAdapter = protocol?.CodexAdapter ?? null;
+ClaudeCodeAdapter = protocol?.ClaudeCodeAdapter ?? null;
+GeminiAdapter = protocol?.GeminiAdapter ?? null;
+KimiAdapter = protocol?.KimiAdapter ?? null;
+GlmAdapter = protocol?.GlmAdapter ?? null;
+noopLogger = protocol?.noopLogger ?? null;
 
 /** Check whether va-agent-protocol Colony is importable. */
 export function isColonyAvailable() {

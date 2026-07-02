@@ -77,7 +77,7 @@ VA Auto-Pilot 是一个**冲刺执行引擎**——它运行自治工程闭环�
 
 VA Auto-Pilot 可以独立运行，也可以作为 va-agent-protocol 的 reference engine / managed agent。协议是任务契约，Auto-Pilot 是满足这个契约的一种执行引擎。
 
-`scripts/lib/colony-bridge.mjs` 中的事件驱动 Colony 派发器在能从本地兄弟仓库解析到 `va-agent-protocol`（`../../../va-agent-protocol/dist/index.js`）时会使用它；解析不到时，Auto-Pilot 会优雅回退到原始 Agent spawn，因此外部用户无需 monorepo 布局也能跑通闭环。
+`scripts/lib/colony-bridge.mjs` 中的事件驱动 Colony 派发器可选地使用 `va-agent-protocol`，解析顺序为：`VA_AGENT_PROTOCOL_PATH` 环境变量 → 已安装的 `va-agent-protocol` npm 包 → 本地兄弟仓库。三者都解析不到时，Auto-Pilot 优雅回退到原始 Agent spawn，因此零额外安装、无需 monorepo 布局即可跑通闭环。
 
 MCP 和 A2A 是互补的连接层。VA Auto-Pilot 位于连接和消息之上：它治理长链路工程任务如何被拆解、执行、审查、恢复和验收。
 

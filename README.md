@@ -79,7 +79,7 @@ VA Auto-Pilot is a **sprint execution engine** — it runs the autonomous engine
 
 VA Auto-Pilot can run standalone. It can also operate as a reference engine / managed agent for va-agent-protocol. The protocol is the task contract; Auto-Pilot is one execution engine that satisfies it.
 
-The event-driven Colony dispatcher in `scripts/lib/colony-bridge.mjs` can use `va-agent-protocol` when it is resolvable from a local sibling checkout (`../../../va-agent-protocol/dist/index.js`). If the protocol is not present, Auto-Pilot falls back to raw agent spawn, so external users still get a working loop without needing the monorepo layout.
+The event-driven Colony dispatcher in `scripts/lib/colony-bridge.mjs` optionally uses `va-agent-protocol` when it can be resolved — in priority order: the `VA_AGENT_PROTOCOL_PATH` env var, an installed `va-agent-protocol` npm package, or a local sibling checkout. If none resolves, Auto-Pilot falls back to raw agent spawn, so the loop runs with zero extra install and no monorepo layout required.
 
 MCP and A2A are complementary connection layers. VA Auto-Pilot sits above connection and messaging: it governs how long-running engineering work is decomposed, executed, reviewed, recovered, and accepted.
 

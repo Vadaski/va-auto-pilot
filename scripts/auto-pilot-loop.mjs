@@ -14,7 +14,7 @@
  *   --max-parallel <n>      Parallel track count (default: 3)
  *   --parallel              Enable multi-track execution (default)
  *   --no-parallel           Disable multi-track execution
- *   --agent-template <cmd>  Agent command template (default: "claude -p --output-format text 'Implement task {taskId} in this project'")
+ *   --agent-template <cmd>  Agent command template (default: vendor-neutral placeholder; configure with --agent-template or a worker override)
  *   --single-cycle          Run exactly one task cycle, then exit
  *   --dry-run               Print plan without executing
  *   --no-commit             Skip git add/git commit after gates pass
@@ -31,6 +31,7 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import {
   DEFAULT_AGENT_TEMPLATE,
+  DEFAULT_AGENT_TEMPLATE_HELP,
   parseArgv,
   nowIso,
   readQualityGateConfig,
@@ -2985,7 +2986,7 @@ Options:
   --max-parallel <n>      Parallel track count (default: 3)
   --parallel              Enable multi-track execution (default)
   --no-parallel           Disable multi-track execution
-  --agent-template <cmd>  Agent command template (default: "claude -p --output-format text 'Implement task {taskId} in this project'")
+  --agent-template <cmd>  Agent command template (default: ${DEFAULT_AGENT_TEMPLATE_HELP})
   --single-cycle          Run exactly one task cycle, then exit
   --dry-run               Print plan without executing
   --no-commit             Skip git add/git commit after gates pass

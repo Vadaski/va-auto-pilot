@@ -33,7 +33,7 @@ npm install
 npm run check:demo
 ```
 
-如果要接入已有仓库，使用 `npx va-auto-pilot init .`。
+如果要接入已有仓库，使用 `npx va-auto-pilot init .`。正式派发任务前，请配置你要使用的 CLI Agent：默认模板现在是一个厂商中立的占位符，会明确报错退出；需通过 `--agent-template` 或 worker 覆盖来指定实际 Agent。
 
 ---
 
@@ -79,7 +79,7 @@ VA Auto-Pilot 押的是反向的赌注。
 
 ### 防御弱点
 
-- **证据门禁防止幻觉** — 模型不能自我认证。CLI 命令产生客观的通过/失败信号。"我觉得做完了"不等于"确实做完了"。
+- **证据门禁防止幻觉** — CLI 命令产生客观的通过/失败信号，模型无法靠辩解绕开。"我觉得做完了"不等于"确实做完了"。门禁能拦截明显的占位符作弊并强制可观测证据，但它不能密码学级别地证明一条测试命令本身是有意义的。
 - **陷阱复利防止重蹈覆辙** — 过往运行中的结构化失败元数据作为硬约束注入后续委派。系统随时间越来越难被愚弄。
 - **对抗性审查打破自我验证闭环** — 全新上下文的审查员只看 diff，不看意图。这在结构上防止了自治循环最常见的失败模式：对越来越错的输出越来越有信心。
 
@@ -92,6 +92,8 @@ VA Auto-Pilot 押的是反向的赌注。
 VA Auto-Pilot 是一个**冲刺执行引擎**——它运行自治工程闭环。[va-agent-protocol](https://github.com/Vadaski/va-agent-protocol) 是**通用任务协议**——将任何 CLI Agent 包装成可组合单元的标准化契约。
 
 VA Auto-Pilot 可以独立运行，也可以作为 va-agent-protocol 的 reference engine / managed agent。协议是任务契约，Auto-Pilot 是满足这个契约的一种执行引擎。
+
+`scripts/lib/colony-bridge.mjs` 中的事件驱动 Colony 派发器在能从本地兄弟仓库解析到 `va-agent-protocol`（`../../../va-agent-protocol/dist/index.js`）时会使用它；解析不到时，Auto-Pilot 会优雅回退到原始 Agent spawn，因此外部用户无需 monorepo 布局也能跑通闭环。
 
 MCP 和 A2A 是互补的连接层。VA Auto-Pilot 位于连接和消息之上：它治理长链路工程任务如何被拆解、执行、审查、恢复和验收。
 
@@ -120,9 +122,9 @@ VA Auto-Pilot 采用不同的模型。在任何评审开始之前，管理 Agent
 
 ### 2. CLI 优先是正确性保证，而不是风格偏好
 
-质量门禁通过确定性 CLI 命令执行。`npm run check:all` 只有两种结果：通过或不通过。模型无法宣称自己完成了，无法用言辞绕过去，无法自我认证质量。
+质量门禁通过确定性 CLI 命令执行。`npm run check:all` 只有两种结果：通过或不通过。模型无法宣称自己完成了，也无法用辩解绕过一个失败的门禁。
 
-这建立了一个客观的同步点，把"我认为做好了"和"确实做好了"分开。
+这建立了一个客观的同步点，把"我认为做好了"和"确实做好了"分开。门禁本身仍可能被足够"配合"的 Agent 绕过，因此框架还会通过陷阱复利和对抗性审查来提高作弊成本。
 
 ### 3. 管理者委派，而不是实现
 
@@ -177,12 +179,28 @@ node "$tmp/va-auto-pilot/bin/va-auto-pilot.mjs" init .
 rm -rf "$tmp"
 ```
 
-初始化后先通过 agent-facing intent 通道捕获目标，再查看 cockpit 摘要：
+体验默认人类工作流：
 
 ```bash
-node scripts/auto-pilot.mjs goal --text "把这个项目推进到可发布状态" --json
-node scripts/auto-pilot.mjs plan-from-goal --json
-node scripts/auto-pilot.mjs plan-from-goal --apply --json
+va-auto-pilot init ./auto-pilot-demo --demo
+cd ./auto-pilot-demo
+va-auto-pilot goal --text "把这个项目推进到可发布状态"
+va-auto-pilot plan-from-goal --json
+va-auto-pilot plan-from-goal --apply --json
+va-auto-pilot cockpit
+```
+
+要真正派发任务，需要配置一个 CLI Agent。示例：
+
+```bash
+# Claude Code
+va-auto-pilot run . --agent-template 'claude -p --output-format text "Implement task {taskId} in this project"'
+
+# Codex CLI
+va-auto-pilot run . --agent-template 'codex exec --full-auto -C . "Implement task {taskId}"'
+
+# Kimi CLI
+va-auto-pilot run . --agent-template 'kimi -w . --quiet -p "Implement task {taskId}"'
 ```
 
 cockpit 是日常控制面：人类只需要判断目标是否仍然正确、风险是否可接受、验收证据是否可信。
@@ -190,6 +208,30 @@ sprint-state、run-journal、pitfall、quality gate 和 orchestration phase 都�
 journal 证据会先压缩成最近完成项、失败项、gate 和决策摘要，gate 可信度会压缩成证据风险信号，再呈现给人类。
 过期 placeholder gate 由 agent 通过 `va-auto-pilot gates audit` 和 `va-auto-pilot gates maintain --apply` 维护。
 显式目标路径是 `goal -> plan-from-goal -> candidate backlog -> orchestrate plan -> review-plan`；`orchestrate plan` 也会自动消费未处理的 objective intent。
+
+默认 cockpit 输出从人类需要做的决策开始：
+
+```text
+Goal Cockpit
+Objective: 把这个项目推进到可发布状态 (human goal; needs-human-intent-processing)
+Progress: NEEDS MANAGER ACTION - New human intent must be incorporated before worker dispatch. (dispatch blocked)
+Risk: MEDIUM - NO_ACTIVE_RUN: No active orchestration run exists.
+Evidence trust: TRUSTED - Required evidence gates are configured and no evidence risk signals are active.
+Evidence: collecting
+  Gate trust: configured
+  Recent completions: none
+  Recent failures: none
+  Known unresolved problems: none
+  Recovery: recoverable
+  Approval freshness: current
+  Commit readiness: not-ready - No completed worker results are waiting to commit.
+Approval: No human approval needed now. Manager action required: New human intent must be incorporated before worker dispatch.
+Manager next:
+1. Generate candidate backlog: node scripts/auto-pilot.mjs plan-from-goal --json - Turn unchecked goal intent into an explicit candidate backlog.
+2. Apply candidate backlog: node scripts/auto-pilot.mjs plan-from-goal --apply --json - Persist candidate backlog items into sprint state and mark intent handled.
+```
+
+需要机器可读审计面或可执行 `nextCommands` 时，使用 `va-auto-pilot cockpit --json`。
 
 ---
 
@@ -266,7 +308,7 @@ $va-auto-pilot
 - 强制门禁是并发轨道的同步屏障
 - 未通过门禁不得推进状态
 - 默认路径是模型原生并发工具调用
-- 将 `review-agent` 替换为你环境中配置的 reviewer 命令或包装器
+- 将 `review-agent` 替换为你环境中配置的 reviewer 命令或包装器（下方示例仅为占位符）
 
 人类通常通过 `cockpit --json` 看摘要；下面的 planner / board 命令是 manager agent 的内部调试面：
 
@@ -290,8 +332,9 @@ npm install
 # 然后捕获目标并查看人类控制面
 node scripts/auto-pilot.mjs goal --text "发布一个可靠版本" --json
 
-# 高能力 CLI Agent 在内部运行治理闭环
-$va-auto-pilot 在当前仓库执行一轮最高标准闭环；人类只判断目标、风险和证据
+# 高能力 CLI Agent 在内部运行治理闭环。
+# 下面这行是粘贴给 Agent 的自然语言提示，不是 shell 命令：
+# $va-auto-pilot 在当前仓库执行一轮最高标准闭环；人类只判断目标、风险和证据
 
 # Agent 集成示例：Claude Code command
 mkdir -p .claude/commands
@@ -303,19 +346,15 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 
 ## 路线图
 
-### v0.2
+### v0.3
 
 - 持久化 — SQLite 存储冲刺状态和陷阱
 - 推送式异步 — 用事件驱动通知替代轮询
 - Web 仪表盘 — 实时冲刺可视化
 
-### v0.3
-
-- REST / gRPC 适配器
-- 治理 — 成本护栏 + 权限范围
-
 ### 未来
 
+- REST / gRPC 适配器
 - 多语言 SDK（Python、Go）
 - 分布式编排
 
@@ -360,7 +399,7 @@ npm run validate:distribution
 
 ## 作者与致谢
 
-由 **Vadaski** 创建，在前沿级编程 Agent 协助下开发，并通过 VA Auto-Pilot 自身工程闭环验证。
+由 **Vadaski** 创建，在前沿级编程 Agent 协助下开发，并在 VA Auto-Pilot 自身工程闭环中持续吃狗粮验证。
 
 致谢：**Vera 项目**
 

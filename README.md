@@ -35,6 +35,8 @@ npm run check:demo
 
 Use `npx va-auto-pilot init .` when adding the loop to an existing repository.
 
+Before dispatching tasks, configure the CLI agent you want to use. The default template is a vendor-neutral placeholder that exits with a clear error; set `--agent-template` or worker overrides so tasks can actually run.
+
 ---
 
 ## The Design Bet
@@ -63,7 +65,7 @@ That is the bet.
 
 ### Guarding against weaknesses
 
-- **Evidence gates prevent hallucination** — The model cannot self-certify. CLI commands produce objective pass/fail signals. "I think it's done" is not the same as "it is done."
+- **Evidence gates prevent hallucination** — CLI commands produce objective pass/fail signals that the model cannot argue around. "I think it's done" is not the same as "it is done." The gates catch obvious placeholder cheating and force observable evidence; they do not cryptographically prove that a test is meaningful.
 - **Pitfall compounding prevents repeated mistakes** — Structured failure metadata from past runs is injected into future delegations as hard constraints. The system gets harder to fool over time.
 - **Adversarial review breaks self-validation loops** — A fresh-context reviewer sees only the diff, never the intent. This structurally prevents the most common autonomous loop failure: growing confidence in growing errors.
 
@@ -76,6 +78,8 @@ That is the bet.
 VA Auto-Pilot is a **sprint execution engine** — it runs the autonomous engineering loop. [va-agent-protocol](https://github.com/Vadaski/va-agent-protocol) is the **universal task protocol** — the standardized contract that wraps any CLI agent into a composable unit.
 
 VA Auto-Pilot can run standalone. It can also operate as a reference engine / managed agent for va-agent-protocol. The protocol is the task contract; Auto-Pilot is one execution engine that satisfies it.
+
+The event-driven Colony dispatcher in `scripts/lib/colony-bridge.mjs` can use `va-agent-protocol` when it is resolvable from a local sibling checkout (`../../../va-agent-protocol/dist/index.js`). If the protocol is not present, Auto-Pilot falls back to raw agent spawn, so external users still get a working loop without needing the monorepo layout.
 
 MCP and A2A are complementary connection layers. VA Auto-Pilot sits above connection and messaging: it governs how long-running engineering work is decomposed, executed, reviewed, recovered, and accepted.
 
@@ -104,9 +108,9 @@ Given those real constraints and anchors, the question becomes: *which expert vi
 
 ### 2. CLI-first is a correctness guarantee, not a style preference
 
-Quality gates run via deterministic CLI commands. `npm run check:all` either passes or it does not. The model cannot declare success, argue its way through, or self-certify quality.
+Quality gates run via deterministic CLI commands. `npm run check:all` either passes or it does not. The model cannot declare success or argue its way through a failing gate.
 
-This creates an objective synchronization point that separates "I think it's done" from "it is done."
+This creates an objective synchronization point that separates "I think it's done" from "it is done." The gate itself can still be gamed by a sufficiently cooperative agent, so the framework also compounds pitfalls and runs adversarial review to raise the cost of cheating.
 
 ### 3. The manager delegates — it never implements
 
@@ -170,6 +174,19 @@ va-auto-pilot goal --text "Ship this project to a releasable state"
 va-auto-pilot plan-from-goal --json
 va-auto-pilot plan-from-goal --apply --json
 va-auto-pilot cockpit
+```
+
+To actually dispatch tasks, configure an agent. Examples:
+
+```bash
+# Claude Code
+va-auto-pilot run . --agent-template 'claude -p --output-format text "Implement task {taskId} in this project"'
+
+# Codex CLI
+va-auto-pilot run . --agent-template 'codex exec --full-auto -C . "Implement task {taskId}"'
+
+# Kimi CLI
+va-auto-pilot run . --agent-template 'kimi -w . --quiet -p "Implement task {taskId}"'
 ```
 
 The cockpit is the daily control surface. It keeps human attention on whether
@@ -287,7 +304,7 @@ No list of files. No sequence of steps. No prescribed approach. You define the d
 - Synchronization at mandatory quality gates
 - State promotion blocked until required gates pass
 - Default path is model-native parallel tool orchestration
-- Replace `review-agent` with your configured reviewer command or wrapper
+- Replace `review-agent` with your configured reviewer command or wrapper (the example below is a placeholder)
 
 Humans normally see this through the default `cockpit` output. Manager agents
 and debuggers can use `cockpit --json`; the planner and board commands below
@@ -314,8 +331,10 @@ npm install
 node scripts/auto-pilot.mjs goal --text "Ship a reliable release"
 node scripts/auto-pilot.mjs cockpit
 
-# A capable CLI agent can then run the governed loop internally
-$va-auto-pilot run one full loop in this repo with highest standards; keep humans on goal, risk, and evidence
+# A capable CLI agent can then run the governed loop internally.
+# The line below is a natural-language prompt you paste into your agent,
+# not a shell command:
+# $va-auto-pilot run one full loop in this repo with highest standards; keep humans on goal, risk, and evidence
 
 # Agent integration example: Claude Code command
 mkdir -p .claude/commands
@@ -327,19 +346,15 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 
 ## Roadmap
 
-### v0.2
-
-- Persistence — SQLite-backed sprint state and pitfall storage
-- Push-based async — replace polling with event-driven notifications
-- Web Dashboard — real-time sprint visualization
-
 ### v0.3
 
-- Governance — cost guardrails + permission scoping
-- REST / gRPC adapter for non-CLI integrations
+- Persistence — SQLite-backed sprint state and pitfall storage
+- Push-based async — replace polling with event-driven worker notifications
+- Web Dashboard — real-time sprint visualization
 
 ### Future
 
+- REST / gRPC adapter for non-CLI integrations
 - Multi-language SDK (Python, Go)
 - Distributed orchestration across machines
 
@@ -382,7 +397,7 @@ npm run validate:distribution
 
 ## Credits
 
-Created by **Vadaski**. Developed with assistance from frontier coding agents and validated through VA Auto-Pilot's own engineering loop.
+Created by **Vadaski**. Developed with assistance from frontier coding agents and dogfooded through VA Auto-Pilot's own engineering loop.
 
 Acknowledgements: **Vera project**
 

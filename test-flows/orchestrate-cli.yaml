@@ -153,6 +153,176 @@ flows:
         - exit_code: 0
       should: []
 
+  - name: "goal-to-backlog: plan-from-goal applies candidate backlog and marks intent handled"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[]}
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        cat > "$tmpdir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/auto-pilot.mjs" goal --text "Make goal-to-backlog explicit" --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" plan-from-goal --json \
+          | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); process.exit(j.candidateBacklog?.items?.[0]?.title==='Make goal-to-backlog explicit'?0:1)"
+        node "$repo/scripts/auto-pilot.mjs" plan-from-goal --apply --json \
+          | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); process.exit(j.applied===true && j.appliedTasks?.[0]?.id==='AP-001'?0:1)"
+        grep -q 'AP-001' "$tmpdir/.va-auto-pilot/sprint-state.json"
+        grep -q -- '- \[x\] \[objective\] Make goal-to-backlog explicit' "$tmpdir/docs/todo/human-board.md"
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
+  - name: "orchestrate: plan auto converts objective intent into candidate backlog"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[]}
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        cat > "$tmpdir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/auto-pilot.mjs" goal --text "Create a visible reviewed plan path" --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json \
+          | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); process.exit(j.goalToBacklog?.applied===true && j.candidatePlan?.primaryTaskId==='AP-001'?0:1)"
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
+  - name: "approvalPolicy: review-plan can auto approve low-risk trusted plan"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/config.yaml" <<'EOF'
+        version: 1
+        qualityGate:
+          buildCommand: 'node -e "process.exit(0)"'
+          reviewCommand: 'node -e "console.log(''REVIEW STATUS: PASS'')"'
+          acceptanceTestCommand: 'node -e "process.exit(0)"'
+        approvalPolicy:
+          smallRefactor: auto-if-gates-trusted
+        EOF
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[{"id":"AP-001","title":"tidy small helper","priority":"P2","state":"Backlog","dependsOn":[]}]}
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        cat > "$tmpdir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --dry-run --json \
+          | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); process.exit(j.phase==='plan-approved' && j.approvalPolicy?.autoApproved===true?0:1)"
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
+  - name: "worktreeIsolation: dispatch maps each track to .va/worktrees"
+    command: "bash"
+    timeout_ms: 30000
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.gitignore" <<'EOF'
+        .va/worktrees/
+        EOF
+        cat > "$tmpdir/.va-auto-pilot/config.yaml" <<'EOF'
+        version: 1
+        qualityGate:
+          buildCommand: 'node -e "process.exit(0)"'
+          reviewCommand: 'node -e "console.log(''REVIEW STATUS: PASS'')"'
+          acceptanceTestCommand: 'node -e "process.exit(0)"'
+        worktreeIsolation:
+          enabled: true
+          rootDir: .va/worktrees
+        EOF
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[{"id":"AP-001","title":"isolated task","priority":"P1","state":"Backlog","dependsOn":[]}]}
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        cat > "$tmpdir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        git init -q
+        git config user.email wt@example.invalid
+        git config user.name "Worktree Test"
+        git add .
+        git commit -q -m "seed"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --dry-run --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json \
+          | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); process.exit(j.worktreeIsolation?.tracks?.[0]?.worktree?.path?.includes('.va/worktrees/AP-001')?0:1)"
+        test -d "$tmpdir/.va/worktrees/AP-001"
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
   - name: "orchestrate: stale checkpoint blocks sprint-state human-board and git-head drift"
     command: "bash"
     timeout_ms: 30000

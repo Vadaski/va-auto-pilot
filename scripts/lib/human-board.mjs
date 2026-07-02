@@ -179,3 +179,53 @@ export function appendHumanIntent(boardPath, intent) {
   fs.writeFileSync(resolved, insertUnderInstructions(raw, line), "utf8");
   return { boardPath: resolved, line };
 }
+
+/**
+ * Marks projected human intent lines as handled without deleting the durable
+ * instruction record.
+ *
+ * @param {string} boardPath
+ * @param {number[]} lineNumbers 1-based line numbers from readHumanBoardInstructions
+ * @param {string} reason
+ * @returns {{boardPath: string, handledCount: number, lineNumbers: number[]}}
+ */
+export function markHumanBoardInstructionsHandled(boardPath, lineNumbers, reason = "processed") {
+  const resolved = path.resolve(boardPath);
+  if (!fs.existsSync(resolved)) {
+    return { boardPath: resolved, handledCount: 0, lineNumbers: [] };
+  }
+
+  const selected = new Set(
+    (Array.isArray(lineNumbers) ? lineNumbers : [])
+      .map((lineNumber) => Number.parseInt(String(lineNumber), 10))
+      .filter((lineNumber) => Number.isFinite(lineNumber) && lineNumber > 0)
+  );
+  if (selected.size === 0) {
+    return { boardPath: resolved, handledCount: 0, lineNumbers: [] };
+  }
+
+  const stamp = new Date().toISOString();
+  const raw = fs.readFileSync(resolved, "utf8");
+  const lines = raw.split(/\r?\n/);
+  const handled = [];
+
+  for (const lineNumber of selected) {
+    const index = lineNumber - 1;
+    const line = lines[index];
+    if (typeof line !== "string") {
+      continue;
+    }
+    const match = line.match(/^(\s*[-*+]\s+)\[\s\](\s+.*)$/);
+    if (!match) {
+      continue;
+    }
+    lines[index] = `${match[1]}[x]${match[2]} _(handled: ${reason}, ${stamp})_`;
+    handled.push(lineNumber);
+  }
+
+  if (handled.length > 0) {
+    fs.writeFileSync(resolved, `${lines.join("\n").replace(/\n*$/, "")}\n`, "utf8");
+  }
+
+  return { boardPath: resolved, handledCount: handled.length, lineNumbers: handled };
+}

@@ -33,6 +33,7 @@ import {
   writeRun,
   writeTracks,
 } from "./lib/orchestration-state.mjs";
+import { planFromGoal } from "./lib/goal-backlog.mjs";
 import {
   detectStopCondition,
   executeSingleTask,
@@ -49,6 +50,17 @@ import {
   writePlanReview,
 } from "./lib/plan-review.mjs";
 import { appendEventLog, buildEvent, observabilityPaths } from "./lib/observability.mjs";
+import {
+  collectApprovalChangeContext,
+  evaluateApprovalPolicy,
+  readApprovalPolicyConfig,
+} from "./lib/approval-policy.mjs";
+import {
+  commitTrackWorktreeResult,
+  prepareTrackWorktree,
+  readWorktreeIsolationConfig,
+  squashMergeTrackCommit,
+} from "./lib/worktree-isolation.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -57,6 +69,29 @@ function planTaskIds(plan) {
     return [];
   }
   return [plan.primaryTaskId, ...(Array.isArray(plan.parallelTracks) ? plan.parallelTracks : [])].filter(Boolean);
+}
+
+function tasksForPlan(state, plan) {
+  const taskIds = new Set(planTaskIds(plan));
+  return (Array.isArray(state?.tasks) ? state.tasks : [])
+    .filter((task) => taskIds.has(task.id));
+}
+
+function buildTrackOpts(base, overrides = {}) {
+  const child = { ...base, ...overrides };
+  for (const key of ["sprintBoardLock", "stateMutationLock"]) {
+    Object.defineProperty(child, key, {
+      get() {
+        return base[key];
+      },
+      set(value) {
+        base[key] = value;
+      },
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  return child;
 }
 
 function hasPendingTasks(state) {
@@ -191,6 +226,7 @@ async function orchestrateClose(opts) {
   run.phase = "done";
   run.locks = { executorPid: null };
   run.candidatePlan = null;
+  run.candidateBacklog = null;
   run.approvedPlanId = null;
   run.approvedCommitTasks = [];
   run.updatedAt = new Date().toISOString();
@@ -320,6 +356,7 @@ async function initRun(opts) {
     cycle: 0,
     approvedPlanId: null,
     candidatePlan: null,
+    candidateBacklog: null,
     approvedCommitTasks: [],
     locks: { executorPid: null },
     startedAt: new Date().toISOString(),
@@ -336,6 +373,17 @@ async function orchestratePlan(opts) {
   const run = readRun(opts.workDir);
   assertRunnablePhase(run, opts);
 
+  const goalBacklogResult = await planFromGoal(opts, {
+    apply: true,
+    reason: "orchestrate plan",
+  });
+  if (!goalBacklogResult.ok && (goalBacklogResult.intents ?? []).length > 0) {
+    fail(opts, "INTENT_PROCESSING_REQUIRED", "unprocessed human intent must be converted into backlog before planning", {
+      boardPath: goalBacklogResult.boardPath,
+      intents: goalBacklogResult.intents,
+    }, 2);
+  }
+
   const planResult = await sprintBoardExec(
     ["plan", "--json", "--max-parallel", String(opts.maxParallel)],
     opts
@@ -350,6 +398,7 @@ async function orchestratePlan(opts) {
   }
 
   run.candidatePlan = parsed.value;
+  run.candidateBacklog = goalBacklogResult.ok ? goalBacklogResult.candidateBacklog : (run.candidateBacklog ?? null);
   run.approvedPlanId = null;
   run.approvedCommitTasks = [];
   run.phase = "awaiting-plan-approval";
@@ -357,7 +406,20 @@ async function orchestratePlan(opts) {
   await writeRun(opts.workDir, run);
   clearPlanReview(opts.workDir);
 
-  const payload = { ok: true, phase: run.phase, runId: run.runId, candidatePlan: run.candidatePlan };
+  const payload = {
+    ok: true,
+    phase: run.phase,
+    runId: run.runId,
+    candidateBacklog: run.candidateBacklog,
+    goalToBacklog: goalBacklogResult.ok
+      ? {
+        applied: goalBacklogResult.applied,
+        appliedTasks: goalBacklogResult.appliedTasks,
+        handledIntent: goalBacklogResult.handledIntent,
+      }
+      : null,
+    candidatePlan: run.candidatePlan,
+  };
   await refreshSnapshot(opts);
   return emitResult(opts, payload);
 }
@@ -403,9 +465,89 @@ async function orchestrateReviewPlan(opts) {
     opts
   );
 
-  const payload = { ok: true, phase: run.phase, runId: run.runId, planHash: review.planHash, review };
+  const approvalPolicy = evaluateApprovalPolicy({
+    decisionPoint: "plan",
+    policy: readApprovalPolicyConfig(path.join(opts.workDir, ".va-auto-pilot", "config.yaml")),
+    qualityGate: gateConfig,
+    tasks: tasksForPlan(readSprintState(opts.stateFile), run.candidatePlan),
+    diffStat: {
+      changedFileCount: planTaskIds(run.candidatePlan).length,
+      estimatedDiffLines: 0,
+    },
+  });
+  let autoApproval = null;
+  if (approvalPolicy.autoApproved) {
+    autoApproval = await approveCandidatePlan(run, opts, {
+      approvalMode: "approvalPolicy",
+      policyDecision: approvalPolicy,
+    });
+    await sprintBoardExec(
+      [
+        "journal",
+        "--task",
+        "plan-review",
+        "--summary",
+        `approvalPolicy auto-approved plan ${autoApproval.planId}: ${approvalPolicy.reason}`,
+        "--signals",
+        `approval-policy:plan:${approvalPolicy.category}`,
+      ],
+      opts
+    );
+  } else {
+    run.approvalPolicyDecisions = {
+      ...(run.approvalPolicyDecisions ?? {}),
+      plan: approvalPolicy,
+    };
+    await writeRun(opts.workDir, run);
+  }
+
+  const payload = {
+    ok: true,
+    phase: run.phase,
+    runId: run.runId,
+    planHash: review.planHash,
+    review,
+    approvalPolicy,
+    autoApproval,
+  };
   await refreshSnapshot(opts);
   return emitResult(opts, payload);
+}
+
+async function approveCandidatePlan(run, opts, { approvalMode = "human", policyDecision = null } = {}) {
+  const planId = createPlanId();
+  run.approvedPlanId = planId;
+  run.phase = "plan-approved";
+  run.updatedAt = new Date().toISOString();
+  run.approvalPolicyDecisions = {
+    ...(run.approvalPolicyDecisions ?? {}),
+    ...(policyDecision ? { plan: policyDecision } : {}),
+  };
+  await writeRun(opts.workDir, run);
+
+  const checkpoint = buildCheckpoint({
+    stateFile: opts.stateFile,
+    workDir: opts.workDir,
+    approvedPlanId: planId,
+    candidatePlan: run.candidatePlan,
+  });
+  checkpoint.governance.approvalMode = approvalMode;
+  if (policyDecision) {
+    checkpoint.governance.approvalPolicy = policyDecision;
+  }
+  await writeCheckpoint(opts.workDir, checkpoint);
+  await appendGovernanceEvent(opts, run, "plan.approved", {
+    planId,
+    checkpointId: checkpoint.governance.checkpointId,
+    candidatePlan: run.candidatePlan,
+    approvalScope: checkpoint.governance.approvalScope,
+    invalidatesOn: checkpoint.governance.invalidatesOn,
+    stalePolicy: checkpoint.governance.stalePolicy,
+    approvalMode,
+    ...(policyDecision ? { approvalPolicy: policyDecision } : {}),
+  });
+
+  return { planId, checkpoint };
 }
 
 async function orchestrateApprovePlan(opts) {
@@ -433,29 +575,9 @@ async function orchestrateApprovePlan(opts) {
     );
   }
 
-  const planId = createPlanId();
-  run.approvedPlanId = planId;
-  run.phase = "plan-approved";
-  run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run);
+  const approval = await approveCandidatePlan(run, opts, { approvalMode: "human" });
 
-  const checkpoint = buildCheckpoint({
-    stateFile: opts.stateFile,
-    workDir: opts.workDir,
-    approvedPlanId: planId,
-    candidatePlan: run.candidatePlan,
-  });
-  await writeCheckpoint(opts.workDir, checkpoint);
-  await appendGovernanceEvent(opts, run, "plan.approved", {
-    planId,
-    checkpointId: checkpoint.governance.checkpointId,
-    candidatePlan: run.candidatePlan,
-    approvalScope: checkpoint.governance.approvalScope,
-    invalidatesOn: checkpoint.governance.invalidatesOn,
-    stalePolicy: checkpoint.governance.stalePolicy,
-  });
-
-  const payload = { ok: true, phase: run.phase, runId: run.runId, approvedPlanId: planId, checkpoint };
+  const payload = { ok: true, phase: run.phase, runId: run.runId, approvedPlanId: approval.planId, checkpoint: approval.checkpoint };
   await refreshSnapshot(opts);
   return emitResult(opts, payload);
 }
@@ -467,15 +589,25 @@ async function orchestrateDispatch(opts) {
 
   const taskIds = planTaskIds(run.candidatePlan);
   const workerOverrides = readWorkerOverrides(opts.workDir);
-  const tracks = taskIds.map((taskId) => ({
-    taskId,
-    state: "queued",
-    worker: workerOverrides.get(taskId) ?? null,
-    pid: null,
-    logFile: null,
-    startedAt: null,
-    lastHeartbeat: new Date().toISOString(),
-  }));
+  const worktreeConfig = readWorktreeIsolationConfig(path.join(opts.workDir, ".va-auto-pilot", "config.yaml"));
+  const tracks = [];
+  for (const taskId of taskIds) {
+    const track = {
+      taskId,
+      state: "queued",
+      worker: workerOverrides.get(taskId) ?? null,
+      pid: null,
+      logFile: null,
+      startedAt: null,
+      lastHeartbeat: new Date().toISOString(),
+    };
+    if (worktreeConfig.enabled === true) {
+      track.worktree = opts.dryRun
+        ? { enabled: true, status: "preview", path: path.resolve(opts.workDir, worktreeConfig.rootDir, taskId) }
+        : await prepareTrackWorktree({ workDir: opts.workDir, runId: run.runId, taskId, config: worktreeConfig });
+    }
+    tracks.push(track);
+  }
 
   run.phase = "dispatch-queued";
   run.updatedAt = new Date().toISOString();
@@ -484,9 +616,24 @@ async function orchestrateDispatch(opts) {
   await appendGovernanceEvent(opts, run, "dispatch.queued", {
     checkpointId: readCheckpoint(opts.workDir)?.governance?.checkpointId ?? run.approvedPlanId,
     queuedTasks: taskIds,
+    worktreeIsolation: {
+      enabled: worktreeConfig.enabled === true,
+      rootDir: worktreeConfig.rootDir,
+      tracks: tracks.map((track) => ({ taskId: track.taskId, worktree: track.worktree ?? null })),
+    },
   });
 
-  const payload = { ok: true, phase: run.phase, runId: run.runId, queuedTasks: taskIds };
+  const payload = {
+    ok: true,
+    phase: run.phase,
+    runId: run.runId,
+    queuedTasks: taskIds,
+    worktreeIsolation: {
+      enabled: worktreeConfig.enabled === true,
+      rootDir: worktreeConfig.rootDir,
+      tracks: tracks.map((track) => ({ taskId: track.taskId, worktree: track.worktree ?? null })),
+    },
+  };
   await refreshSnapshot(opts);
   return emitResult(opts, payload);
 }
@@ -534,7 +681,8 @@ async function orchestrateAwaitWorkers(opts) {
     return emitResult(opts, payload);
   }
 
-  const bridge = await createBridge(opts);
+  const usesWorktreeIsolation = queued.some((track) => track.worktree?.enabled === true && track.worktree?.path);
+  const sharedBridge = usesWorktreeIsolation ? null : await createBridge(opts);
   const gateConfig = readQualityGateConfig();
   const pitfalls = await loadUnresolvedPitfalls(opts);
   const execOpts = {
@@ -563,8 +711,28 @@ async function orchestrateAwaitWorkers(opts) {
     if (track.state === "halted") {
       return { taskId: track.taskId, action: "halted", terminal: true, skipped: true };
     }
-    const result = await executeSingleTask(track.taskId, bridge, pitfalls, gateConfig, execOpts);
-    return { taskId: track.taskId, ...result };
+    const trackOpts = track.worktree?.enabled === true && track.worktree?.path
+      ? buildTrackOpts(execOpts, { workDir: track.worktree.path })
+      : execOpts;
+    const bridge = track.worktree?.enabled === true && track.worktree?.path
+      ? await createBridge(trackOpts)
+      : (sharedBridge ?? await createBridge(trackOpts));
+    try {
+      const result = await executeSingleTask(track.taskId, bridge, pitfalls, gateConfig, trackOpts);
+      if (track.worktree?.enabled === true && result?.task?.state === "Done") {
+        const commitResult = await commitTrackWorktreeResult({
+          task: result.task,
+          worktree: track.worktree,
+        });
+        track.worktree.resultCommit = commitResult.hash;
+        track.worktree.commitResult = commitResult;
+      }
+      return { taskId: track.taskId, ...result };
+    } finally {
+      if (bridge && bridge !== sharedBridge && bridge.shutdown) {
+        await bridge.shutdown();
+      }
+    }
   };
 
   const settled = await Promise.allSettled(queued.map((track) => runTrack(track)));
@@ -598,15 +766,70 @@ async function orchestrateAwaitWorkers(opts) {
 
   await writeTracks(opts.workDir, tracksDoc);
 
-  if (!opts.dryRun && bridge.shutdown) {
-    await bridge.shutdown();
+  if (!opts.dryRun && sharedBridge?.shutdown) {
+    await sharedBridge.shutdown();
   }
 
+  const stateAfterWorkers = readSprintState(opts.stateFile);
+  const plannedTaskIds = new Set(planTaskIds(run.candidatePlan));
+  const doneTasks = (stateAfterWorkers.tasks ?? [])
+    .filter((task) => plannedTaskIds.has(task.id) && task.state === "Done");
+  let approvalPolicy = null;
+  let autoApproval = null;
+
   run.phase = "awaiting-commit-approval";
+  if (doneTasks.length > 0) {
+    const changeContext = await collectApprovalChangeContext(opts.workDir);
+    approvalPolicy = evaluateApprovalPolicy({
+      decisionPoint: "commit",
+      policy: readApprovalPolicyConfig(path.join(opts.workDir, ".va-auto-pilot", "config.yaml")),
+      qualityGate: gateConfig,
+      tasks: doneTasks,
+      changedFiles: changeContext.changedFiles,
+      diffStat: changeContext.diffStat,
+    });
+    run.approvalPolicyDecisions = {
+      ...(run.approvalPolicyDecisions ?? {}),
+      commit: approvalPolicy,
+    };
+    if (approvalPolicy.autoApproved) {
+      run.approvedCommitTasks = doneTasks.map((task) => task.id);
+      run.phase = "commit-approved";
+      autoApproval = {
+        approvedCommitTasks: run.approvedCommitTasks,
+        approvalPolicy,
+      };
+      await appendGovernanceEvent(opts, run, "commit.approved", {
+        approvalMode: "approvalPolicy",
+        approvedCommitTasks: run.approvedCommitTasks,
+        approvalPolicy,
+      });
+      await sprintBoardExec(
+        [
+          "journal",
+          "--task",
+          "commit-approval",
+          "--summary",
+          `approvalPolicy auto-approved commit for ${run.approvedCommitTasks.join(", ")}: ${approvalPolicy.reason}`,
+          "--signals",
+          `approval-policy:commit:${approvalPolicy.category}`,
+        ],
+        opts
+      );
+    }
+  }
   run.updatedAt = new Date().toISOString();
   await writeRun(opts.workDir, run);
 
-  const payload = { ok: true, phase: run.phase, runId: run.runId, results, parallel: queued.length };
+  const payload = {
+    ok: true,
+    phase: run.phase,
+    runId: run.runId,
+    results,
+    parallel: queued.length,
+    approvalPolicy,
+    autoApproval,
+  };
   await refreshSnapshot(opts);
   return emitResult(opts, payload);
 }
@@ -647,6 +870,8 @@ async function orchestrateCommit(opts) {
 
   const approved = new Set(run.approvedCommitTasks ?? []);
   const state = readSprintState(opts.stateFile);
+  const tracksDoc = readTracks(opts.workDir);
+  const tracksByTaskId = new Map((tracksDoc.tracks ?? []).map((track) => [track.taskId, track]));
   const tasksToCommit = [];
   const commits = [];
 
@@ -666,8 +891,21 @@ async function orchestrateCommit(opts) {
   }
 
   for (const { taskId, task } of tasksToCommit) {
+    const track = tracksByTaskId.get(taskId);
+    let worktreeMerge = null;
+    if (track?.worktree?.enabled === true) {
+      try {
+        worktreeMerge = await squashMergeTrackCommit({ workDir: opts.workDir, track });
+      } catch (error) {
+        fail(opts, "WORKTREE_MERGE_FAILED", `failed to squash merge ${taskId} worktree result`, {
+          taskId,
+          worktree: track.worktree,
+          message: error instanceof Error ? error.message : String(error),
+        }, 1);
+      }
+    }
     const result = await finalizeDoneTaskCommit(task, opts);
-    commits.push({ taskId, ok: result.ok, details: result.details, hash: result.commitResult?.hash });
+    commits.push({ taskId, ok: result.ok, details: result.details, hash: result.commitResult?.hash, worktreeMerge });
     if (!result.ok) {
       run.phase = "awaiting-commit-approval";
       run.approvedCommitTasks = [];
@@ -744,28 +982,7 @@ async function approveCurrentPlanForUnattended(opts) {
     fail(opts, "NO_CANDIDATE_PLAN", "run orchestrate plan first", {}, 2);
   }
 
-  const planId = createPlanId();
-  run.approvedPlanId = planId;
-  run.phase = "plan-approved";
-  run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run);
-
-  const checkpoint = buildCheckpoint({
-    stateFile: opts.stateFile,
-    workDir: opts.workDir,
-    approvedPlanId: planId,
-    candidatePlan: run.candidatePlan,
-  });
-  await writeCheckpoint(opts.workDir, checkpoint);
-  await appendGovernanceEvent(opts, run, "plan.approved", {
-    planId,
-    checkpointId: checkpoint.governance.checkpointId,
-    candidatePlan: run.candidatePlan,
-    approvalScope: checkpoint.governance.approvalScope,
-    invalidatesOn: checkpoint.governance.invalidatesOn,
-    stalePolicy: checkpoint.governance.stalePolicy,
-    approvalMode: "waive-approvals",
-  });
+  const { checkpoint } = await approveCandidatePlan(run, opts, { approvalMode: "waive-approvals" });
   await refreshSnapshot(opts);
 
   return { run, checkpoint };

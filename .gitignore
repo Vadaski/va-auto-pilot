@@ -6,5 +6,6 @@ dist/
 coverage/
 .va-conductor/conductor.db
 .va-mcp/
+.va/worktrees/
 .va-auto-pilot/orchestration/
 .va-auto-pilot/parallel-runs/

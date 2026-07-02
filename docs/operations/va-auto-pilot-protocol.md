@@ -70,21 +70,33 @@ commands belong in `nextCommands[].argv` for the session agent.
 | `.va-auto-pilot/orchestration/directives.json` | **Tactical** directives for the active run only (halt, replan, supersede-plan) — **not** merged into human-board |
 | `.va-auto-pilot/orchestration/run.json` | Active run phase, approved plan id, approved commit tasks |
 | `.va-auto-pilot/orchestration/tracks.json` | Per-track execution status |
+| `.va-auto-pilot/orchestration/candidate-backlog.json` | Explicit goal-to-backlog proposal generated from unprocessed intent |
 | `.va-auto-pilot/orchestration/checkpoint.json` | Snapshot at last `approve-plan` (invalidates dispatch if stale) |
 | `.va-auto-pilot/orchestration/snapshot.json` | Read-only aggregate for `observe --json`, including `recommendedActions` text and executable `nextCommands[].argv` suggestions |
 
-### Approval gates (mandatory in orchestrated mode)
+### Goal-to-backlog gate
 
-1. **`review-plan`** — required after `plan`, before `approve-plan`. Manager runs a **read-only** configured reviewer agent on `candidatePlan` + human-board context. Writes `.va-auto-pilot/orchestration/plan-review.json` bound to `planHash`. **Do not dispatch or implement until review passes** (no CRITICAL findings). Record summary in run-journal.
-2. **`approve-plan`** — required after `review-plan`, before `dispatch`. Records checkpoint (sprint-state hash, human-board hash, git HEAD). Blocks if `plan-review.json` is missing, stale, or reports CRITICAL. Emergency: `--waive-review-with-reason "..."` (journaled).
-3. **`approve-commit --tasks AP-001,...`** — required after workers settle and gates pass, before `commit`.
+`goal` captures durable objective intent. `plan-from-goal` turns unchecked intent into `.va-auto-pilot/orchestration/candidate-backlog.json`. `plan-from-goal --apply` writes candidate items into sprint state and marks the consumed human-board intent `[x]`. `orchestrate plan` performs this conversion automatically when unchecked objective intent exists.
 
-There is no auto-approve in interactive orchestrated mode.
+### Approval gates
+
+1. **`review-plan`** — required after `plan`, before `dispatch`. Manager runs a **read-only** configured reviewer agent on `candidatePlan` + human-board context. Writes `.va-auto-pilot/orchestration/plan-review.json` bound to `planHash`. **Do not dispatch or implement until review passes** (no CRITICAL findings). Record summary in run-journal.
+2. **`approve-plan`** — required after `review-plan`, before `dispatch` unless `approvalPolicy` auto-approves the reviewed plan. Records checkpoint (sprint-state hash, human-board hash, git HEAD). Blocks if `plan-review.json` is missing, stale, or reports CRITICAL. Emergency: `--waive-review-with-reason "..."` (journaled).
+3. **`approve-commit --tasks AP-001,...`** — required after workers settle and gates pass, before `commit` unless `approvalPolicy` auto-approves the completed work.
+
+`approvalPolicy` is risk based. Safe examples: `docsOnly: auto-if-gates-trusted`, `testsOnly: auto-if-gates-trusted`, `smallRefactor: auto-if-no-risk-signals`. High-risk categories such as `apiChange`, `securityChange`, and `researchClaimChange` should remain `human-required`.
+
+### Worktree isolation
+
+When `.va-auto-pilot/config.yaml` sets `worktreeIsolation.enabled: true`, `dispatch` maps each track to `.va/worktrees/<taskId>`. Workers execute and gate inside their own git worktree. If a track reaches Done, Auto-Pilot creates a track-local result commit. During `orchestrate commit`, the manager squash-merges the approved track commit into the main worktree, then creates the final governed commit.
 
 ### Manager loop (one cycle)
 
 ```bash
 node scripts/auto-pilot.mjs orchestrate init --manager-surface cursor
+node scripts/auto-pilot.mjs goal --text "..."
+node scripts/auto-pilot.mjs plan-from-goal --json
+node scripts/auto-pilot.mjs plan-from-goal --apply --json
 node scripts/auto-pilot.mjs orchestrate plan --max-parallel 3
 node scripts/auto-pilot.mjs observe --json
 node scripts/auto-pilot.mjs orchestrate review-plan

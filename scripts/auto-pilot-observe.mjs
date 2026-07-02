@@ -11,6 +11,7 @@ import {
   buildRecoveryPlan,
   isTerminalRunPhase,
   isCheckpointStale,
+  readCandidateBacklog,
   readCheckpoint,
   readDirectives,
   readRun,
@@ -859,11 +860,13 @@ export function buildCockpit(snapshot) {
           phase: snapshot.run.phase,
           approvedPlanId: snapshot.run.approvedPlanId ?? null,
           approvedCommitTasks: snapshot.run.approvedCommitTasks ?? [],
+          approvalPolicyDecisions: snapshot.run.approvalPolicyDecisions ?? {},
         }
         : null,
       sprint: snapshot.sprint,
       checkpointStatus: snapshot.checkpointStatus,
       checkpointGovernance: snapshot.checkpoint?.governance ?? null,
+      candidateBacklog: snapshot.candidateBacklog ?? null,
       directives: snapshot.directives,
       anomalies: snapshot.anomalies ?? [],
       pitfalls: snapshot.pitfalls ?? [],
@@ -877,6 +880,7 @@ export async function refreshSnapshot(opts) {
   const run = readRun(opts.workDir);
   const tracks = readTracks(opts.workDir);
   const checkpoint = readCheckpoint(opts.workDir);
+  const candidateBacklog = readCandidateBacklog(opts.workDir);
   const directives = readDirectives(opts.workDir);
   const state = readSprintState(opts.stateFile);
   const stopCondition = detectStopCondition(state);
@@ -922,6 +926,7 @@ export async function refreshSnapshot(opts) {
     schemaVersion: 1,
     updatedAt: new Date().toISOString(),
     run,
+    candidateBacklog,
     tracks: tracks?.tracks ? tracks : { runId: run?.runId ?? null, tracks: [] },
     checkpoint,
     directives: {
@@ -1144,8 +1149,9 @@ function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pen
   if (anomalies?.some((a) => a.code === "STALE_RUN_PHASE")) {
     commands.push(command("Close stale run", ["orchestrate", "close"], "Run phase is stale after sprint work settled."));
   }
-  if (uncheckedBoard.length > 0 && run && !isTerminalRunPhase(run.phase)) {
-    commands.push(command("Review cockpit", ["cockpit", "--json"], "Unchecked human intent may affect dispatch decisions."));
+  if (uncheckedBoard.length > 0) {
+    commands.push(command("Generate candidate backlog", ["plan-from-goal", "--json"], "Turn unchecked goal intent into an explicit candidate backlog."));
+    commands.push(command("Apply candidate backlog", ["plan-from-goal", "--apply", "--json"], "Persist candidate backlog items into sprint state and mark intent handled."));
   }
   if (hasHaltDirective(directives)) {
     commands.push(command("Observe halt directive", ["observe", "--json"], "A halt directive is active; clear or supersede it before continuing."));

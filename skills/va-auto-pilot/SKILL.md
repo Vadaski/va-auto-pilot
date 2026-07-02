@@ -65,6 +65,8 @@ Use the cockpit and intent commands as the daily agent-facing interface:
 
 ```bash
 node scripts/auto-pilot.mjs goal --text "..."
+node scripts/auto-pilot.mjs plan-from-goal --json
+node scripts/auto-pilot.mjs plan-from-goal --apply --json
 node scripts/auto-pilot.mjs cockpit --json
 node scripts/auto-pilot.mjs gates audit --json
 node scripts/auto-pilot.mjs gates maintain --apply --json
@@ -75,6 +77,11 @@ node scripts/auto-pilot.mjs intent acceptance --text "..."
 node scripts/auto-pilot.mjs intent override --text "..."
 ```
 
+`goal` writes objective intent; `plan-from-goal` turns unchecked objective intent
+into `.va-auto-pilot/orchestration/candidate-backlog.json`. With `--apply`, it
+writes candidate items into sprint state and marks consumed intent handled.
+`orchestrate plan` performs this conversion automatically when unchecked
+objective intent exists.
 `intent` writes to the human override channel without requiring the user to edit
 `human-board.md`; stale approval invalidation still applies.
 `gates maintain --apply` is agent-internal cleanup for resolved placeholder
@@ -101,13 +108,15 @@ Adaptive: `node scripts/sprint-board.mjs suggest-gate` reads unresolved pitfalls
 node scripts/auto-pilot.mjs orchestrate init --manager-surface cursor
 node scripts/auto-pilot.mjs cockpit --json
 node scripts/auto-pilot.mjs goal --text "..."
+node scripts/auto-pilot.mjs plan-from-goal --json
+node scripts/auto-pilot.mjs plan-from-goal --apply --json
 node scripts/auto-pilot.mjs orchestrate plan
 node scripts/auto-pilot.mjs observe --json
-node scripts/auto-pilot.mjs orchestrate review-plan    # Codex/read-only plan review — required before approve
-node scripts/auto-pilot.mjs orchestrate approve-plan   # explicit — required after review-plan
+node scripts/auto-pilot.mjs orchestrate review-plan    # Codex/read-only plan review; approvalPolicy may auto-approve
+node scripts/auto-pilot.mjs orchestrate approve-plan   # explicit when approvalPolicy requires human judgment
 node scripts/auto-pilot.mjs orchestrate dispatch
 node scripts/auto-pilot.mjs orchestrate await-workers
-node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-XXX
+node scripts/auto-pilot.mjs orchestrate approve-commit --tasks AP-XXX # explicit when approvalPolicy requires human judgment
 node scripts/auto-pilot.mjs orchestrate commit
 node scripts/auto-pilot.mjs orchestrate recover --json     # diagnose stale/crashed run state
 ```
@@ -132,6 +141,19 @@ Unattended only: `node scripts/auto-pilot-loop.mjs --max-cycles 50` or `orchestr
 - `--parallel` (default): dispatches independent tasks concurrently via `plan --json`
 - `--no-parallel`: serialize all tasks
 - `--max-parallel <n>`: control concurrency (default: 3)
+- Optional worktree isolation maps each queued track to `.va/worktrees/<taskId>`
+  when `worktreeIsolation.enabled: true`; manager squash-merges approved track
+  commits during `orchestrate commit`.
+
+### Risk-Based Approval Policy
+- `approvalPolicy` in `.va-auto-pilot/config.yaml` can auto-approve only low-risk
+  categories when configured conditions hold.
+- Recommended shape: `docsOnly: auto-if-gates-trusted`,
+  `testsOnly: auto-if-gates-trusted`, `smallRefactor:
+  auto-if-no-risk-signals`, and `apiChange` / `securityChange` /
+  `researchClaimChange`: `human-required`.
+- Without `approvalPolicy`, interactive runs remain human-required for
+  `approve-plan` and `approve-commit`.
 
 ### Error Recovery
 - Failures are classified: build/lint/test/review/dispatch/commit
@@ -193,6 +215,7 @@ Cross-project: inherit proven gates from similar projects.
 # Autonomous loop (primary)
 node scripts/auto-pilot.mjs cockpit [--json]
 node scripts/auto-pilot.mjs goal --text "..."
+node scripts/auto-pilot.mjs plan-from-goal [--apply] [--json]
 node scripts/auto-pilot.mjs intent objective --text "..."
 node scripts/auto-pilot-loop.mjs [--max-cycles 50] [--no-parallel] [--skip-sprint-review]
 node scripts/auto-pilot.mjs orchestrate recover [--apply] [--json]

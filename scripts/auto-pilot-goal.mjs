@@ -7,14 +7,32 @@ function buildGoalCommands(snapshot) {
     : [];
 
   if (commands.length > 0) {
-    return commands;
+    const goalBacklogCommands = [
+      {
+        label: "Generate candidate backlog",
+        argv: ["node", "scripts/auto-pilot.mjs", "plan-from-goal", "--json"],
+        reason: "Turn the captured goal intent into an explicit candidate backlog.",
+      },
+      {
+        label: "Apply candidate backlog",
+        argv: ["node", "scripts/auto-pilot.mjs", "plan-from-goal", "--apply", "--json"],
+        reason: "Write reviewed candidate backlog items into sprint state when the direction is correct.",
+      },
+    ];
+    const duplicate = (command) => (command.argv ?? []).includes("plan-from-goal");
+    return [...goalBacklogCommands, ...commands.filter((command) => !duplicate(command))];
   }
 
   return [
     {
-      label: "Inspect cockpit",
-      argv: ["node", "scripts/auto-pilot.mjs", "cockpit", "--json"],
-      reason: "Goal was captured; inspect the goal/risk/evidence control surface.",
+      label: "Generate candidate backlog",
+      argv: ["node", "scripts/auto-pilot.mjs", "plan-from-goal", "--json"],
+      reason: "Turn the captured goal intent into an explicit candidate backlog.",
+    },
+    {
+      label: "Apply candidate backlog",
+      argv: ["node", "scripts/auto-pilot.mjs", "plan-from-goal", "--apply", "--json"],
+      reason: "Write reviewed candidate backlog items into sprint state when the direction is correct.",
     },
   ];
 }

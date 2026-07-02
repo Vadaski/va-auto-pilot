@@ -119,6 +119,8 @@ Options (add):
   --title <text>            (required) Task title
   --priority <P0|P1|P2|P3> (required) Task priority
   --source <text>           Origin of the task (e.g. "codex review", "dogfood")
+  --note <text>             Initial task notes
+  --owner <text>            Initial owner
   --depends-on <ID1,ID2,...> Comma-separated task IDs this task depends on
 
 Options (update):
@@ -701,7 +703,7 @@ function addTask(state, options) {
     title,
     priority,
     state: "Backlog",
-    owner: "",
+    owner: options.owner ?? "",
     source: options.source ?? "",
     createdAt,
     startedAt: "",
@@ -710,7 +712,7 @@ function addTask(state, options) {
     failCount: 0,
     reason: "",
     verification: "",
-    notes: "",
+    notes: options.note ?? "",
     review: {},
     testing: {},
     dependsOn: options["depends-on"] ? normalizeDependsOn(options["depends-on"]) : []

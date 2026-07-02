@@ -81,6 +81,7 @@ Usage:
   va-auto-pilot gates audit [options]
   va-auto-pilot gates maintain [--apply] [options]
   va-auto-pilot goal --text "..."
+  va-auto-pilot plan-from-goal [--apply] [--json]
   va-auto-pilot intent <objective|constraint|risk|acceptance|override|note> --text "..."
   va-auto-pilot intervene <subcommand> [options]
   va-auto-pilot --help
@@ -94,6 +95,7 @@ Commands:
   cockpit      Print the human-facing goal/risk/evidence control surface
   gates        Audit and maintain internal quality gate trust
   goal         Capture a goal and return the cockpit/next agent actions
+  plan-from-goal Generate/apply candidate backlog from captured objective intent
   intent       Append human intent through the agent-managed override channel
   intervene    Tactical directives for the active run (separate from human-board)
 
@@ -140,6 +142,7 @@ Examples:
   va-auto-pilot gates audit --json
   va-auto-pilot gates maintain --apply --json
   va-auto-pilot goal --text "Ship a reliable release" --json
+  va-auto-pilot plan-from-goal --apply --json
   va-auto-pilot intent objective --text "Ship a reliable release"
   va-auto-pilot orchestrate recover --json
   va-auto-pilot orchestrate recover --apply
@@ -535,16 +538,18 @@ function runInit(parsed) {
   if (!dryRun) {
     console.log("\nNext steps:");
     console.log('1. Capture the first objective with va-auto-pilot goal --text "..."');
-    console.log("2. Open the human cockpit with va-auto-pilot cockpit");
-    console.log("3. Use va-auto-pilot cockpit --json for agent/debug auditability");
+    console.log("2. Generate candidate backlog with va-auto-pilot plan-from-goal --json");
+    console.log("3. Apply candidate backlog with va-auto-pilot plan-from-goal --apply --json");
+    console.log("4. Open the human cockpit with va-auto-pilot cockpit");
+    console.log("5. Use va-auto-pilot cockpit --json for agent/debug auditability");
     if (demo) {
-      console.log(`4. Run ${DEMO_GATE_COMMAND}`);
-      console.log("5. Start governed execution with va-auto-pilot orchestrate init");
+      console.log(`6. Run ${DEMO_GATE_COMMAND}`);
+      console.log("7. Start governed execution with va-auto-pilot orchestrate init");
     } else {
-      console.log("4. Start governed execution with va-auto-pilot orchestrate init");
-      console.log("5. Run your first acceptance flow with scripts/test-runner.ts");
+      console.log("6. Start governed execution with va-auto-pilot orchestrate init");
+      console.log("7. Run your first acceptance flow with scripts/test-runner.ts");
       console.log(
-        "6. Keep humans on goal, risk, and evidence decisions; leave sprint-state, journal, pitfalls, and phases to the agent"
+        "8. Keep humans on goal, risk, and evidence decisions; leave sprint-state, journal, pitfalls, and phases to the agent"
       );
     }
   }
@@ -926,7 +931,7 @@ function main() {
     process.exit(0);
   }
 
-  if (["orchestrate", "observe", "cockpit", "gates", "goal", "intent", "intervene"].includes(argv[0])) {
+  if (["orchestrate", "observe", "cockpit", "gates", "goal", "plan-from-goal", "intent", "intervene"].includes(argv[0])) {
     runAutoPilotCli(argv);
     return;
   }

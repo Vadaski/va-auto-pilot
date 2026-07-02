@@ -167,6 +167,8 @@ Try the default human workflow:
 va-auto-pilot init ./auto-pilot-demo --demo
 cd ./auto-pilot-demo
 va-auto-pilot goal --text "Ship this project to a releasable state"
+va-auto-pilot plan-from-goal --json
+va-auto-pilot plan-from-goal --apply --json
 va-auto-pilot cockpit
 ```
 
@@ -177,7 +179,9 @@ orchestration phases remain auditable internals for the agent. Journal evidence
 is summarized into recent completions, failures, gates, and decisions before it
 is shown to humans, with gate trust compressed into evidence-risk signals.
 Agents can maintain stale placeholder gates with `va-auto-pilot gates audit` and
-`va-auto-pilot gates maintain --apply`.
+`va-auto-pilot gates maintain --apply`. The explicit goal path is
+`goal -> plan-from-goal -> candidate backlog -> orchestrate plan -> review-plan`;
+`orchestrate plan` also consumes unchecked objective intent automatically.
 
 Default cockpit output starts with the decisions a human needs:
 
@@ -197,8 +201,8 @@ Evidence: collecting
   Commit readiness: not-ready - No completed worker results are waiting to commit.
 Approval: No human approval needed now. Manager action required: New human intent must be incorporated before worker dispatch.
 Manager next:
-1. Start run: node scripts/auto-pilot.mjs orchestrate init - No active orchestration run exists.
-2. Plan next cycle: node scripts/auto-pilot.mjs orchestrate plan - Pending sprint tasks are available.
+1. Generate candidate backlog: node scripts/auto-pilot.mjs plan-from-goal --json - Turn unchecked goal intent into an explicit candidate backlog.
+2. Apply candidate backlog: node scripts/auto-pilot.mjs plan-from-goal --apply --json - Persist candidate backlog items into sprint state and mark intent handled.
 ```
 
 Use `va-auto-pilot cockpit --json` when a manager agent or debugger needs the

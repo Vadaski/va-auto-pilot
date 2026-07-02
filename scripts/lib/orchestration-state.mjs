@@ -26,6 +26,7 @@ export function orchestrationPaths(workDir = process.cwd()) {
     checkpoint: path.join(dir, "checkpoint.json"),
     snapshot: path.join(dir, "snapshot.json"),
     directives: path.join(dir, "directives.json"),
+    candidateBacklog: path.join(dir, "candidate-backlog.json"),
   };
 }
 
@@ -54,6 +55,11 @@ export function readTracks(workDir) {
 export function readCheckpoint(workDir) {
   const { checkpoint } = orchestrationPaths(workDir);
   return readJsonFile(checkpoint, null);
+}
+
+export function readCandidateBacklog(workDir) {
+  const { candidateBacklog } = orchestrationPaths(workDir);
+  return readJsonFile(candidateBacklog, null);
 }
 
 export function readDirectives(workDir) {
@@ -102,6 +108,14 @@ export async function writeSnapshot(workDir, value) {
   const { snapshot } = orchestrationPaths(workDir);
   await withPilotFileLock(snapshot, async () => {
     writeJsonFileAtomicSync(snapshot, value);
+  });
+}
+
+export async function writeCandidateBacklog(workDir, value) {
+  ensureOrchestrationDir(workDir);
+  const { candidateBacklog } = orchestrationPaths(workDir);
+  await withPilotFileLock(candidateBacklog, async () => {
+    writeJsonFileAtomicSync(candidateBacklog, value);
   });
 }
 

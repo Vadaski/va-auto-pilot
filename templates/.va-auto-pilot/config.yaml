@@ -8,6 +8,18 @@ qualityGate:
   buildCommand: "{{BUILD_COMMAND}}"
   reviewCommand: "{{REVIEW_COMMAND}}"
   acceptanceTestCommand: "{{TEST_COMMAND}}"
+approvalPolicy:
+  docsOnly: auto-if-gates-trusted
+  testsOnly: auto-if-gates-trusted
+  smallRefactor: auto-if-no-risk-signals
+  apiChange: human-required
+  securityChange: human-required
+  researchClaimChange: human-required
+worktreeIsolation:
+  enabled: false
+  rootDir: ".va/worktrees"
+  branchPrefix: "va-track"
+  cleanup: keep
 review:
   domainRoleName: "{{DOMAIN_ROLE_NAME}}"
   domainPrompt: "{{DOMAIN_EXPERT_PROMPT}}"

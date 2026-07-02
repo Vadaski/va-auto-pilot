@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { DEFAULT_AGENT_TEMPLATE, parseArgv, resolveDefaults } from "./sprint-utils.mjs";
+import { DEFAULT_TRACK_TIMEOUT_MS, DEFAULT_MAX_PARALLEL } from "./constants.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -37,13 +38,13 @@ export function buildOrchestrationOpts(argv, extra = {}) {
     noColony: parsed.flags.has("no-colony"),
     strict: parsed.flags.has("strict"),
     waiveApprovals: parsed.flags.has("waive-approvals"),
-    maxParallel: Number.parseInt(parsed.options["max-parallel"] ?? "3", 10),
+    maxParallel: Number.parseInt(parsed.options["max-parallel"] ?? String(DEFAULT_MAX_PARALLEL), 10),
     runId: parsed.options["run-id"] ?? "",
     managerSurface: parsed.options["manager-surface"] ?? "unknown",
     tasks: parsed.options.tasks ?? "",
     reason: parsed.options.reason ?? "",
     worker: parsed.options.worker ?? "",
-    timeoutMs: Number.parseInt(parsed.options.timeout ?? "600000", 10),
+    timeoutMs: Number.parseInt(parsed.options.timeout ?? String(DEFAULT_TRACK_TIMEOUT_MS), 10),
     pollIntervalMs: Number.parseInt(parsed.options["poll-interval"] ?? "2000", 10),
     stateFile: path.resolve(parsed.options["state-file"] ?? defaults.stateFile),
     boardFile: path.resolve(parsed.options["board-file"] ?? defaults.boardFile),
@@ -51,7 +52,7 @@ export function buildOrchestrationOpts(argv, extra = {}) {
     pitfallsFile: path.resolve(parsed.options["pitfalls-file"] ?? ".va-auto-pilot/pitfalls.json"),
     workDir: process.cwd(),
     agentTemplate: parsed.options["agent-template"] ?? DEFAULT_AGENT_TEMPLATE,
-    trackTimeout: Number.parseInt(parsed.options["track-timeout"] ?? "600000", 10),
+    trackTimeout: Number.parseInt(parsed.options["track-timeout"] ?? String(DEFAULT_TRACK_TIMEOUT_MS), 10),
     sprintBoardLock: Promise.resolve(),
     stateMutationLock: Promise.resolve(),
     taskBaselines: new Map(),

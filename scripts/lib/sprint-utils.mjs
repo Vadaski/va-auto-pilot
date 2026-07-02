@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { parse as parseYaml } from "yaml";
+import { DEFAULT_SMOKE_TEST_TIMEOUT_MS } from "./constants.mjs";
 
 export const DEFAULT_AGENT_TEMPLATE = 'node -e "console.error(\'[va-auto-pilot] No agent configured. Pass --agent-template or set a worker override for task {taskId}.\'); process.exit(127)"';
 export const DEFAULT_AGENT_TEMPLATE_HELP = "vendor-neutral placeholder; configure with --agent-template or a worker override";
@@ -132,7 +133,10 @@ export const DEFAULT_AGENT_TEMPLATE_HELP = "vendor-neutral placeholder; configur
  * @typedef {Object} QualityGateConfig
  * @property {string} [buildCommand]
  * @property {string} [reviewCommand]
+ * @property {string} [planReviewCommand]
  * @property {string} [acceptanceTestCommand]
+ * @property {object} [budget]
+ * @property {object} [runBudget]
  * @property {string} [smokeTestCommand]
  * @property {Object} [smokeTest]
  * @property {boolean} [smokeTest.enabled]
@@ -411,7 +415,7 @@ export async function runSmokeTests(options = {}) {
   }
 
   const screenshotDir = smokeTest.screenshotDir ?? ".va-auto-pilot/screenshots";
-  const timeout = typeof smokeTest.timeout === "number" ? smokeTest.timeout : 30000;
+  const timeout = typeof smokeTest.timeout === "number" ? smokeTest.timeout : DEFAULT_SMOKE_TEST_TIMEOUT_MS;
 
   const gateResults = [];
   const pitfallEntries = [];

@@ -161,7 +161,7 @@ test("init --force retains registered extensions", async () => {
   await store.close();
   await initStore(cwd, "--force");
   const index = await readIndex(path.join(cwd, ".docstore", "INDEX.json"));
-  assert.equal(Boolean(index.extensions.registeredTypes.kept), true);
+  assert.equal(Boolean(/** @type {any} */ (index.extensions).registeredTypes.kept), true);
 });
 
 test("doctor on clean store returns ok and exits zero", async () => {
@@ -414,27 +414,27 @@ test("init --force still lets explicit --managed-roots override existing config 
 });
 
 test("mode enforcement stays permissive in legacy mode", () => {
-  const result = checkStagedDiff({ stagedFiles: [{ path: ".docstore/designs/x.json", status: "M" }], config: { ...buildDefaultConfig(), managedRoots: [".docstore/designs"] }, index: { entries: {} } });
+  const result = checkStagedDiff({ stagedFiles: [{ path: ".docstore/designs/x.json", status: "M" }], config: { ...buildDefaultConfig(), managedRoots: [".docstore/designs"] }, index: { entries: {} }, previousIndex: { entries: {} } });
   assert.equal(result.ok, true);
 });
 
 test("mode enforcement ignores unmanaged paths in mixed mode", () => {
-  const result = checkStagedDiff({ stagedFiles: [{ path: "docs/legacy.md", status: "M" }], config: { ...buildDefaultConfig(), mode: "mixed", managedRoots: [".docstore/designs"] }, index: { entries: {} } });
+  const result = checkStagedDiff({ stagedFiles: [{ path: "docs/legacy.md", status: "M" }], config: { ...buildDefaultConfig(), mode: "mixed", managedRoots: [".docstore/designs"] }, index: { entries: {} }, previousIndex: { entries: {} } });
   assert.equal(result.ok, true);
 });
 
 test("mode enforcement flags bare managed modify in mixed mode", () => {
-  const result = checkStagedDiff({ stagedFiles: [{ path: ".docstore/designs/x.json", status: "M" }], config: { ...buildDefaultConfig(), mode: "mixed", managedRoots: [".docstore/designs"] }, index: { entries: {} } });
+  const result = checkStagedDiff({ stagedFiles: [{ path: ".docstore/designs/x.json", status: "M" }], config: { ...buildDefaultConfig(), mode: "mixed", managedRoots: [".docstore/designs"] }, index: { entries: {} }, previousIndex: { entries: {} } });
   assert.equal(result.violations[0]?.type, "BARE_MANAGED_MODIFY");
 });
 
 test("mode enforcement flags unregistered managed add in mixed mode", () => {
-  const result = checkStagedDiff({ stagedFiles: [{ path: ".docstore/designs/x.json", status: "A" }], config: { ...buildDefaultConfig(), mode: "mixed", managedRoots: [".docstore/designs"] }, index: { entries: {} } });
+  const result = checkStagedDiff({ stagedFiles: [{ path: ".docstore/designs/x.json", status: "A" }], config: { ...buildDefaultConfig(), mode: "mixed", managedRoots: [".docstore/designs"] }, index: { entries: {} }, previousIndex: { entries: {} } });
   assert.equal(result.violations[0]?.type, "UNREGISTERED_MANAGED_ADD");
 });
 
 test("mode enforcement flags bare managed modify in managed mode", () => {
-  const result = checkStagedDiff({ stagedFiles: [{ path: ".docstore/process/x.json", status: "M" }], config: { ...buildDefaultConfig(), mode: "managed", managedRoots: [".docstore/process"] }, index: { entries: {} } });
+  const result = checkStagedDiff({ stagedFiles: [{ path: ".docstore/process/x.json", status: "M" }], config: { ...buildDefaultConfig(), mode: "managed", managedRoots: [".docstore/process"] }, index: { entries: {} }, previousIndex: { entries: {} } });
   assert.equal(result.violations[0]?.type, "BARE_MANAGED_MODIFY");
 });
 

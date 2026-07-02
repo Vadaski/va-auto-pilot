@@ -10,7 +10,7 @@ export async function runPlanFromGoal(argv) {
   });
 
   if (!result.ok) {
-    const error = result.error ?? {};
+    const error = result.error ?? { code: "PLAN_FROM_GOAL_FAILED", message: "failed to plan from goal" };
     fail(opts, error.code ?? "PLAN_FROM_GOAL_FAILED", error.message ?? "failed to plan from goal", {
       boardPath: result.boardPath,
       intents: result.intents ?? [],

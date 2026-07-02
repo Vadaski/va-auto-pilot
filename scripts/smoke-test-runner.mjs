@@ -17,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
+import { DEFAULT_SMOKE_TEST_TIMEOUT_MS } from "./lib/constants.mjs";
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -24,7 +25,7 @@ import { parse as parseYaml } from "yaml";
 
 function parseArgs(argv) {
   const args = argv.slice(2);
-  const opts = { config: null, screenshotDir: null, timeout: 30000 };
+  const opts = { config: null, screenshotDir: null, timeout: DEFAULT_SMOKE_TEST_TIMEOUT_MS };
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
       case "--config":
@@ -52,6 +53,8 @@ function parseArgs(argv) {
 
 async function loadPuppeteer() {
   try {
+    // Puppeteer is an optional runtime dependency; types are not bundled.
+    // @ts-ignore
     return await import("puppeteer");
   } catch {
     console.error(

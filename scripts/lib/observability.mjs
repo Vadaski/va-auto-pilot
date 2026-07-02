@@ -263,7 +263,7 @@ export function buildBundleManifest({
   timeline,
   artifacts,
   gates,
-  review,
+  review = null,
   eventsLog,
   redactedShareable,
 }) {

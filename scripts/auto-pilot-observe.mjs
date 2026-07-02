@@ -19,6 +19,7 @@ import {
   writeSnapshot,
 } from "./lib/orchestration-state.mjs";
 import { detectStopCondition, readSprintState } from "./auto-pilot-loop.mjs";
+import { planTaskIds } from "./lib/plan-helpers.mjs";
 
 function tailJournal(journalFile, maxEntries = 5) {
   if (!fs.existsSync(journalFile)) {
@@ -179,14 +180,6 @@ function readGitStatus(workDir) {
       dirtyFiles: [],
     };
   }
-}
-
-function planTaskIds(plan) {
-  if (!plan) {
-    return [];
-  }
-  return [plan.primaryTaskId, ...(Array.isArray(plan.parallelTracks) ? plan.parallelTracks : [])]
-    .filter(Boolean);
 }
 
 function buildCommitReadiness({ run, state, trackList, workDir }) {

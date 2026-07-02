@@ -84,7 +84,7 @@ function generateCompletedTask() {
   const phase = "running";
 
   const buildLog = [
-    "> va-auto-pilot@0.2.0 check:all",
+    "> va-auto-pilot@0.2.1 check:all",
     "> npm run check && npm run check:sprint && npm run check:units",
     "",
     "PASS: lint, typecheck, units, cli-flows",
@@ -190,7 +190,7 @@ function generateFailedTask() {
   const phase = "running";
 
   const buildLog = [
-    "> va-auto-pilot@0.2.0 check:all",
+    "> va-auto-pilot@0.2.1 check:all",
     "> npm run check:units",
     "",
     "FAIL: observability checkpoint test",

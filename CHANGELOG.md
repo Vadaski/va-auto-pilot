@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CLAUDE.md` aligned with the actual stack: `checkJs`/`allowJs` TypeScript (`strict: false`), ESLint, Node built-in test runner + `c8`
 - README softened the "model cannot self-certify" claim to reflect that CLI gates catch obvious cheating and force observable evidence, but cannot cryptographically prove gate meaning
 - README documented the `colony-bridge` / `va-agent-protocol` coupling and fallback behavior
+- TypeScript coverage expanded to all `scripts/**/*.mjs` and `bin/**/*.mjs`; fixed type errors across source and test files
+- Centralized timeout/concurrency constants in `scripts/lib/constants.mjs`
+- Extracted shared `planTaskIds` helper to `scripts/lib/plan-helpers.mjs`
+- Extracted sprint-board pure functions (`normalizeTask`, `findNextTask`, `buildParallelPlan`, etc.) to `scripts/lib/sprint-board/core.mjs`
+- Hardened agent dispatch against shell injection by splitting commands into argv and using `spawn(file, args, { shell: false })`
+- `sprint-board.mjs` main entry now guarded by `pathToFileURL(process.argv[1]).href === import.meta.url`
+- `check:sprint` now validates state file format without requiring a specific runtime state (`summary --validate`)
+- Website CI validation (`check:website`) verifies `app.js` syntax and `softwareVersion` consistency
+- Cleaned up 22 resolved placeholder adaptive gates from `.va-auto-pilot/config.yaml`
+- Aligned `README.zh.md` section order with `README.md`
+- Added `AGENTS.md` with agent-focused conventions, commands, and release checklist
+- Started splitting `test-units.mjs` into focused `tests/*.test.mjs` files
 
 ## [0.2.0] - 2026-04-15
 

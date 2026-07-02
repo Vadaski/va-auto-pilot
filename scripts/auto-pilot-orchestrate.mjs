@@ -61,15 +61,9 @@ import {
   readWorktreeIsolationConfig,
   squashMergeTrackCommit,
 } from "./lib/worktree-isolation.mjs";
+import { planTaskIds } from "./lib/plan-helpers.mjs";
 
 const execFileAsync = promisify(execFile);
-
-function planTaskIds(plan) {
-  if (!plan) {
-    return [];
-  }
-  return [plan.primaryTaskId, ...(Array.isArray(plan.parallelTracks) ? plan.parallelTracks : [])].filter(Boolean);
-}
 
 function tasksForPlan(state, plan) {
   const taskIds = new Set(planTaskIds(plan));
@@ -170,6 +164,7 @@ async function appendGovernanceEvent(opts, run, eventType, payload) {
     buildEvent({
       eventType,
       runId: run.runId,
+      taskId: null,
       phase: run.phase,
       payload,
       provenance: { source: "auto-pilot-orchestrate" },

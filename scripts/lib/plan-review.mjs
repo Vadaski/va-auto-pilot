@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { hashString, orchestrationPaths } from "./orchestration-state.mjs";
+import { DEFAULT_TRACK_TIMEOUT_MS } from "./constants.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -130,7 +131,7 @@ export async function runPlanReviewCommand({ workDir, candidatePlan, runId, revi
       const { stdout: out, stderr: err } = await execFileAsync(
         "/bin/bash",
         ["-lc", `</dev/null ${command}`],
-        { cwd: workDir, encoding: "utf8", timeout: 600_000, maxBuffer: 10 * 1024 * 1024 }
+        { cwd: workDir, encoding: "utf8", timeout: DEFAULT_TRACK_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 }
       );
       stdout = out;
       stderr = err;
@@ -139,7 +140,7 @@ export async function runPlanReviewCommand({ workDir, candidatePlan, runId, revi
       const { stdout: out, stderr: err } = await execFileAsync(parts[0], parts.slice(1), {
         cwd: workDir,
         encoding: "utf8",
-        timeout: 600_000,
+        timeout: DEFAULT_TRACK_TIMEOUT_MS,
         maxBuffer: 10 * 1024 * 1024,
       });
       stdout = out;

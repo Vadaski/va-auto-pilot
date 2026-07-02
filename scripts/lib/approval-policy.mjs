@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { parse as parseYaml } from "yaml";
 
 import { buildGateTrustSummary } from "./gate-trust.mjs";
+import { DEFAULT_GATE_TIMEOUT_MS } from "./constants.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -221,7 +222,7 @@ export async function collectApprovalChangeContext(workDir) {
     const result = await execFileAsync("git", args, {
       cwd,
       encoding: "utf8",
-      timeout: 30_000,
+      timeout: DEFAULT_GATE_TIMEOUT_MS,
     });
     return result.stdout ?? "";
   };

@@ -18,6 +18,7 @@ import { runMigration } from "./migration-engine.mjs";
 import { recoverPendingTransactions } from "./store-recovery.mjs";
 import { validateStore } from "./store-validation.mjs";
 import { JOURNAL_FILE, buildArtifactPath, cloneValue, ensureStoreLayout, nowIso, pathExists } from "./shared.mjs";
+import { DEFAULT_GATE_TIMEOUT_MS } from "../constants.mjs";
 
 // single-handle-per-root is the Sprint 1 contract per design §10; multi-handle support is future work
 const OPEN_HANDLES = new Map();
@@ -245,7 +246,7 @@ export async function openManagedDocStore(absoluteRoot, options = {}) {
     async function runMutation(op, payload, applyChange, rollbackChange) {
       if (closed) throw new DocStoreError("ManagedDocStore is closed.", { code: "STORE_CLOSED" });
       await testHooks.beforeAcquireLock?.({ op });
-      const lock = await acquireLock(lockPath, { timeoutMs: 30_000 });
+      const lock = await acquireLock(lockPath, { timeoutMs: DEFAULT_GATE_TIMEOUT_MS });
       const txId = crypto.randomUUID();
       /** @type {import("./types.mjs").JournalEntry | null} */
       let pendingEntry = null;

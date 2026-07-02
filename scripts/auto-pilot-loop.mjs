@@ -78,6 +78,12 @@ import {
   writeBundleManifest,
 } from "./lib/observability.mjs";
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
+import {
+  DEFAULT_TRACK_TIMEOUT_MS,
+  DEFAULT_GATE_TIMEOUT_MS,
+  DEFAULT_MAX_PARALLEL
+} from "./lib/constants.mjs";
+import { countPendingTasks } from "./lib/sprint-board/core.mjs";
 import { createFixTasksFromFindings, parseReviewFindings } from "./lib/review-parser.mjs";
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./lib/pilot-state.mjs";
 
@@ -93,9 +99,10 @@ const SPRINT_BOARD = path.resolve(
 );
 
 /**
- * Run a sprint-board subcommand and return { stdout, stderr, exitCode }.
+ * Append common sprint-board options to an argument list.
  * @param {string[]} args
- * @returns {Promise<{ stdout: string, stderr: string, exitCode: number }>}
+ * @param {Object} [opts]
+ * @returns {string[]}
  */
 function appendSprintBoardOptions(args, opts = {}) {
   const finalArgs = [...args];
@@ -119,7 +126,7 @@ async function sprintBoard(args, opts = {}) {
       const { stdout, stderr } = await execFileAsync(
         process.execPath,
         [SPRINT_BOARD, ...appendSprintBoardOptions(args, opts)],
-        { encoding: "utf8", timeout: 30_000, cwd: opts.workDir ?? process.cwd() }
+        { encoding: "utf8", timeout: DEFAULT_GATE_TIMEOUT_MS, cwd: opts.workDir ?? process.cwd() }
       );
       return { stdout, stderr, exitCode: 0 };
     } catch (err) {
@@ -161,12 +168,14 @@ async function requireSprintBoard(args, opts, context = "sprint-board command") 
 
   const parsed = parseSprintBoardError(result);
   const error = new Error(parsed.message || `${context} failed`);
-  error.code = parsed.code || "SPRINT_BOARD_FAILED";
-  error.context = context;
-  error.stdout = parsed.stdout;
-  error.stderr = parsed.stderr;
-  error.exitCode = result.exitCode;
-  throw error;
+  /** @type {any} */
+  const augmented = error;
+  augmented.code = parsed.code || "SPRINT_BOARD_FAILED";
+  augmented.context = context;
+  augmented.stdout = parsed.stdout;
+  augmented.stderr = parsed.stderr;
+  augmented.exitCode = result.exitCode;
+  throw augmented;
 }
 
 function mapGateToFailureType(gateName) {
@@ -988,7 +997,7 @@ async function runPitfallAwareReviewGate(gate, opts) {
       if (typeof opts.reviewGateRunner === "function") {
         const result = await opts.reviewGateRunner(prompt, { gate, pitfalls, diffBundle }, opts);
         return {
-          output: String(result.stdout ?? result.output ?? ""),
+          output: String(result.output ?? result.stdout ?? ""),
           hardFailure: false,
           failureReason: "",
           stderr: ""
@@ -1006,7 +1015,7 @@ async function runPitfallAwareReviewGate(gate, opts) {
         timeout: 120_000
       });
       return {
-        output: String(result.stdout ?? result.output ?? ""),
+        output: String(result.stdout ?? ""),
         hardFailure: false,
         failureReason: "",
         stderr: ""
@@ -1153,11 +1162,7 @@ async function runPitfallAwareReviewGate(gate, opts) {
 // ---------------------------------------------------------------------------
 
 /**
- * Dispatch a task to a sub-agent.
- * @param {object} task
- * @param {ColonyBridge} bridge
- * @param {string} pitfallContext
- * @param {string} humanBoardBlock
+ * Compute scope metadata (changed files, diff lines) for the current task.
  * @param {object} opts
  * @returns {Promise<object>}
  */
@@ -1465,12 +1470,6 @@ function readSprintState(stateFile) {
   }
 }
 
-function countPendingTasks(state) {
-  return Array.isArray(state.tasks)
-    ? state.tasks.filter((task) => task?.state !== "Done").length
-    : 0;
-}
-
 function detectStopCondition(state) {
   const repeatedFailure = Array.isArray(state.tasks)
     ? state.tasks.find((task) => task?.state !== "Done" && Number(task?.failCount ?? 0) >= 3)
@@ -1543,7 +1542,7 @@ async function git(args, opts) {
   return execFileAsync("git", args, {
     encoding: "utf8",
     cwd: opts.workDir ?? process.cwd(),
-    timeout: 30_000,
+    timeout: DEFAULT_GATE_TIMEOUT_MS,
     env: opts.env ?? process.env
   });
 }
@@ -2072,6 +2071,10 @@ function actionForTaskState(task) {
   }
 }
 
+/**
+ * @param {object} opts
+ * @returns {Promise<{ done: boolean, task?: any, action?: string, details?: string }>}
+ */
 async function resolveNextSelection(opts) {
   const nextArgs = ["next", "--json"];
   if (opts.strict) {
@@ -2121,7 +2124,7 @@ async function resolveNextSelection(opts) {
     throw new Error(`sprint-board next --json returned error: ${error?.message ?? "unknown error"}`);
   }
 
-  return next;
+  return /** @type {{ done: boolean, task?: any, action?: string, details?: string }} */ (next);
 }
 
 function buildTaskSelection(taskId, opts) {
@@ -2510,7 +2513,7 @@ async function commitFinalCycleBoundaryIfNeeded(cycleResult, opts) {
 function extractReviewerReport(raw) {
   const parsed = tryParseJson(String(raw ?? "").trim());
   if (parsed.parsed && parsed.value && typeof parsed.value === "object") {
-    const value = parsed.value;
+    const value = /** @type {Record<string, any>} */ (parsed.value);
     return {
       status: String(value.status ?? "WARNING"),
       perspective: String(value.perspective ?? ""),
@@ -2765,7 +2768,7 @@ async function runLoop(opts) {
       if (opts.parallel) {
         const planResult = await sprintBoard(["plan", "--json", "--max-parallel", String(opts.maxParallel)], opts);
         const parsedPlan = tryParseJson(planResult.stdout.trim());
-        const plan = parsedPlan.parsed ? parsedPlan.value : null;
+        const plan = parsedPlan.parsed ? /** @type {{ primaryTaskId?: string, parallelTracks?: string[] } | null} */ (parsedPlan.value) : null;
         if (!plan) {
           const review = await handleSprintCompletionReview(opts);
           const state = readSprintState(opts.stateFile);
@@ -2857,7 +2860,7 @@ async function runLoop(opts) {
         pendingTasks,
         stopCondition,
         commitFiles: trackResults.flatMap((track) => track.commitFiles ?? []),
-        workerUsage: extractUsageFromFiles(trackResults.map((track) => track.logFile).filter(Boolean)),
+        workerUsage: extractUsageFromFiles(trackResults.map((track) => /** @type {any} */ (track).logFile).filter(Boolean)),
         steps: trackResults.flatMap((track) => track.steps ?? [])
       };
       cycleResult.budget = evaluateBudget({
@@ -3008,7 +3011,6 @@ export {
   runGateSequence,
   parseEvalGateOutput,
   readSprintState,
-  countPendingTasks,
 };
 export { extractHumanBoardAcknowledgments, appendHumanBoardAuditEntry };
 export {
@@ -3039,7 +3041,7 @@ async function main() {
 
   const opts = {
     maxCycles: parseInt(parsed.options["max-cycles"] ?? "50", 10),
-    maxParallel: parseInt(parsed.options["max-parallel"] ?? "3", 10),
+    maxParallel: parseInt(parsed.options["max-parallel"] ?? String(DEFAULT_MAX_PARALLEL), 10),
     parallel: !parsed.flags.has("no-parallel"),
     agentTemplate: parsed.options["agent-template"] ?? DEFAULT_AGENT_TEMPLATE,
     dryRun: parsed.flags.has("dry-run"),
@@ -3047,7 +3049,7 @@ async function main() {
     noCommit: parsed.flags.has("no-commit"),
     noColony: parsed.flags.has("no-colony"),
     skipSprintReview: parsed.flags.has("skip-sprint-review"),
-    trackTimeout: parseInt(parsed.options["track-timeout"] ?? "600000", 10),
+    trackTimeout: parseInt(parsed.options["track-timeout"] ?? String(DEFAULT_TRACK_TIMEOUT_MS), 10),
     json: parsed.flags.has("json"),
     strict: parsed.flags.has("strict"),
     stateFile: path.resolve(parsed.options["state-file"] ?? resolveDefaults().stateFile),

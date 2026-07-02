@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
+import { DEFAULT_VALIDATE_DISTRIBUTION_TIMEOUT_MS } from "./lib/constants.mjs";
 
 const root = process.cwd();
 const packageJsonPath = path.join(root, "package.json");
@@ -45,7 +46,7 @@ function validatePackContents() {
   const result = spawnSync("npm", ["pack", "--dry-run", "--json"], {
     cwd: root,
     encoding: "utf8",
-    timeout: 30_000
+    timeout: DEFAULT_VALIDATE_DISTRIBUTION_TIMEOUT_MS
   });
 
   if (result.status !== 0) {
@@ -144,7 +145,7 @@ function validatePackContents() {
   }
 }
 
-function spawnChecked(command, args, { cwd = root, timeout = 30_000, label = command } = {}) {
+function spawnChecked(command, args, { cwd = root, timeout = DEFAULT_VALIDATE_DISTRIBUTION_TIMEOUT_MS, label = command } = {}) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
@@ -201,7 +202,7 @@ function validatePackedQuickStart() {
       ...args,
     ], {
       cwd: options.cwd ?? tmpDir,
-      timeout: options.timeout ?? 30_000,
+      timeout: options.timeout ?? DEFAULT_VALIDATE_DISTRIBUTION_TIMEOUT_MS,
       label: `installed va-auto-pilot ${args.join(" ")}`,
     });
 

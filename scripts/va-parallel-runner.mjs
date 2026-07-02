@@ -10,12 +10,13 @@ import {
   requireOption
 } from "./lib/sprint-utils.mjs";
 import { ColonyBridge } from "./lib/colony-bridge.mjs";
+import { splitShellCommand } from "./lib/shell-split.mjs";
+import { DEFAULT_TRACK_TIMEOUT_MS } from "./lib/constants.mjs";
 
 const VALID_STATES = new Set(["Backlog", "In Progress", "Review", "Testing", "Failed", "Done"]);
 const DEFAULT_MAX_WORKERS = 4;
 const DEFAULT_LOG_DIR = ".va-auto-pilot/parallel-runs";
 // Default track timeout: 10 minutes.  Override with --track-timeout <ms>.
-const DEFAULT_TRACK_TIMEOUT_MS = 600_000;
 
 const DEFAULTS = resolveDefaults();
 
@@ -124,8 +125,12 @@ function runTrack(track, command, logFile, timeoutMs) {
     `[${nowIso()}] task=${track.taskId}\ncommand: ${command}\ntimeout: ${timeoutMs > 0 ? `${timeoutMs}ms` : "none"}\n---\n`
   );
 
+  const argv = splitShellCommand(command);
+  const [file, ...args] = argv;
+
   return new Promise((resolve) => {
-    const child = spawn("bash", ["-lc", command], {
+    const child = spawn(file, args, {
+      shell: false,
       env: { ...process.env, VA_TASK_ID: track.taskId }
     });
 

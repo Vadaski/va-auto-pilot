@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { readHumanBoardInstructions, resolveHumanBoardPath } from "./human-board.mjs";
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./pilot-state.mjs";
 import { observabilityPaths, OBSERVABILITY_SCHEMA_VERSION } from "./observability.mjs";
+import { DEFAULT_TRACK_TIMEOUT_MS } from "./constants.mjs";
 
 export const ORCHESTRATION_SCHEMA_VERSION = 1;
 export const GOVERNANCE_SCHEMA_VERSION = 1;
@@ -294,7 +295,7 @@ export function buildRecoveryPlan(input = {}) {
   const pendingTasks = tasks.filter((task) => task?.state !== "Done").length;
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const nowMs = Number.isFinite(input.nowMs) ? input.nowMs : Date.now();
-  const trackTimeoutMs = Number.isFinite(input.trackTimeoutMs) ? input.trackTimeoutMs : 600_000;
+  const trackTimeoutMs = Number.isFinite(input.trackTimeoutMs) ? input.trackTimeoutMs : DEFAULT_TRACK_TIMEOUT_MS;
   const issues = [];
   const mutations = [];
   const nextCommands = [];

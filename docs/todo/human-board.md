@@ -8,6 +8,7 @@
 
 ## Instructions (highest priority)
 
+- [ ] [objective] review 待提交的重构变更，然后将 va-auto-pilot 与其他 va-* 库解耦，使其纯净独立、可在任意目录布局运行 _(source: unknown, 2026-07-02T07:45:08.211Z)_
 - [x] [risk] 风险规则：任何设计如果不能被真实命令触发、不能产生可检查证据、或 CI/本地质量门不绿，都不能算完成；遇到问题先修复根因，若一轮无法修复，必须记录 pitfall、创建明确 backlog，并保留失败证据。 _(source: user, 2026-07-01T15:25:43.224Z)_
 - [x] [acceptance] 验收：CI 必须全绿，包括本地质量门 npm run typecheck、npm run check:all、npm run check:e2e 或等价关键端到端/烟测，以及 GitHub Actions 对应必过检查；每个被验证的设计都要留下可观测证据：命令、输出摘要、事件/快照/evidence bundle、失败记录与修复提交。 _(source: user, 2026-07-01T15:25:38.904Z)_
 - [x] [constraint] 约束：验证必须走真实可执行路径，优先使用 VA Auto-Pilot 自身 CLI、orchestrated loop、quality gates、smoke/e2e、MCP/read-only resources、observability evidence bundle、GitHub Actions CI 等已设计机制；不能只靠文档阅读、静态声明或人工想象来判定设计可用。 _(source: user, 2026-07-01T15:25:35.073Z)_
@@ -95,7 +96,7 @@
 
 - [x] **CHANGELOG.md 创建**：项目没有 CHANGELOG。创建 CHANGELOG.md，补录 v0.1.0 的主要功能（sprint execution loop、CLI quality gates、pitfall compounding、adversarial review、upgrade command、62 tests）。使用 Keep a Changelog 格式。
 
-- [x] **清理无用 devDependency**：`tsx` 在 devDependencies 里但没有任何 script 使用它（test-runner.ts 是 reference implementation，实际测试用 node:test）。要么删除 tsx，要么把 test-runner.ts 正式接入 scripts。建议删除 tsx，保持零 devDep 的简洁性。
+- [x] **确认 tsx 依赖位置**：`tsx` 已作为 `dependencies` 成员（非 devDependencies），`scripts/test-runner.ts` 与 `bin/va-auto-pilot.mjs` 的默认测试命令均依赖它执行 TypeScript runner。无需删除，但后续若将 runner 完全编译为 `.mjs` 可再评估迁移。
 
 - [x] **website 国际化修复**：检查 website/ 中的文案是否与最新 README 的定位一致。特别是 tagline（应该是 "CLI-first autonomous multi-agent engineering loop"，不是 "USB interface"）、对比表信息、Frontier Models 章节是否在 landing page 有体现。
 

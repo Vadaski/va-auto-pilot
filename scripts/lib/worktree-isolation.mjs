@@ -41,6 +41,10 @@ function readConfig(configPath) {
   }
 }
 
+/**
+ * @param {string} [configPath]
+ * @returns {{ enabled: boolean, rootDir: string, branchPrefix: string, cleanup: string }}
+ */
 export function readWorktreeIsolationConfig(configPath) {
   const config = readConfig(configPath);
   const raw = isObject(config.worktreeIsolation) ? config.worktreeIsolation : {};

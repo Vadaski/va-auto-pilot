@@ -8,6 +8,7 @@ import { appendEntry, readAll } from "./journal.mjs";
 import { acquireLock, releaseLock } from "./locking.mjs";
 import { readSchemaVersion, writeSchemaVersion, SCHEMA_VERSION_FILE } from "./lifecycle.mjs";
 import { cloneValue, nowIso, pathExists, SUPPORTED_STORE_FORMAT_VERSION } from "./shared.mjs";
+import { DEFAULT_GATE_TIMEOUT_MS } from "../constants.mjs";
 
 const MIGRATION_REGISTRY = new Map();
 
@@ -396,7 +397,7 @@ export async function runMigration(storeRoot, options = {}) {
   const lockPath = path.join(storeRoot, ".lock");
   let lock = null;
   try {
-    lock = await acquireLock(lockPath, { timeoutMs: 30_000 });
+    lock = await acquireLock(lockPath, { timeoutMs: DEFAULT_GATE_TIMEOUT_MS });
     await writeIndexAtomic(indexPath, applyResult.nextIndex);
     await testHooks.afterWriteIndex?.({ storeRoot, indexPath, journalPath });
     const migrateEntry = {

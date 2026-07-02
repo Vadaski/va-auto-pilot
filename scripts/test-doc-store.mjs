@@ -280,16 +280,16 @@ test("INDEX stores embedded checksum and removes legacy checksum files", async (
   const rawIndex = JSON.parse(fs.readFileSync(path.join(root, "INDEX.json"), "utf8"));
   const hydrated = await store.getIndex();
 
-  assert.equal(typeof rawIndex.__checksum, "string");
+  assert.equal(typeof /** @type {any} */ (rawIndex).__checksum, "string");
   assert.equal(fs.existsSync(path.join(root, ".checksum")), false);
-  assert.equal(hydrated.__checksum, undefined);
+  assert.equal(/** @type {any} */ (hydrated).__checksum, undefined);
   assert.equal(hydrated.entries[created.id].frontmatter.title, "Checksum carrier");
 });
 
 test("extension type mutations keep concurrent document creations in INDEX", async () => {
   const root = createRoot();
-  let entered = null;
-  let release = null;
+  /** @type {any} */ let entered = null;
+  /** @type {any} */ let release = null;
   const store = await openManagedDocStore(root, {
     __testHooks: {
       beforeAcquireLock: async ({ op }) => {
@@ -498,18 +498,18 @@ test("startup recovery rolls back target artifacts touched by refs mirror mid-up
   // wrote source and target artifacts with updated inboundRefs,
   // but crashed before INDEX update.
   const journalPath = path.join(root, ".journal", "current.jsonl");
-  const nextSource = {
+  const nextSource = /** @type {any} */ ({
     ...source,
     revision: 2,
     refs: [{ to: target.id, relation: "depends", strength: "weak" }],
     frontmatter: { ...source.frontmatter, updatedAt: new Date().toISOString() }
-  };
-  const nextTarget = {
+  });
+  const nextTarget = /** @type {any} */ ({
     ...target,
     revision: 2,
     inboundRefs: [{ to: source.id, relation: "depends", strength: "weak" }],
     frontmatter: { ...target.frontmatter, updatedAt: new Date().toISOString() }
-  };
+  });
 
   await writeArtifact(root, nextSource);
   await writeArtifact(root, nextTarget);
@@ -680,8 +680,8 @@ test("acquireLock clears corrupt stale lockfiles and retries immediately", async
 
 test("concurrent updates rebase on the latest INDEX state after the write lock is acquired", async () => {
   const root = createRoot();
-  let entered = null;
-  let release = null;
+  /** @type {any} */ let entered = null;
+  /** @type {any} */ let release = null;
   let pausedOnce = false;
   const store = await openManagedDocStore(root, {
     __testHooks: {
@@ -809,7 +809,7 @@ test("createDocument resolves subtype registration from the reloaded INDEX insid
         index.extensions = {
           ...(index.extensions ?? {}),
           registeredTypes: {
-            ...(index.extensions?.registeredTypes ?? {}),
+            ...(/** @type {Record<string, unknown>} */ (index.extensions?.registeredTypes) ?? {}),
             [subtype]: { name: subtype, kind: "process", artifactSchemaVersion }
           }
         };
@@ -1021,5 +1021,5 @@ test("migrate journal entry includes entryId", async () => {
   const journal = await readAll(path.join(root, ".journal", "current.jsonl"));
   const migrateEntries = journal.filter((e) => e.op === "migrate" && e.status === "committed");
   assert.equal(migrateEntries.length, 1);
-  assert.ok(typeof migrateEntries[0].entryId === "string" && migrateEntries[0].entryId.length > 0, "migrate journal entry must have entryId");
+  assert.ok(typeof /** @type {any} */ (migrateEntries[0]).entryId === "string" && /** @type {any} */ (migrateEntries[0]).entryId.length > 0, "migrate journal entry must have entryId");
 });

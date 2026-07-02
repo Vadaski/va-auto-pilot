@@ -83,14 +83,11 @@ import { withPilotFileLock, writeTextFileAtomicSync } from "./lib/pilot-state.mj
 import { buildRecoveryPlan } from "./lib/orchestration-state.mjs";
 
 // ---------------------------------------------------------------------------
-// Import pure functions from sprint-board via a thin re-export shim.
-// sprint-board.mjs has a try/catch main() at module scope that calls main()
-// on import (process.argv-driven).  We work around this by importing only
-// the functions we export via named re-exports in a shim, OR by testing
-// behaviour via child_process for the CLI surface.
-//
-// For pure-function tests we replicate the logic under test directly here
-// (keeping them in sync via acceptance assertions on the CLI output).
+// Sprint-board surface
+// sprint-board.mjs guards main() with import.meta.url === pathToFileURL(process.argv[1]),
+// so it can be imported safely for its named exports. The sprint-board CLI surface
+// is still exercised via child_process (runBoard) to keep tests isolated from
+// mutable sprint state.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -183,7 +180,7 @@ test("readSprintPathsFromConfig returns {} for missing file", () => {
 test("readSprintPathsFromConfig reads sprint section keys", () => {
   const yaml = `other:\n  key: ignored\nsprint:\n  stateFile: custom/state.json\n  boardFile: custom/board.md\n`;
   const { filePath } = withTempFile(yaml);
-  const result = readSprintPathsFromConfig(filePath);
+  const result = /** @type {any} */ (readSprintPathsFromConfig(filePath));
   assert.equal(result.stateFile, "custom/state.json");
   assert.equal(result.boardFile, "custom/board.md");
   assert.equal(result.other, undefined);
@@ -206,7 +203,7 @@ test("readSprintPathsFromConfig ignores comment lines", () => {
 test("readSprintPathsFromConfig ignores sections other than sprint", () => {
   const yaml = `database:\n  host: localhost\nsprint:\n  stateFile: s.json\n`;
   const { filePath } = withTempFile(yaml);
-  const result = readSprintPathsFromConfig(filePath);
+  const result = /** @type {any} */ (readSprintPathsFromConfig(filePath));
   assert.equal(result.stateFile, "s.json");
   assert.equal(result.host, undefined);
 });
@@ -405,7 +402,7 @@ test("dispatchTask injects constraint prompt sections when bridge returns conten
   };
   const pitfallContext = "\n--- HARD CONSTRAINTS (pitfall guide) ---\n- Known pitfall: prior fix regressed tests -- retry failed\n---";
   const humanBoardBlock = "Explicitly acknowledge the board before coding.";
-  let capturedTrack = null;
+  /** @type {any} */ let capturedTrack = null;
   const bridge = {
     async dispatch(track) {
       capturedTrack = track;
@@ -456,7 +453,7 @@ test("dispatchTask keeps the legacy prompt layout when constraint injection is e
   };
   const pitfallContext = "\n--- HARD CONSTRAINTS (pitfall guide) ---\n- Known pitfall: unchanged baseline -- retry failed\n---";
   const humanBoardBlock = "Board instruction";
-  let capturedTrack = null;
+  /** @type {any} */ let capturedTrack = null;
   const bridge = {
     async dispatch(track) {
       capturedTrack = track;
@@ -904,7 +901,7 @@ test("autoCommitTask syncs pre-existing dirty files in a separate commit before 
   );
 
   assert.equal(commitResult.committed, true);
-  assert.deepEqual(commitResult.baselineCommit.files, ["pending.txt"]);
+  assert.deepEqual(/** @type {any} */ (commitResult).baselineCommit.files, ["pending.txt"]);
   assert.deepEqual(commitResult.files.sort(), ["feature.txt", "pending.txt"]);
   assert.equal(runGit(["status", "--short"], repoDir), "");
 
@@ -1960,6 +1957,35 @@ test("runGateSequence injects unresolved pitfalls into codex-backed review gate 
   assert.match(capturedPrompt, /pitfall guide was not injected/);
 });
 
+test("runGateSequence reads reviewGateRunner `output` field, not only `stdout`", async () => {
+  // Regression: the runner hook historically returned { output }; a refactor
+  // made the gate read only result.stdout, silently dropping { output } and
+  // failing required review gates despite a passing runner result.
+  const repoDir = createTempGitRepo({ "scripts/auto-pilot-loop.mjs": "before\n" });
+  const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
+  const workFile = path.join(repoDir, "scripts", "auto-pilot-loop.mjs");
+  fs.mkdirSync(path.dirname(pitfallsFile), { recursive: true });
+  fs.writeFileSync(pitfallsFile, JSON.stringify({ version: 1, entries: [] }, null, 2) + "\n", "utf8");
+  fs.writeFileSync(workFile, "after\n", "utf8");
+
+  const gateResult = await runGateSequence(
+    { reviewCommand: "codex review --uncommitted" },
+    {
+      dryRun: false,
+      json: false,
+      workDir: repoDir,
+      pitfallsFile,
+      reviewGateRunner: async () => ({ output: "REVIEW STATUS: PASS\n" })
+    }
+  );
+
+  // Before the fix, `result.output` was dropped (only stdout was read), so the
+  // gate saw empty/unstructured output and a REQUIRED review gate failed closed
+  // despite the runner returning PASS. passed===true proves the `output` field
+  // is now read.
+  assert.equal(gateResult.passed, true);
+});
+
 test("runGateSequence fails closed when codex-backed review gate times out without stdout", async () => {
   const repoDir = createTempGitRepo({ "scripts/auto-pilot-loop.mjs": "before\n" });
   const pitfallsFile = path.join(repoDir, ".va-auto-pilot", "pitfalls.json");
@@ -1977,7 +2003,7 @@ test("runGateSequence fails closed when codex-backed review gate times out witho
       workDir: repoDir,
       pitfallsFile,
       reviewGateRunner: async () => {
-        const error = new Error("Command timed out after 120000ms");
+        const error = /** @type {any} */ (new Error("Command timed out after 120000ms"));
         error.killed = true;
         throw error;
       }
@@ -2006,7 +2032,7 @@ test("runGateSequence allows explicitly advisory review gate to pass runner hard
       workDir: repoDir,
       pitfallsFile,
       reviewGateRunner: async () => {
-        const error = new Error("Command timed out after 120000ms");
+        const error = /** @type {any} */ (new Error("Command timed out after 120000ms"));
         error.killed = true;
         throw error;
       }
@@ -2036,7 +2062,7 @@ test("runGateSequence retries once and fails closed on repeated unstructured cod
       pitfallsFile,
       reviewGateRunner: async () => {
         attempts += 1;
-        const error = new Error("rate limit");
+        const error = /** @type {any} */ (new Error("rate limit"));
         error.stdout = "429 rate limit exceeded\nplease retry later\n";
         throw error;
       }
@@ -2068,7 +2094,7 @@ test("runGateSequence allows explicitly advisory review gate to pass repeated un
       pitfallsFile,
       reviewGateRunner: async () => {
         attempts += 1;
-        const error = new Error("rate limit");
+        const error = /** @type {any} */ (new Error("rate limit"));
         error.stdout = "429 rate limit exceeded\nplease retry later\n";
         throw error;
       }
@@ -4237,6 +4263,7 @@ import {
   trackToTaskUnit,
   colonyResultToRunnerResult,
   isSprintLevelMultiFileTask,
+  needsShellExecution,
 } from "./lib/colony-bridge.mjs";
 
 test("isColonyAvailable returns a boolean", () => {
@@ -4366,6 +4393,85 @@ test("ColonyBridge: dispatchViaSpawn runs a real command and returns result", as
   // Verify log file was written
   const logContent = fs.readFileSync(logFile, "utf8");
   assert.ok(logContent.includes("hello-colony"), `log should contain output, got: ${logContent}`);
+});
+
+test("ColonyBridge: dispatchViaSpawn resolves as failed (exit 127) when executable is missing", async () => {
+  // Regression: spawn() emits an 'error' event for a missing binary; with no
+  // listener Node rethrows and crashes the whole loop. The bridge must resolve
+  // a failed track so the sprint can classify and recover.
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-missing-"));
+  const logFile = path.join(tmpDir, "missing.log");
+  const track = { taskId: "CB-MISS", command: "va-definitely-nonexistent-binary-xyz-12345 arg" };
+  const result = await bridge.dispatchViaSpawn(track, "", logFile, 10_000);
+  assert.equal(result.taskId, "CB-MISS");
+  assert.equal(result.success, false);
+  assert.equal(result.exitCode, 127);
+  assert.equal(result.timedOut, false);
+  const logContent = fs.readFileSync(logFile, "utf8");
+  assert.match(logContent, /spawn error/i);
+});
+
+test("needsShellExecution: detects spaced/compact operators, builtins, and expansion", () => {
+  // Plain commands — no shell needed.
+  assert.equal(needsShellExecution("claude -p hello"), false);
+  assert.equal(needsShellExecution('claude -p "hello world"'), false);
+  assert.equal(needsShellExecution("echo '$VAR'"), false); // single-quote literal
+  assert.equal(needsShellExecution(""), false);
+  // Shell constructs — must route through bash -lc.
+  assert.equal(needsShellExecution("cd app && claude"), true); // builtin
+  assert.equal(needsShellExecution("echo a && echo b"), true);
+  assert.equal(needsShellExecution("echo a | grep b"), true);
+  assert.equal(needsShellExecution("echo $VAR"), true); // bare variable
+  assert.equal(needsShellExecution('echo "$VAR"'), true); // double-quote expansion
+  assert.equal(needsShellExecution("export FOO=bar"), true);
+  // Regression: compact operators (no surrounding spaces) MUST be detected —
+  // token-only detection missed these and silently misexecuted.
+  assert.equal(needsShellExecution("echo hi>out"), true);
+  assert.equal(needsShellExecution("echo hi>>out"), true);
+  assert.equal(needsShellExecution("true&&echo hi"), true);
+  assert.equal(needsShellExecution("cmd1||cmd2"), true);
+  assert.equal(needsShellExecution("a|b"), true);
+  assert.equal(needsShellExecution("CI=1 npm test"), true); // leading env assign
+});
+
+test("ColonyBridge: dispatchViaSpawn routes shell-style commands through bash -lc", async () => {
+  // `&&` must run the second branch — proves the command went through bash -lc,
+  // not shell:false (which would pass `&&`/`echo` as literal args to `true`).
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-shell-"));
+  const logFile = path.join(tmpDir, "shell.log");
+  const track = { taskId: "CB-SH", command: "true && echo shell-ran" };
+  const result = await bridge.dispatchViaSpawn(track, "", logFile, 10_000);
+  assert.equal(result.success, true);
+  const logContent = fs.readFileSync(logFile, "utf8");
+  assert.ok(logContent.includes("shell-ran"), `shell && should execute second branch: ${logContent}`);
+});
+
+test("ColonyBridge: dispatchViaSpawn routes compact shell redirects through bash -lc", async () => {
+  // Regression: compact `>` (no spaces) was missed by token-only detection and
+  // silently echoed the literal payload instead of redirecting to a file.
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-redir-"));
+  const logFile = path.join(tmpDir, "redir.log");
+  const outFile = path.join(tmpDir, "out.txt");
+  const track = { taskId: "CB-RD", command: `printf redirected > ${outFile}` };
+  const result = await bridge.dispatchViaSpawn(track, "", logFile, 10_000);
+  assert.equal(result.success, true);
+  assert.ok(fs.existsSync(outFile), "compact redirect should create the file via bash -lc");
+  assert.equal(fs.readFileSync(outFile, "utf8").trim(), "redirected");
+});
+
+test("ColonyBridge: dispatchViaSpawn expands ~ to home in arguments", async () => {
+  // Regression: ~ was no longer expanded without bash -lc; spawn got literal "~".
+  const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-tilde-"));
+  const logFile = path.join(tmpDir, "tilde.log");
+  const track = { taskId: "CB-TILDE", command: "echo ~/run.log" };
+  const result = await bridge.dispatchViaSpawn(track, "", logFile, 10_000);
+  assert.equal(result.success, true);
+  const logContent = fs.readFileSync(logFile, "utf8");
+  assert.ok(logContent.includes(os.homedir()), `~ should expand to home: ${logContent}`);
 });
 
 test("ColonyBridge: dispatch falls back to spawn when colony is null", async () => {
@@ -4649,7 +4755,7 @@ test("readSprintPathsFromConfig: returns {} for invalid YAML syntax", () => {
 test("readSprintPathsFromConfig: filters out non-string values from sprint section", () => {
   const yaml = `sprint:\n  stateFile: s.json\n  nested:\n    deep: value\n  num: 42\n`;
   const { filePath } = withTempFile(yaml);
-  const result = readSprintPathsFromConfig(filePath);
+  const result = /** @type {any} */ (readSprintPathsFromConfig(filePath));
   assert.equal(result.stateFile, "s.json");
   assert.equal(result.nested, undefined);
   assert.equal(result.num, undefined);
@@ -5343,7 +5449,7 @@ test("ColonyBridge: dispatchViaSpawn handles command failure (exit code != 0)", 
   const bridge = new ColonyBridge({ workDir: "/tmp", useColony: false });
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-colony-fail-"));
   const logFile = path.join(tmpDir, "fail.log");
-  const track = { taskId: "CB-FAIL", command: "exit 42" };
+  const track = { taskId: "CB-FAIL", command: "node -e process.exit(42)" };
   const result = await bridge.dispatchViaSpawn(track, "", logFile, 10_000);
   assert.equal(result.taskId, "CB-FAIL");
   assert.equal(result.success, false);
@@ -5691,7 +5797,7 @@ test("runReviewCommand: exec failure without stdout exits 1 and prints error", a
 
   const result = await invokeReviewCommandForTest(pitfallsFile, {
     execRunner: () => {
-      const error = new Error("spawn codex ENOENT");
+      const error = /** @type {any} */ (new Error("spawn codex ENOENT"));
       error.stderr = "codex executable not found";
       throw error;
     }
@@ -5820,11 +5926,12 @@ test("plan-review: parseReviewFindings extracts CRITICAL lines", async () => {
   assert.equal(findings.suggestion.length, 1);
   const plan = { primaryTaskId: "AP-001", parallelTracks: [] };
   const hash = computeCandidatePlanHash(plan);
-  assert.equal(validatePlanReviewForApprove({ review: null, candidatePlan: plan }).ok, false);
+  assert.equal(validatePlanReviewForApprove({ review: null, candidatePlan: plan, runId: undefined }).ok, false);
   assert.equal(
     validatePlanReviewForApprove({
       review: { planHash: hash, passed: true, findings: { critical: [] } },
       candidatePlan: plan,
+      runId: undefined,
     }).ok,
     true
   );
@@ -6516,6 +6623,8 @@ test("observability: validateEvent rejects unknown eventType", () => {
   const event = buildEvent({
     eventType: "task.unknown",
     runId: "run-1",
+    taskId: undefined,
+    phase: undefined,
     payload: {},
     provenance: { source: "auto-pilot-loop" },
   });
@@ -6528,8 +6637,8 @@ test("observability: validateEvent rejects unknown eventType", () => {
 test("observability: appendEventLog persists events across reads", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-obs-log-"));
   const logFile = path.join(tmpDir, "events.jsonl");
-  const eventA = buildEvent({ eventType: "task.started", runId: "run-1", taskId: "AP-001", payload: {}, provenance: { source: "auto-pilot-loop" } });
-  const eventB = buildEvent({ eventType: "task.gate", runId: "run-1", taskId: "AP-001", payload: { gateName: "build", passed: true }, provenance: { source: "auto-pilot-loop" } });
+  const eventA = buildEvent({ eventType: "task.started", runId: "run-1", taskId: "AP-001", phase: undefined, payload: {}, provenance: { source: "auto-pilot-loop" } });
+  const eventB = buildEvent({ eventType: "task.gate", runId: "run-1", taskId: "AP-001", phase: undefined, payload: { gateName: "build", passed: true }, provenance: { source: "auto-pilot-loop" } });
   await appendEventLog(logFile, eventA);
   await appendEventLog(logFile, eventB);
   const events = readEventLog(logFile);
@@ -6559,6 +6668,9 @@ test("observability: redactBundle produces shareable copy", () => {
     taskId: "AP-001",
     state: "completed",
     outcome: { state: "completed" },
+    timeline: undefined,
+    eventsLog: undefined,
+    redactedShareable: undefined,
     artifacts: [
       {
         name: "build-gate.log",
@@ -6588,6 +6700,10 @@ test("observability: validateBundleManifest accepts valid manifest", () => {
     taskId: "AP-001",
     state: "completed",
     outcome: { state: "completed" },
+    timeline: undefined,
+    artifacts: undefined,
+    eventsLog: undefined,
+    redactedShareable: undefined,
     gates: [{ name: "build", required: true, passed: true, exitCode: 0, durationMs: 1000 }],
   });
   const validation = validateBundleManifest(manifest);

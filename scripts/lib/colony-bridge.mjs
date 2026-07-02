@@ -7,10 +7,19 @@
  */
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { DEFAULT_AGENT_TEMPLATE, nowIso } from "./sprint-utils.mjs";
+import { splitShellCommand } from "./shell-split.mjs";
+import {
+  DEFAULT_TRACK_TIMEOUT_MS,
+  LARGE_TASK_FILE_THRESHOLD,
+  LARGE_TASK_DIFF_LINE_THRESHOLD,
+  LARGE_TASK_OBJECTIVE_LENGTH_THRESHOLD,
+  LARGE_TASK_ACCEPTANCE_CRITERIA_THRESHOLD
+} from "./constants.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -107,10 +116,10 @@ export function colonyResultToRunnerResult(taskId, command, durationMs, logFile,
 export function isSprintLevelMultiFileTask(taskUnit) {
   const scope = taskUnit.metadata?.scope;
   if (scope) {
-    if (scope.changedFileCount > 3) {
+    if (scope.changedFileCount > LARGE_TASK_FILE_THRESHOLD) {
       return { isLarge: true, reason: `${scope.changedFileCount} changed files` };
     }
-    if (scope.estimatedDiffLines > 200) {
+    if (scope.estimatedDiffLines > LARGE_TASK_DIFF_LINE_THRESHOLD) {
       return { isLarge: true, reason: `${scope.estimatedDiffLines} estimated diff lines` };
     }
   }
@@ -121,23 +130,95 @@ export function isSprintLevelMultiFileTask(taskUnit) {
   const fileRefs = [...text.matchAll(/\b[\w\-/]+\.(?:js|ts|mjs|cjs|jsx|tsx|py|go|rs|java|cpp|c|h|md|yaml|yml|json|html|css|scss)\b/g)]
     .map((m) => m[0]);
   const uniqueFiles = new Set(fileRefs);
-  if (uniqueFiles.size > 3) {
+  if (uniqueFiles.size > LARGE_TASK_FILE_THRESHOLD) {
     return { isLarge: true, reason: `${uniqueFiles.size} file references` };
   }
 
   // Objective length as a rough proxy for complexity
   const objective = String(taskUnit.objective ?? "");
-  if (objective.length > 150) {
-    return { isLarge: true, reason: "objective length > 150 chars" };
+  if (objective.length > LARGE_TASK_OBJECTIVE_LENGTH_THRESHOLD) {
+    return { isLarge: true, reason: `objective length > ${LARGE_TASK_OBJECTIVE_LENGTH_THRESHOLD} chars` };
   }
 
   // Acceptance criteria count
   const acceptanceCriteria = taskUnit.acceptanceCriteria ?? [];
-  if (acceptanceCriteria.length > 3) {
+  if (acceptanceCriteria.length > LARGE_TASK_ACCEPTANCE_CRITERIA_THRESHOLD) {
     return { isLarge: true, reason: `${acceptanceCriteria.length} acceptance criteria` };
   }
 
   return { isLarge: false, reason: "" };
+}
+
+/**
+ * Detect whether a command string contains shell constructs that
+ * splitShellCommand cannot represent under shell:false: compact OR spaced
+ * operators (`a>b`, `c1&&c2`, `|`, `;`), variable/command expansion (`$VAR`,
+ * backticks — including inside double quotes, which bash expands), redirects,
+ * sequences, leading env assignments (`VAR=value cmd`), and shell
+ * builtins. Scans the RAW command while tracking quote/escape state, so quoted
+ * literals are not flagged but compact operators are caught — token-only
+ * detection misses `echo x>file` and silently misexecutes (echo prints the
+ * literal "x>file" with exit 0). Favoring bash -lc on any doubt is safe: a
+ * false positive just runs a plain command under bash, which still works.
+ */
+// Parentheses, braces, and glob chars are intentionally excluded: they appear
+// in legal argument values (e.g. `node -e process.exit(42)`, regex patterns)
+// and routing those through bash would let bash reinterpret them as
+// sub-shells / brace / glob expansion and corrupt the argument. Sub-shells and
+// command groups still route to bash via their `;` / `&` / newline.
+const SHELL_METACHARS = new Set([
+  "&", "|", "<", ">", ";", "`", "$", "\n"
+]);
+const SHELL_BUILTINS = new Set([
+  "cd", "export", "source", "eval", "exec", "set", "unset",
+  "alias", "read", "pushd", "popd", "exit", "trap", "umask"
+]);
+
+export function needsShellExecution(command) {
+  if (typeof command !== "string" || command.length === 0) return false;
+
+  // Leading environment assignment: `VAR=value cmd ...`
+  if (/^\s*[A-Za-z_][A-Za-z0-9_]*=/.test(command)) return true;
+
+  // Shell builtin as the first token.
+  const firstToken = command.trimStart().split(/\s+/, 1)[0] ?? "";
+  if (SHELL_BUILTINS.has(firstToken)) return true;
+
+  // Scan for shell metacharacters outside single quotes. Double quotes still
+  // allow $ and ` expansion in bash, so those trigger too.
+  let quote = null;
+  let escape = false;
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command[i];
+    if (escape) { escape = false; continue; }
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === "\\") { escape = true; continue; }
+      if (ch === '"') { quote = null; continue; }
+      if (ch === "$" || ch === "`") return true;
+      continue;
+    }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === "'" || ch === '"') { quote = ch; continue; }
+    if (SHELL_METACHARS.has(ch)) return true;
+  }
+  return false;
+}
+
+/**
+ * Expand a leading `~` or `~/` to the user's home directory, mirroring the
+ * shell behavior lost by spawning directly instead of through `bash -lc`.
+ * Only a standalone `~` or `~/...` token expands (shell expands tilde only at
+ * the start of a word); `--flag=~` / `a~b` pass through unchanged.
+ */
+function expandTilde(token) {
+  if (typeof token !== "string") return token;
+  if (token === "~") return os.homedir();
+  if (token.startsWith("~/")) return path.join(os.homedir(), token.slice(2));
+  return token;
 }
 
 function quoteShellArg(value) {
@@ -292,7 +373,7 @@ export class ColonyBridge {
       try {
         const adapter = new d.Cls({
           workingDirectory: this.workDir, [d.optKey]: d.bin,
-          taskTimeoutMs: 600_000, qualityGates: [], logger,
+          taskTimeoutMs: DEFAULT_TRACK_TIMEOUT_MS, qualityGates: [], logger,
         });
         this.colony.addAgent(adapter);
         this.registeredAdapters.push(adapter.id);
@@ -308,7 +389,7 @@ export class ColonyBridge {
           if (apiKeys.length > 0) {
             const adapter = new GlmAdapter({
               workingDirectory: this.workDir, apiKeys,
-              taskTimeoutMs: 600_000, qualityGates: [], logger,
+              taskTimeoutMs: DEFAULT_TRACK_TIMEOUT_MS, qualityGates: [], logger,
             });
             this.colony.addAgent(adapter);
             this.registeredAdapters.push(adapter.id);
@@ -417,9 +498,20 @@ export class ColonyBridge {
       };
     }
 
+    const argv = splitShellCommand(command);
+    const useShell = needsShellExecution(command);
+    // Shell constructs (operators, variable expansion, sub-shells, builtins like
+    // `cd`) cannot be represented by splitShellCommand — route them through
+    // `bash -lc` so documented shell-style agent templates keep working. Plain
+    // commands spawn directly with shell:false for control and safety.
+    const spawnTarget = useShell
+      ? { file: "bash", args: ["-lc", command] }
+      : { file: expandTilde(argv[0]), args: argv.slice(1).map(expandTilde) };
+
     return new Promise((resolve) => {
-      const child = spawn("bash", ["-lc", command], {
+      const child = spawn(spawnTarget.file, spawnTarget.args, {
         cwd: this.workDir,
+        shell: false,
         env: {
           ...process.env,
           VA_TASK_ID: track.taskId,
@@ -441,6 +533,28 @@ export class ColonyBridge {
 
       child.stdout.on("data", (chunk) => appendLog(logFile, chunk.toString()));
       child.stderr.on("data", (chunk) => appendLog(logFile, chunk.toString()));
+
+      // Missing executable / spawn failure: without this listener Node rethrows
+      // the 'error' event and crashes the whole loop. Resolve as a failed track
+      // so the sprint can classify and recover (mirrors the old `bash -lc`
+      // exit-127 path when a CLI binary is unavailable).
+      child.on("error", (err) => {
+        if (killTimer) clearTimeout(killTimer);
+        this._spawnChildren.delete(track.taskId);
+        const durationMs = Date.now() - startedAt;
+        appendLog(logFile, `\n[${nowIso()}] spawn error: ${err.message}\n`);
+        resolve({
+          taskId: track.taskId,
+          command,
+          success: false,
+          exitCode: 127,
+          signal: "",
+          durationMs,
+          timedOut: false,
+          logFile,
+          pid: child.pid ?? null,
+        });
+      });
 
       child.on("close", (code, signal) => {
         if (killTimer) clearTimeout(killTimer);

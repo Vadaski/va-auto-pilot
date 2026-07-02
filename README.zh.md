@@ -37,22 +37,6 @@ npm run check:demo
 
 ---
 
-## 它在 Agent Stack 里的位置
-
-VA Auto-Pilot 不是另一个连接协议，也不是 MCP/A2A 的竞争者。它位于连接和消息之上，治理长链路工程任务如何被拆解、执行、审查、恢复和验收。
-
-```text
-Model / CLI Agent
-  -> Harness：工具、约束、记忆、审查、门禁、权限
-  -> Loop：状态机、计划、委派、恢复、提交、下一任务
-  -> Task Protocol：va-agent-protocol 可组合任务契约
-  -> Connectors：MCP、A2A、本地 CLI、CI、包管理器、外部工具
-```
-
-> **一句话** — MCP/A2A 解决如何连接；VA Auto-Pilot 解决连接之后如何可靠完成长任务。
-
----
-
 ## 这个框架在押什么赌注
 
 大多数 Agent 框架会降低自治度：把任务拆成细碎步骤，精确规定模型该做什么，让 Agent 贴着人类维护的脚本走。

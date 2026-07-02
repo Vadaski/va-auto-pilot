@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 
 import { TransactionConflictError } from "./errors.mjs";
 import { nowIso } from "./shared.mjs";
+import { DEFAULT_GATE_TIMEOUT_MS } from "../constants.mjs";
 
 function sleep(durationMs) {
   return new Promise((resolve) => setTimeout(resolve, durationMs));
@@ -35,7 +36,7 @@ function pidExists(pid) {
  * @returns {Promise<{ path: string, fd: import('node:fs/promises').FileHandle }>}
  */
 export async function acquireLock(lockPath, options = {}) {
-  const timeoutMs = options.timeoutMs ?? 30_000;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_GATE_TIMEOUT_MS;
   const startedAt = Date.now();
   let delayMs = 25;
 

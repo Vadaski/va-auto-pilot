@@ -9,5 +9,5 @@
     "moduleResolution": "NodeNext",
     "skipLibCheck": true
   },
-  "include": ["scripts/lib/**/*.mjs", "scripts/sprint-board.mjs", "bin/va-auto-pilot.mjs"]
+  "include": ["scripts/**/*.mjs", "bin/**/*.mjs"]
 }

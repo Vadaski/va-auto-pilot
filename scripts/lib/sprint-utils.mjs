@@ -6,7 +6,8 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 
-export const DEFAULT_AGENT_TEMPLATE = 'claude -p --output-format text "Implement task {taskId} in this project"';
+export const DEFAULT_AGENT_TEMPLATE = 'node -e "console.error(\'[va-auto-pilot] No agent configured. Pass --agent-template or set a worker override for task {taskId}.\'); process.exit(127)"';
+export const DEFAULT_AGENT_TEMPLATE_HELP = "vendor-neutral placeholder; configure with --agent-template or a worker override";
 
 // ---------------------------------------------------------------------------
 // Type definitions

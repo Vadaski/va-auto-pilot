@@ -5397,12 +5397,13 @@ test("resolveSpawnCommand preserves custom legacy claude --task prompts as viabl
   );
 });
 
-test("resolveSpawnCommand normalizes the default agent template into a shell-safe command", () => {
+test("resolveSpawnCommand returns the vendor-neutral placeholder for the default template", () => {
   const command = resolveSpawnCommand(
     { taskId: "AP-058" },
     DEFAULT_AGENT_TEMPLATE
   );
-  assert.equal(command, buildDefaultAgentCommand("AP-058"));
+  assert.ok(command.includes("No agent configured"), command);
+  assert.ok(command.includes("AP-058"), command);
 });
 
 test("ColonyBridge: kimi bypass rewrites legacy fallback commands into viable spawn commands", async () => {

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-07-01
+
+### Added
+
+- Human-facing cockpit (`va-auto-pilot cockpit`) and goal-first CLI (`goal`, `plan-from-goal`)
+- Explicit orchestrated mode with `orchestrate plan`, `review-plan`, `approve-plan`, `dispatch`, `await-workers`, `commit`, and `recover` phases
+- Governance checkpoints, permission scope policy, budget guardrails, and eval gate runner
+- Observability evidence contract, read-only MCP resources, and runtime evidence bundles
+- `colony-bridge.mjs` graceful fallback to raw agent spawn when `va-agent-protocol` is not resolvable
+- Distribution validation smoke test for packed artifact quick-start path
+
+### Changed
+
+- Default `--agent-template` is now a vendor-neutral placeholder that fails fast with a clear error; users must configure an agent template or worker override before dispatch
+- `CLAUDE.md` aligned with the actual stack: `checkJs`/`allowJs` TypeScript (`strict: false`), ESLint, Node built-in test runner + `c8`
+- README softened the "model cannot self-certify" claim to reflect that CLI gates catch obvious cheating and force observable evidence, but cannot cryptographically prove gate meaning
+- README documented the `colony-bridge` / `va-agent-protocol` coupling and fallback behavior
+
 ## [0.2.0] - 2026-04-15
 
 ### Added

@@ -197,8 +197,10 @@ export function resolveSpawnCommand(track, agentTemplate) {
   }
 
   const legacyDefaultCommand = interpolateAgentTemplate("claude --task {taskId}", track.taskId);
-  const modernDefaultCommand = interpolateAgentTemplate(DEFAULT_AGENT_TEMPLATE, track.taskId);
-  if (rawCommand === legacyDefaultCommand || rawCommand === modernDefaultCommand) {
+  const modernDefaultCommand = DEFAULT_AGENT_TEMPLATE.includes("claude")
+    ? interpolateAgentTemplate(DEFAULT_AGENT_TEMPLATE, track.taskId)
+    : "";
+  if (rawCommand === legacyDefaultCommand || (modernDefaultCommand && rawCommand === modernDefaultCommand)) {
     return buildDefaultAgentCommand(track.taskId);
   }
 

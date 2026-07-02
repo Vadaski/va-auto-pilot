@@ -35,6 +35,8 @@ npm run check:demo
 
 Use `npx va-auto-pilot init .` when adding the loop to an existing repository.
 
+Before dispatching tasks, configure the CLI agent you want to use. The default template is a vendor-neutral placeholder that exits with a clear error; set `--agent-template` or worker overrides so tasks can actually run.
+
 ---
 
 ## The Design Bet
@@ -63,7 +65,7 @@ That is the bet.
 
 ### Guarding against weaknesses
 
-- **Evidence gates prevent hallucination** — The model cannot self-certify. CLI commands produce objective pass/fail signals. "I think it's done" is not the same as "it is done."
+- **Evidence gates prevent hallucination** — CLI commands produce objective pass/fail signals that the model cannot argue around. "I think it's done" is not the same as "it is done." The gates catch obvious placeholder cheating and force observable evidence; they do not cryptographically prove that a test is meaningful.
 - **Pitfall compounding prevents repeated mistakes** — Structured failure metadata from past runs is injected into future delegations as hard constraints. The system gets harder to fool over time.
 - **Adversarial review breaks self-validation loops** — A fresh-context reviewer sees only the diff, never the intent. This structurally prevents the most common autonomous loop failure: growing confidence in growing errors.
 
@@ -76,6 +78,8 @@ That is the bet.
 VA Auto-Pilot is a **sprint execution engine** — it runs the autonomous engineering loop. [va-agent-protocol](https://github.com/Vadaski/va-agent-protocol) is the **universal task protocol** — the standardized contract that wraps any CLI agent into a composable unit.
 
 VA Auto-Pilot can run standalone. It can also operate as a reference engine / managed agent for va-agent-protocol. The protocol is the task contract; Auto-Pilot is one execution engine that satisfies it.
+
+The event-driven Colony dispatcher in `scripts/lib/colony-bridge.mjs` can use `va-agent-protocol` when it is resolvable from a local sibling checkout (`../../../va-agent-protocol/dist/index.js`). If the protocol is not present, Auto-Pilot falls back to raw agent spawn, so external users still get a working loop without needing the monorepo layout.
 
 MCP and A2A are complementary connection layers. VA Auto-Pilot sits above connection and messaging: it governs how long-running engineering work is decomposed, executed, reviewed, recovered, and accepted.
 
@@ -104,9 +108,9 @@ Given those real constraints and anchors, the question becomes: *which expert vi
 
 ### 2. CLI-first is a correctness guarantee, not a style preference
 
-Quality gates run via deterministic CLI commands. `npm run check:all` either passes or it does not. The model cannot declare success, argue its way through, or self-certify quality.
+Quality gates run via deterministic CLI commands. `npm run check:all` either passes or it does not. The model cannot declare success or argue its way through a failing gate.
 
-This creates an objective synchronization point that separates "I think it's done" from "it is done."
+This creates an objective synchronization point that separates "I think it's done" from "it is done." The gate itself can still be gamed by a sufficiently cooperative agent, so the framework also compounds pitfalls and runs adversarial review to raise the cost of cheating.
 
 ### 3. The manager delegates — it never implements
 

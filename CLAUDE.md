@@ -14,10 +14,10 @@ CLI agents (codex, claude, gemini, kimi, glm) → bottom-layer execution
 ```
 
 ## Code Conventions
-- TypeScript 5.7+, strict mode, ES2022 target, ESM only
-- Node.js >= 20
-- Biome for formatting/linting
-- Vitest for testing
+- Node.js >= 20, ESM only
+- TypeScript 5.x in checkJs/allowJs mode over `.mjs` sources (`tsconfig.json`); `strict: false`, ES2022 target, `NodeNext` module resolution
+- ESLint for linting (`npm run lint`)
+- Node built-in test runner + c8 for coverage (`npm run check:units`, `npm run check:coverage`)
 - Named exports only
 
 ## Orchestrated Mode (default for session agents)

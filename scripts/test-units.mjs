@@ -6859,6 +6859,49 @@ test("progress-iteration: classifyRepository detects multiple stacks from manife
   assert.ok(node.repoType.includes("Node") || node.repoType.includes("project"));
 });
 
+test("progress-iteration: real CLI progress-iterate + goal + plan-from-goal writes state task derived from produced objective", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "va-iter-cli-"));
+  const vaDir = path.join(tmpRoot, ".va-auto-pilot");
+  const docsTodo = path.join(tmpRoot, "docs", "todo");
+  fs.mkdirSync(vaDir, { recursive: true });
+  fs.mkdirSync(docsTodo, { recursive: true });
+
+  const stateFile = path.join(vaDir, "sprint-state.json");
+  fs.writeFileSync(stateFile, JSON.stringify({ version: 1, projectPrefix: "AP", updatedAt: new Date().toISOString(), tasks: [] }));
+
+  const boardFile = path.join(docsTodo, "human-board.md");
+  fs.writeFileSync(boardFile, "# Human Board\n\n## Instructions (highest priority)\n- [x] [objective] old checked\n");
+
+  // 1. real progress-iterate (local only, fast)
+  const iter = spawnSync(process.execPath, ["scripts/auto-pilot.mjs", "progress-iterate", "--state-file", stateFile, "--json"], { cwd: process.cwd(), encoding: "utf8" });
+  if (iter.status !== 0) throw new Error("iter failed: " + (iter.stderr || iter.stdout));
+  const iterJ = JSON.parse(iter.stdout);
+  const obj = iterJ.objective;
+  assert.ok(/repo type/i.test(obj), "produced obj must have assessment signal");
+
+  // 2. real goal --text (array spawn passes full obj safely)
+  const goal = spawnSync(process.execPath, ["scripts/auto-pilot.mjs", "goal", "--state-file", stateFile, "--text", obj, "--json"], { cwd: process.cwd(), encoding: "utf8" });
+  assert.equal(goal.status, 0, "goal cli must succeed");
+
+  // 3. real plan-from-goal --apply
+  const apply = spawnSync(process.execPath, ["scripts/auto-pilot.mjs", "plan-from-goal", "--state-file", stateFile, "--apply", "--json"], { cwd: process.cwd(), encoding: "utf8" });
+  assert.equal(apply.status, 0, "plan-from-goal apply must succeed");
+
+  // 4. inspect written state (real path)
+  const written = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const task = (written.tasks || []).find(t => t.state !== "Done");
+  assert.ok(task, "must have created a backlog task");
+  const notes = task.notes || task.title || "";
+  assert.ok(/From progress-iteration assessment/i.test(task.title || ""), "title must derive from produced objective");
+  assert.ok(/repo type/i.test(notes), "notes must contain repo type signal from assessment");
+  assert.ok(/assessment|progress-iteration/i.test(notes), "notes must contain assessment signal");
+});
+
 // ---------------------------------------------------------------------------
 // Import additional coverage tests
 // ---------------------------------------------------------------------------

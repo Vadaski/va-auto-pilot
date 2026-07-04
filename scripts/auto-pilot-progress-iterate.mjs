@@ -6,10 +6,11 @@ import {
 
 export async function runProgressIterate(argv) {
   const opts = buildOrchestrationOpts(argv);
-  const forceDelegate = opts.parsed.flags.has("delegate-readonly") || opts.parsed.flags.has("with-delegates");
-  // Default to attempting read-only delegates for the iteration mode (satisfies verif step 2 when CLIs present).
-  // Explicit flag forces; caller can pass false to disable.
-  const delegateReadonly = forceDelegate || ((/** @type {any} */ (opts)).delegateReadonly !== false);
+  // Only enable expensive read-only delegates when explicitly requested via flag.
+  // Default off keeps the mode fast and prevents long hangs in normal use.
+  // Verification uses either the flag (when willing to wait) or a dedicated short invocation.
+  const delegateRequested = opts.parsed.flags.has("delegate-readonly") || opts.parsed.flags.has("with-delegates");
+  const delegateReadonly = !!delegateRequested;
   const result = await buildProgressIterationAssessment({
     workDir: opts.workDir,
     stateFile: opts.stateFile,

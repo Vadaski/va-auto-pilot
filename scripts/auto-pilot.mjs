@@ -19,6 +19,7 @@ import { runGoal } from "./auto-pilot-goal.mjs";
 import { runIntervene } from "./auto-pilot-intervene.mjs";
 import { runIntent } from "./auto-pilot-intent.mjs";
 import { runPlanFromGoal } from "./auto-pilot-plan-from-goal.mjs";
+import { runProgressIterate } from "./auto-pilot-progress-iterate.mjs";
 
 function printHelp() {
   console.log(`auto-pilot — Orchestrated execution (session agent is the manager)
@@ -43,6 +44,7 @@ Usage:
   node scripts/auto-pilot.mjs gates maintain [--apply] [--json]
   node scripts/auto-pilot.mjs goal --text "..."
   node scripts/auto-pilot.mjs plan-from-goal [--apply] [--json]
+  node scripts/auto-pilot.mjs progress-iterate [--delegate-readonly] [--json]
   node scripts/auto-pilot.mjs intent objective --text "..."
   node scripts/auto-pilot.mjs intent constraint --text "..."
   node scripts/auto-pilot.mjs intent risk --text "..."
@@ -97,6 +99,11 @@ async function main() {
 
   if (command === "plan-from-goal") {
     await runPlanFromGoal(argv.slice(1));
+    return;
+  }
+
+  if (command === "progress-iterate") {
+    await runProgressIterate(argv.slice(1));
     return;
   }
 

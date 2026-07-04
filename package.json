@@ -22,6 +22,7 @@
     "scripts/auto-pilot-intervene.mjs",
     "scripts/auto-pilot-loop.mjs",
     "scripts/auto-pilot-plan-from-goal.mjs",
+    "scripts/auto-pilot-progress-iterate.mjs",
     "scripts/auto-pilot-intent.mjs",
     "scripts/auto-pilot-observe.mjs",
     "scripts/auto-pilot-orchestrate.mjs",

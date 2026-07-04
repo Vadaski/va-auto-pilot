@@ -6770,6 +6770,79 @@ test("orchestration-state: buildCheckpoint carries governance contract", () => {
   assert.equal(checkpoint.governance.resumePhase, "plan-approved");
 });
 
+test("progress-iteration: pure classify + gates + format produce consumable artifacts", async () => {
+  const { classifyRepository, extractQualityGates, formatAsAutoPilotArtifacts } = await import("./lib/progress-iteration.mjs");
+  const fakePkg = {
+    name: "va-auto-pilot",
+    type: "module",
+    engines: { node: ">=20" },
+    bin: { "va-auto-pilot": "bin/va-auto-pilot.mjs" },
+    scripts: { "check:all": "npm run check && ...", "validate:distribution": "node ./scripts/validate-distribution.mjs", typecheck: "npx tsc --noEmit" },
+  };
+  const fakeConfig = {
+    qualityGate: {
+      buildCommand: "npm run check:all",
+      reviewCommand: "codex review --uncommitted",
+      acceptanceTestCommand: "npm run validate:distribution",
+      smokeTest: { enabled: false },
+      adaptiveGates: [{ name: "review-gate", command: "codex review --uncommitted", required: false }],
+    },
+  };
+  const repo = classifyRepository({ packageJson: fakePkg, tsconfig: {}, hasEslint: true, testDir: "tests", scriptsDir: "scripts" });
+  assert.ok(repo.repoType.includes("Node"));
+  assert.ok(repo.manifestsDetected.includes("package.json"));
+
+  const gates = extractQualityGates({ packageJson: fakePkg, vaConfig: fakeConfig });
+  assert.equal(gates.buildCommand, "npm run check:all");
+  assert.equal(gates.smokeEnabled, false);
+
+  const assessment = {
+    repo,
+    gates,
+    risks: ["smoke gate disabled (placeholder; no critical paths exercised)"],
+    diffs: ["smokeTest.enabled=false in config (documented maintenance)"],
+  };
+  const arts = formatAsAutoPilotArtifacts(assessment);
+  assert.ok(typeof arts.objective === "string" && arts.objective.length > 20);
+  assert.ok(arts.objective.includes("repo type") || arts.objective.includes("quality gates"));
+  assert.ok(Array.isArray(arts.constraints) && arts.constraints.length >= 3);
+  assert.ok(arts.taskBreakdown.includes("Local assessment"));
+  assert.ok(arts.delegationStrategy.includes("composer") || arts.delegationStrategy.includes("kimi"));
+  assert.ok(arts.crossModelReviewStrategy.includes("codex review"));
+  assert.ok(arts.highestValue && arts.highestValue.title);
+});
+
+test("progress-iteration: pickHighestValue prefers smoke gap when disabled", async () => {
+  const { formatAsAutoPilotArtifacts } = await import("./lib/progress-iteration.mjs");
+  const assessment = {
+    repo: { repoType: "Node test", manifestsDetected: ["p"] },
+    gates: { smokeEnabled: false, buildCommand: "x", reviewCommand: "y", acceptanceTestCommand: "z", allCheckScripts: [], adaptiveGates: [] },
+    risks: [],
+    diffs: [],
+  };
+  const arts = formatAsAutoPilotArtifacts(assessment);
+  assert.ok(arts.highestValue.title.includes("smokeTest") || arts.highestValue.title.includes("Enable"));
+});
+
+test("progress-iteration: artifacts feed via goal-backlog path produces task notes with assessment signal", async () => {
+  const { formatAsAutoPilotArtifacts } = await import("./lib/progress-iteration.mjs");
+  const { buildCandidateBacklogFromIntents } = await import("./lib/goal-backlog.mjs");
+  const assessment = {
+    repo: { repoType: "Node ESM CLI harness", manifestsDetected: ["package.json", "tsconfig.json"] },
+    gates: { buildCommand: "npm run check:all", reviewCommand: "codex review --uncommitted", acceptanceTestCommand: "npm run validate:distribution", smokeEnabled: false, allCheckScripts: ["check:all"], adaptiveGates: [] },
+    risks: ["smoke gate disabled"],
+    diffs: ["smoke disabled"],
+  };
+  const arts = formatAsAutoPilotArtifacts(assessment);
+  // Simulate human board line from objective (goal --text feeds objective)
+  const rawInstructions = [{ text: `[objective] ${arts.objective}`, lineNumber: 10 }];
+  const built = buildCandidateBacklogFromIntents(rawInstructions);
+  assert.equal(built.ok, true);
+  const notes = built.candidateBacklog.items[0].notes || "";
+  assert.ok(notes.includes("repo type") || notes.includes("quality gates") || notes.includes("assessment"), "notes must carry assessment-derived signal");
+  assert.ok(built.candidateBacklog.items[0].title.length > 5);
+});
+
 // ---------------------------------------------------------------------------
 // Import additional coverage tests
 // ---------------------------------------------------------------------------

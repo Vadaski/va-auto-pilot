@@ -1159,9 +1159,14 @@ function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pen
       commands.push(command("Plan next cycle", ["orchestrate", "plan"], "Pending sprint tasks are available."));
     } else if (uncheckedBoard.length === 0) {
       commands.push(command(
+        "Progress-iterate (assessment)",
+        ["progress-iterate", "--json"],
+        "No pending sprint tasks and no unchecked intent: run progress iteration assessment to discover highest-value next goal from repo/gates/risks/doc gaps."
+      ));
+      commands.push(command(
         "Capture goal",
         ["goal", "--text", "<objective>"],
-        "No pending sprint tasks are available; ask the human for the next goal."
+        "No pending sprint tasks are available; ask the human for the next goal (or use progress-iterate)."
       ));
     }
     return commands;
@@ -1169,9 +1174,14 @@ function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pen
 
   if (pendingTasks === 0 && uncheckedBoard.length === 0 && ["initialized", "cycle-closed"].includes(run.phase)) {
     commands.push(command(
+      "Progress-iterate (assessment)",
+      ["progress-iterate", "--json"],
+      "Backlog empty + no pending intent: run bounded repo assessment (type/gates/risks/doc-impl) + read-only delegates when warranted; emit objective/constraint/risk/acceptance + strategies directly consumable via goal/plan-from-goal."
+    ));
+    commands.push(command(
       "Capture goal",
       ["goal", "--text", "<objective>"],
-      "The run is ready, but backlog is empty; ask the human for the next goal."
+      "The run is ready, but backlog is empty; ask the human for the next goal (prefer progress-iterate for autonomous highest-value discovery)."
     ));
   }
 

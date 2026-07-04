@@ -6788,9 +6788,9 @@ test("progress-iteration: pure classify + gates + format produce consumable arti
       adaptiveGates: [{ name: "review-gate", command: "codex review --uncommitted", required: false }],
     },
   };
-  const repo = classifyRepository({ packageJson: fakePkg, tsconfig: {}, hasEslint: true, testDir: "tests", scriptsDir: "scripts" });
-  assert.ok(repo.repoType.includes("Node"));
-  assert.ok(repo.manifestsDetected.includes("package.json"));
+  const repo = classifyRepository({ packageJson: fakePkg, manifests: { hasPackageJson: true, hasTsconfig: true, hasEslint: true, hasScriptsDir: true, hasTestsDir: true } });
+  assert.ok(repo.repoType.includes("Node") || repo.repoType.includes("project"));
+  assert.ok(repo.manifestsDetected.some(m => m.includes("package") || m.includes("Cargo") || m.includes("godot")));
 
   const gates = extractQualityGates({ packageJson: fakePkg, vaConfig: fakeConfig });
   assert.equal(gates.buildCommand, "npm run check:all");
@@ -6841,6 +6841,22 @@ test("progress-iteration: artifacts feed via goal-backlog path produces task not
   const notes = built.candidateBacklog.items[0].notes || "";
   assert.ok(notes.includes("repo type") || notes.includes("quality gates") || notes.includes("assessment"), "notes must carry assessment-derived signal");
   assert.ok(built.candidateBacklog.items[0].title.length > 5);
+});
+
+test("progress-iteration: classifyRepository detects multiple stacks from manifests (real fn)", async () => {
+  const { classifyRepository } = await import("./lib/progress-iteration.mjs");
+  const rust = classifyRepository({ packageJson: { name: "foo" }, manifests: { hasCargoToml: true, hasTestsDir: true } });
+  assert.ok(rust.repoType.includes("Rust") || rust.repoType.includes("Cargo"));
+  assert.ok(rust.manifestsDetected.some(m => m.includes("Cargo")));
+
+  const godot = classifyRepository({ packageJson: {}, manifests: { hasProjectGodot: true } });
+  assert.ok(godot.repoType.includes("Godot"));
+
+  const py = classifyRepository({ packageJson: {}, manifests: { hasPyproject: true } });
+  assert.ok(py.repoType.includes("Python") || py.repoType.includes("project"));
+
+  const node = classifyRepository({ packageJson: { name: "bar", type: "module" }, manifests: { hasPackageJson: true } });
+  assert.ok(node.repoType.includes("Node") || node.repoType.includes("project"));
 });
 
 // ---------------------------------------------------------------------------

@@ -37,29 +37,70 @@ function safeReadText(filePath, maxBytes = 8192) {
   }
 }
 
-export function classifyRepository({ packageJson, tsconfig, hasEslint, testDir, scriptsDir }) {
-  const type = packageJson?.type === "module" ? "esm" : "cjs";
-  const engines = packageJson?.engines?.node ?? ">=18";
-  const name = packageJson?.name ?? "unknown";
-  const isCli = Boolean(packageJson?.bin);
-  const hasTsCheck = Boolean(packageJson?.scripts?.typecheck);
+export function classifyRepository(input = {}) {
+  const pkg = (input.packageJson || input.pkg || {});
+  const manifests = (input.manifests || input || {});
+  const name = pkg.name || "unknown";
+  const isCli = Boolean(pkg.bin);
+  const hasTsCheck = Boolean(pkg.scripts && pkg.scripts.typecheck);
+  const modType = pkg.type === "module" ? "esm" : "cjs";
+  const nodeRange = (pkg.engines && pkg.engines.node) || ">=18";
+
+  let repoType = "Unknown project";
+  let language = "unknown";
+  let testRunner = "unknown";
+  const detected = [];
+
+  if (manifests.hasCargo || manifests.hasCargoToml) {
+    repoType = "Rust project";
+    language = "Rust";
+    testRunner = "cargo test";
+    if (manifests.hasCargoToml) detected.push("Cargo.toml");
+  } else if (manifests.hasGodot || manifests.hasProjectGodot) {
+    repoType = "Godot project";
+    language = "GDScript / C#";
+    testRunner = "godot --headless --script (custom validate)";
+    if (manifests.hasProjectGodot) detected.push("project.godot");
+  } else if (manifests.hasPyproject || manifests.hasSetupPy) {
+    repoType = "Python project";
+    language = "Python";
+    testRunner = "pytest or unittest";
+    if (manifests.hasPyproject) detected.push("pyproject.toml");
+  } else if (manifests.hasPackageJson || pkg.name) {
+    repoType = "Node.js project";
+    language = pkg.type === "module" ? "JavaScript (ESM)" : "JavaScript";
+    testRunner = "node --test + c8 (or npm test)";
+    detected.push("package.json");
+  } else if (manifests.hasGoMod) {
+    repoType = "Go project";
+    language = "Go";
+    testRunner = "go test";
+    detected.push("go.mod");
+  }
+
+  if (manifests.hasTsconfig) detected.push("tsconfig.json");
+  if (manifests.hasEslint) detected.push("eslint.config.mjs");
+  if (manifests.hasScriptsDir) detected.push("scripts/");
+  if (manifests.hasTestsDir) detected.push("tests/");
+
+  if (detected.length === 0) {
+    repoType = pkg.name ? "Node.js project" : "Generic project";
+    language = "JavaScript";
+    testRunner = "node --test";
+    if (pkg.name) detected.push("package.json");
+  }
+
   return {
-    repoType: "Node.js CLI harness (autonomous multi-agent sprint loop)",
-    language: "JavaScript (ESM)",
-    moduleType: type,
-    nodeRange: engines,
+    repoType,
+    language,
+    moduleType: modType,
+    nodeRange,
     packageName: name,
     isCliPackage: isCli,
     hasTypeScriptCheck: hasTsCheck,
-    hasLint: Boolean(hasEslint),
-    testRunner: "node --test + c8",
-    manifestsDetected: [
-      "package.json",
-      tsconfig ? "tsconfig.json" : null,
-      hasEslint ? "eslint.config.mjs" : null,
-      "scripts/",
-      "tests/",
-    ].filter(Boolean),
+    hasLint: Boolean(manifests.hasEslint),
+    testRunner,
+    manifestsDetected: detected.length ? detected : ["package.json"],
   };
 }
 
@@ -93,9 +134,14 @@ export function extractQualityGates({ packageJson, vaConfig }) {
   };
 }
 
-export function synthesizeRisks({ journalTail, unresolvedPitfalls, gateConfig, cockpitSignals }) {
+export function synthesizeRisks(input = {}) {
+  const journalTail = input.journalTail || input.journal || "";
+  const unresolvedPitfalls = input.unresolvedPitfalls || [];
+  const gateConfig = input.gateConfig || input.gates || {};
+  const cockpitSignals = input.cockpitSignals || "";
   const risks = [];
-  if (!gateConfig.smokeEnabled) {
+  const gc = gateConfig || {};
+  if (gc.smokeEnabled === false) {
     risks.push("smoke gate disabled (placeholder; no critical paths exercised)");
   }
   if ((unresolvedPitfalls || []).length > 0) {
@@ -105,7 +151,8 @@ export function synthesizeRisks({ journalTail, unresolvedPitfalls, gateConfig, c
   if (/auth|401|credential|rate/i.test(journal)) {
     risks.push("agent auth / rate limit signals in recent journal");
   }
-  if (gateConfig.gateTrustSignals?.advisoryCount > 0) {
+  const gts = gc.gateTrustSignals || {};
+  if ((gts.advisoryCount || 0) > 0) {
     risks.push("advisory gates reduce evidence trust (review-gate, reason-changed, smoke)");
   }
   if (cockpitSignals && /evidence-risk/i.test(String(cockpitSignals))) {
@@ -117,62 +164,81 @@ export function synthesizeRisks({ journalTail, unresolvedPitfalls, gateConfig, c
   return risks.slice(0, 5);
 }
 
-export function detectDocImplDiffs({ publicNarrativeResult, distributionResult, recentJournal, packageScripts }) {
+export function detectDocImplDiffs(input = {}) {
+  const publicNarrativeResult = input.publicNarrativeResult || "";
+  const distributionResult = input.distributionResult || "";
+  const recentJournal = input.recentJournal || "";
+  const packageScripts = input.packageScripts || [];
+  const gates = input.gates || input.gateConfig || {};
   const diffs = [];
-  // Validators are authoritative; if they passed recently we record confirmation
   if (publicNarrativeResult && publicNarrativeResult.includes("passed")) {
-    // good, no diff
-  } else {
+    // good
+  } else if (publicNarrativeResult) {
     diffs.push("public-narrative validate drift suspected");
   }
   if (distributionResult && distributionResult.includes("passed")) {
     // good
-  } else {
+  } else if (distributionResult) {
     diffs.push("distribution validate drift suspected");
   }
-  // Known live gaps (bounded)
-  if (!packageScripts.includes("check:quality")) {
-    // present actually, skip
+  // General signals
+  if (gates.reviewCommand && /codex|external/i.test(gates.reviewCommand)) {
+    diffs.push("review gate depends on external CLI (availability/auth risk for generic agents)");
   }
-  // Smoke is configured disabled in this repo's config
-  diffs.push("smokeTest.enabled=false in config (documented maintenance)");
-  // Review gate external dep is real capability but not pure local
-  diffs.push("review gate depends on external codex CLI (availability/auth risk)");
+  if (gates.smokeEnabled === false) {
+    diffs.push("smoke gate disabled or placeholder (no critical paths exercised)");
+  }
+  if (diffs.length === 0) {
+    diffs.push("no major doc-impl drift detected in targeted scans");
+  }
   return diffs;
 }
 
-export function pickHighestValueGoal(assessment) {
-  const { repo, gates, risks, diffs } = assessment;
-  // Heuristic: pick the gap with biggest loop-closing value
-  if (!gates.smokeEnabled) {
+export function pickHighestValueGoal(assessment = {}) {
+  const { repo = {}, gates = {}, risks = [], diffs = [] } = assessment;
+  const rt = repo.repoType || "project";
+  const g = gates || {};
+  // Data-driven highest value for arbitrary repo
+  if (g.smokeEnabled === false) {
     return {
-      title: "Enable smokeTest with at least one critical path and prove via progress-iteration + runtime-proof",
-      rationale: "Smoke is the only configured but disabled gate; exercising it after iteration assessment closes the evidence gap and proves the new mode.",
+      title: `Enable smoke (or equivalent critical-path gate) and prove via progress-iteration for ${rt}`,
+      rationale: "Configured smoke/critical gate is disabled or placeholder; exercising it after assessment closes evidence gap for this stack.",
       priority: "P1",
     };
   }
-  if (diffs.some((d) => d.includes("review gate"))) {
+  if (diffs && diffs.some((d) => /review gate|external.*CLI|auth/i.test(String(d)))) {
     return {
-      title: "Make review gate robust for generic agents and document fallback when codex unavailable",
-      rationale: "External review dep is top operational risk; iteration mode should surface and mitigate it for any stack.",
+      title: `Make review gate resilient for generic agents on ${rt} and document fallbacks`,
+      rationale: "External review dependency is operational risk; iteration should surface mitigation usable by any CLI agent.",
       priority: "P1",
     };
   }
-  // Default forward from current state (after decouple intent)
+  if (!g.allCheckScripts || g.allCheckScripts.length < 2) {
+    return {
+      title: `Add/integrate quality gate(s) and prove full assessment + goal-consume loop on ${rt}`,
+      rationale: "Limited gate surface detected; running progress-iteration + feeding via plan-from-goal proves the autonomous discovery for this stack.",
+      priority: "P1",
+    };
+  }
+  // General forward highest value
   return {
-    title: "Prove decoupled va-auto-pilot bootstraps a clean sprint in fresh external repo using only installed package + generic agent + progress-iteration for next-goal discovery",
-    rationale: "After consuming the decouple objective, highest value is end-to-end proof that the pure harness works standalone, exercises iteration assessment, and produces verifiable backlog from assessment signals.",
+    title: `Run progress-iteration assessment on ${rt}, emit objective/constraint/risk/acceptance artifacts, and consume via goal + plan-from-goal to populate highest-value backlog task`,
+    rationale: "Assessment discovered real type/gates/risks/diffs for this repo; feeding the produced objective demonstrates the find-consume loop and highest-value selection.",
     priority: "P1",
   };
 }
 
 function buildObjectiveText(assessment, highest) {
-  const { repo, gates, risks, diffs } = assessment;
+  const a = assessment || {};
+  const repo = a.repo || {};
+  const g = a.gates || a.gateConfig || {};
+  const risks = a.risks || [];
+  const diffs = a.diffs || [];
   const signals = [
-    `repo type: ${repo.repoType} (${repo.moduleType}, ${repo.nodeRange})`,
-    `manifests: ${repo.manifestsDetected.join(", ")}`,
-    `quality gates: build=${gates.buildCommand}; review=${gates.reviewCommand}; acceptance=${gates.acceptanceTestCommand}; smokeEnabled=${gates.smokeEnabled}; adaptive=${gates.adaptiveGates.length}`,
-    `real capabilities: ${gates.allCheckScripts.slice(0, 6).join(", ")}...`,
+    `repo type: ${repo.repoType || "project"} (${repo.moduleType || "unknown"}, ${repo.nodeRange || ">=18"})`,
+    `manifests: ${(repo.manifestsDetected || []).join(", ")}`,
+    `quality gates: build=${g.buildCommand || "check"}; review=${g.reviewCommand || "review"}; acceptance=${g.acceptanceTestCommand || "validate"}; smokeEnabled=${!!g.smokeEnabled}; adaptive=${(g.adaptiveGates || []).length}`,
+    `real capabilities: ${(g.allCheckScripts || []).slice(0, 6).join(", ")}...`,
     `doc/impl diffs: ${diffs.join(" | ")}`,
     `risks: ${risks.join(" | ")}`,
   ].join(" ; ");
@@ -265,31 +331,39 @@ export async function buildProgressIterationAssessment(opts = {}) {
   const pending = countPendingTasks(sprintState);
   const pkg = safeReadJson("package.json", {});
   const vaConfig = safeReadJson(".va-auto-pilot/config.yaml", parseYaml(safeReadText(".va-auto-pilot/config.yaml") || "version: 1"));
-  const tsconfig = safeReadJson("tsconfig.json", null);
-  const eslintExists = fs.existsSync("eslint.config.mjs");
   const journalTail = safeReadText("docs/todo/run-journal.md", 6000);
   const pitfalls = safeReadJson(".va-auto-pilot/pitfalls.json", { pitfalls: [] });
   const unresolved = (pitfalls.pitfalls || []).filter((p) => !p.resolvedAt).slice(0, 3);
 
-  // Targeted doc-impl via recent validate runs (or re-run bounded)
+  // Compute real manifest presence for general classification (bounded fs checks)
+  const manifests = {
+    hasPackageJson: fs.existsSync(path.join(workDir, "package.json")),
+    hasCargoToml: fs.existsSync(path.join(workDir, "Cargo.toml")),
+    hasProjectGodot: fs.existsSync(path.join(workDir, "project.godot")),
+    hasPyproject: fs.existsSync(path.join(workDir, "pyproject.toml")),
+    hasGoMod: fs.existsSync(path.join(workDir, "go.mod")),
+    hasTsconfig: fs.existsSync(path.join(workDir, "tsconfig.json")),
+    hasEslint: fs.existsSync(path.join(workDir, "eslint.config.mjs")),
+    hasScriptsDir: fs.existsSync(path.join(workDir, "scripts")),
+    hasTestsDir: fs.existsSync(path.join(workDir, "tests")),
+  };
+
+  // Targeted doc-impl scans: always execute the validators (bounded) as authoritative inputs per plan.
+  // Never read session-specific scratch paths.
   let pub = "";
   let dist = "";
   try {
-    // Prefer cached logs from scratch if present, else run (fast)
-    const scratchPub = safeReadText("/var/folders/0n/ld7yzsqn1935pn7q842y0_300000gn/T/grok-goal-80e94454c84e/implementer/validate-public-narrative.log");
-    pub = scratchPub || (await execFileAsync(process.execPath, ["scripts/validate-public-narrative.mjs"], { cwd: workDir, timeout: 45000, maxBuffer: 256 * 1024 })).stdout;
-  } catch { /* ignore */ }
+    const r = await execFileAsync(process.execPath, ["scripts/validate-public-narrative.mjs"], { cwd: workDir, timeout: 45000, maxBuffer: 256 * 1024 });
+    pub = r.stdout || "";
+  } catch { /* ignore - will produce conservative diff */ }
   try {
-    const scratchDist = safeReadText("/var/folders/0n/ld7yzsqn1935pn7q842y0_300000gn/T/grok-goal-80e94454c84e/implementer/validate-distribution.log");
-    dist = scratchDist || (await execFileAsync(process.execPath, ["scripts/validate-distribution.mjs"], { cwd: workDir, timeout: 45000, maxBuffer: 256 * 1024 })).stdout;
+    const r = await execFileAsync(process.execPath, ["scripts/validate-distribution.mjs"], { cwd: workDir, timeout: 45000, maxBuffer: 256 * 1024 });
+    dist = r.stdout || "";
   } catch { /* ignore */ }
 
   const repo = classifyRepository({
     packageJson: pkg,
-    tsconfig,
-    hasEslint: eslintExists,
-    testDir: "tests",
-    scriptsDir: "scripts",
+    manifests,
   });
   const gates = extractQualityGates({ packageJson: pkg, vaConfig });
   const risks = synthesizeRisks({
@@ -303,6 +377,7 @@ export async function buildProgressIterationAssessment(opts = {}) {
     distributionResult: dist,
     recentJournal: journalTail,
     packageScripts: Object.keys(pkg.scripts || {}),
+    gates,
   });
 
   const assessment = {

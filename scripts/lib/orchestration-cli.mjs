@@ -24,6 +24,8 @@ export const ORCHESTRATE_BOOL_FLAGS = new Set([
   "waive-review",
   "reset-fail-count",
   "apply",
+  "delegate-readonly",
+  "with-delegates",
 ]);
 
 export function buildOrchestrationOpts(argv, extra = {}) {

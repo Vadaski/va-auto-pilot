@@ -6865,6 +6865,9 @@ test("progress-iteration: real CLI progress-iterate + goal + plan-from-goal writ
   const os = await import("node:os");
   const path = await import("node:path");
 
+  const realCwd = process.cwd();
+  const autoPilotScript = path.join(realCwd, "scripts/auto-pilot.mjs");
+
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "va-iter-cli-"));
   const vaDir = path.join(tmpRoot, ".va-auto-pilot");
   const docsTodo = path.join(tmpRoot, "docs", "todo");
@@ -6877,22 +6880,28 @@ test("progress-iteration: real CLI progress-iterate + goal + plan-from-goal writ
   const boardFile = path.join(docsTodo, "human-board.md");
   fs.writeFileSync(boardFile, "# Human Board\n\n## Instructions (highest priority)\n- [x] [objective] old checked\n");
 
-  // 1. real progress-iterate (local only, fast)
-  const iter = spawnSync(process.execPath, ["scripts/auto-pilot.mjs", "progress-iterate", "--state-file", stateFile, "--json"], { cwd: process.cwd(), encoding: "utf8" });
+  const journalFile = path.join(docsTodo, "run-journal.md");
+
+  // Snapshot real journal to prove isolation
+  const realJournalPath = path.resolve(realCwd, "docs/todo/run-journal.md");
+  const beforeRealJournal = fs.existsSync(realJournalPath) ? fs.readFileSync(realJournalPath, "utf8") : "";
+
+  // 1. real progress-iterate (assessment on real tree: use real cwd + absolute script)
+  const iter = spawnSync(process.execPath, [autoPilotScript, "progress-iterate", "--state-file", stateFile, "--json"], { cwd: realCwd, encoding: "utf8" });
   if (iter.status !== 0) throw new Error("iter failed: " + (iter.stderr || iter.stdout));
   const iterJ = JSON.parse(iter.stdout);
   const obj = iterJ.objective;
   assert.ok(/repo type/i.test(obj), "produced obj must have assessment signal");
 
-  // 2. real goal --text (array spawn passes full obj safely)
-  const goal = spawnSync(process.execPath, ["scripts/auto-pilot.mjs", "goal", "--state-file", stateFile, "--text", obj, "--json"], { cwd: process.cwd(), encoding: "utf8" });
+  // 2. real goal --text (use tmp cwd + absolute script + explicit --journal-file for isolation)
+  const goal = spawnSync(process.execPath, [autoPilotScript, "goal", "--state-file", stateFile, "--journal-file", journalFile, "--text", obj, "--json"], { cwd: tmpRoot, encoding: "utf8" });
   assert.equal(goal.status, 0, "goal cli must succeed");
 
-  // 3. real plan-from-goal --apply
-  const apply = spawnSync(process.execPath, ["scripts/auto-pilot.mjs", "plan-from-goal", "--state-file", stateFile, "--apply", "--json"], { cwd: process.cwd(), encoding: "utf8" });
+  // 3. real plan-from-goal --apply (same isolation)
+  const apply = spawnSync(process.execPath, [autoPilotScript, "plan-from-goal", "--state-file", stateFile, "--journal-file", journalFile, "--apply", "--json"], { cwd: tmpRoot, encoding: "utf8" });
   assert.equal(apply.status, 0, "plan-from-goal apply must succeed");
 
-  // 4. inspect written state (real path)
+  // 4. inspect written state (tmp)
   const written = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   const task = (written.tasks || []).find(t => t.state !== "Done");
   assert.ok(task, "must have created a backlog task");
@@ -6900,6 +6909,10 @@ test("progress-iteration: real CLI progress-iterate + goal + plan-from-goal writ
   assert.ok(/From progress-iteration assessment/i.test(task.title || ""), "title must derive from produced objective");
   assert.ok(/repo type/i.test(notes), "notes must contain repo type signal from assessment");
   assert.ok(/assessment|progress-iteration/i.test(notes), "notes must contain assessment signal");
+
+  // Prove no pollution to real checkout journal
+  const afterRealJournal = fs.existsSync(realJournalPath) ? fs.readFileSync(realJournalPath, "utf8") : "";
+  assert.equal(afterRealJournal, beforeRealJournal, "real journal must not be mutated by test's goal/plan-from-goal (isolation)");
 });
 
 // ---------------------------------------------------------------------------

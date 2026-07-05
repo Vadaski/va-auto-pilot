@@ -329,10 +329,10 @@ export async function buildProgressIterationAssessment(opts = {}) {
   const stateFile = opts.stateFile || defaults.stateFile;
   const sprintState = safeReadJson(stateFile, { tasks: [] });
   const pending = countPendingTasks(sprintState);
-  const pkg = safeReadJson("package.json", {});
-  const vaConfig = safeReadJson(".va-auto-pilot/config.yaml", parseYaml(safeReadText(".va-auto-pilot/config.yaml") || "version: 1"));
-  const journalTail = safeReadText("docs/todo/run-journal.md", 6000);
-  const pitfalls = safeReadJson(".va-auto-pilot/pitfalls.json", { pitfalls: [] });
+  const pkg = safeReadJson(path.join(workDir, "package.json"), {});
+  const vaConfig = safeReadJson(path.join(workDir, ".va-auto-pilot/config.yaml"), parseYaml(safeReadText(path.join(workDir, ".va-auto-pilot/config.yaml")) || "version: 1"));
+  const journalTail = safeReadText(path.join(workDir, "docs/todo/run-journal.md"), 6000);
+  const pitfalls = safeReadJson(path.join(workDir, ".va-auto-pilot/pitfalls.json"), { pitfalls: [] });
   const unresolved = (pitfalls.pitfalls || []).filter((p) => !p.resolvedAt).slice(0, 3);
 
   // Compute real manifest presence for general classification (bounded fs checks)

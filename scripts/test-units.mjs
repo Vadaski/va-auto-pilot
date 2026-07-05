@@ -6912,28 +6912,13 @@ test("progress-iteration: real CLI progress-iterate + goal + plan-from-goal writ
 
   const uniqueSig = obj.slice(0, 100); // unique to this run's objective for precise pollution check
 
-  // Write obj to file to pass long text safely via shell after cd (avoids command line length/quoting issues)
-  const objFile = path.join(tmpRoot, "obj.txt");
-  fs.writeFileSync(objFile, obj);
-
-  // 2. real goal --text (shell cd + cat objFile to force cwd=tmpRoot for workDir and safely pass long text)
-  function shEscape(s) { return String(s).replace(/'/g, "'\\''"); }
-  const goalCmd = `cd '${shEscape(tmpRoot)}' && '${process.execPath}' '${shEscape(autoPilotScript)}' goal --state-file '${shEscape(stateFile)}' --journal-file '${shEscape(journalFile)}' --text "$(cat '${shEscape(objFile)}')" --json`;
-  const goal = spawnSync("/bin/sh", ["-c", goalCmd], { encoding: "utf8" });
+  // 2. real goal --text (direct array + {cwd: tmpRoot} + explicit --journal-file + --state-file for isolation)
+  const goal = spawnSync(process.execPath, [autoPilotScript, "goal", "--state-file", stateFile, "--journal-file", journalFile, "--text", obj, "--json"], { cwd: tmpRoot, encoding: "utf8" });
   assert.equal(goal.status, 0, "goal cli must succeed");
 
-  // 3. real plan-from-goal --apply (same)
-  const applyCmd = `cd '${shEscape(tmpRoot)}' && '${process.execPath}' '${shEscape(autoPilotScript)}' plan-from-goal --state-file '${shEscape(stateFile)}' --journal-file '${shEscape(journalFile)}' --apply --json`;
-  const apply = spawnSync("/bin/sh", ["-c", applyCmd], { encoding: "utf8" });
+  // 3. real plan-from-goal --apply (same direct isolation)
+  const apply = spawnSync(process.execPath, [autoPilotScript, "plan-from-goal", "--state-file", stateFile, "--journal-file", journalFile, "--apply", "--json"], { cwd: tmpRoot, encoding: "utf8" });
   assert.equal(apply.status, 0, "plan-from-goal apply must succeed");
-
-  // Restore real candidate-backlog (and other orch if needed) so the test leaves real checkout unchanged even if spawn temporarily wrote there
-  const realCandPath = path.join(realOrchDir, "candidate-backlog.json");
-  if (beforeOrch.candidateStr) {
-    fs.writeFileSync(realCandPath, beforeOrch.candidateStr);
-  } else if (fs.existsSync(realCandPath)) {
-    fs.unlinkSync(realCandPath);
-  }
 
   // 4. inspect written state (tmp)
   const written = JSON.parse(fs.readFileSync(stateFile, "utf8"));
@@ -6944,13 +6929,19 @@ test("progress-iteration: real CLI progress-iterate + goal + plan-from-goal writ
   assert.ok(/repo type/i.test(notes), "notes must contain repo type signal from assessment");
   assert.ok(/assessment|progress-iteration/i.test(notes), "notes must contain assessment signal");
 
-  // Prove no pollution to real checkout journal
+  // Prove no pollution to real checkout journal (before/after from pre-spawn snapshot)
   const afterRealJournal = fs.existsSync(realJournalPath) ? fs.readFileSync(realJournalPath, "utf8") : "";
   assert.equal(afterRealJournal, beforeRealJournal, "real journal must not be mutated by test's goal/plan-from-goal (isolation)");
 
-  // Prove no pollution to real orchestration, candidate-backlog and sprint-state (full AC1/AC2)
+  // Prove no pollution to real orchestration, candidate-backlog and sprint-state (full AC1/AC2) — direct after-spawn snapshots, no restore
   const afterOrch = getOrchSnapshot();
   assert.deepEqual(afterOrch.files, beforeOrch.files, "real orchestration files must not change");
+  // For candidate, if it existed before, content must be identical (no overwrite); if not, after should not have been created with test data
+  if (beforeOrch.candidateStr !== undefined) {
+    assert.equal(afterOrch.candidateStr || '', beforeOrch.candidateStr || '', "real candidate-backlog content must not have been overwritten by test");
+  } else {
+    assert.ok(!afterOrch.candidateStr || !afterOrch.candidateStr.includes(uniqueSig), "real candidate must not have been created with this run's objective");
+  }
   const afterRealState = fs.existsSync(realStatePath) ? fs.readFileSync(realStatePath, "utf8") : "";
   assert.equal(afterRealState, beforeRealState, "real sprint-state must not be mutated by test");
 

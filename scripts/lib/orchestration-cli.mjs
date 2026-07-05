@@ -3,6 +3,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { DEFAULT_AGENT_TEMPLATE, parseArgv, resolveDefaults } from "./sprint-utils.mjs";
+import { resolveHumanBoardPath } from "./human-board.mjs";
+import { resolveOrchestrationDir } from "./orchestration-state.mjs";
 import { DEFAULT_TRACK_TIMEOUT_MS, DEFAULT_MAX_PARALLEL } from "./constants.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -30,7 +32,8 @@ export const ORCHESTRATE_BOOL_FLAGS = new Set([
 
 export function buildOrchestrationOpts(argv, extra = {}) {
   const parsed = parseArgv(argv, ORCHESTRATE_BOOL_FLAGS);
-  const defaults = resolveDefaults();
+  const workDir = process.cwd();
+  const defaults = resolveDefaults(workDir);
   return {
     ...extra,
     parsed,
@@ -148,4 +151,29 @@ export function fail(opts, code, message, context = {}, exitCode = 2) {
     process.stderr.write(`[${code}] ${message}\n`);
   }
   process.exit(exitCode);
+}
+
+/**
+ * Pure helper to resolve the write roots for CLI operations given the
+ * effective cwd and explicit flags. Used to make isolation testable
+ * without spawning.
+ * @param {{cwd?: string, stateFile?: string, journalFile?: string}} [input]
+ */
+export function resolveCliWriteRoots(input = {}) {
+  const cwd = input.cwd || process.cwd();
+  const stateOpt = input.stateFile;
+  const journalOpt = input.journalFile;
+  const d = resolveDefaults(cwd);
+  const stateFile = path.resolve(stateOpt ?? path.resolve(cwd, d.stateFile));
+  const journalFile = path.resolve(journalOpt ?? path.resolve(cwd, d.journalFile));
+  const boardFile = resolveHumanBoardPath(stateFile);
+  const orchDir = resolveOrchestrationDir(cwd);
+  return {
+    cwd,
+    stateFile,
+    journalFile,
+    boardFile,
+    orchestrationDir: orchDir,
+    candidateBacklog: path.join(orchDir, "candidate-backlog.json"),
+  };
 }

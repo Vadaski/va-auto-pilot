@@ -213,9 +213,9 @@ export function readSprintPathsFromConfig(configPath) {
  *
  * @returns {SprintDefaults}
  */
-export function resolveDefaults() {
+export function resolveDefaults(cwd = process.cwd()) {
   const sprintFromConfig = readSprintPathsFromConfig(
-    path.resolve(process.cwd(), ".va-auto-pilot/config.yaml")
+    path.resolve(cwd, ".va-auto-pilot/config.yaml")
   );
 
   return {

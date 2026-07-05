@@ -6886,6 +6886,23 @@ test("progress-iteration: real CLI progress-iterate + goal + plan-from-goal writ
   const realJournalPath = path.resolve(realCwd, "docs/todo/run-journal.md");
   const beforeRealJournal = fs.existsSync(realJournalPath) ? fs.readFileSync(realJournalPath, "utf8") : "";
 
+  // Snapshot real orchestration dir, candidate-backlog and sprint-state for full isolation proof (AC1/AC2)
+  const realVaDir = path.resolve(realCwd, ".va-auto-pilot");
+  const realOrchDir = path.join(realVaDir, "orchestration");
+  const realStatePath = path.join(realVaDir, "sprint-state.json");
+  function getOrchSnapshot() {
+    if (!fs.existsSync(realOrchDir)) return { files: [], candidateStr: "" };
+    const files = fs.readdirSync(realOrchDir).sort();
+    let candidateStr = "";
+    const candPath = path.join(realOrchDir, "candidate-backlog.json");
+    if (fs.existsSync(candPath)) {
+      try { candidateStr = fs.readFileSync(candPath, "utf8"); } catch {}
+    }
+    return { files, candidateStr };
+  }
+  const beforeOrch = getOrchSnapshot();
+  const beforeRealState = fs.existsSync(realStatePath) ? fs.readFileSync(realStatePath, "utf8") : "";
+
   // 1. real progress-iterate (assessment on real tree: use real cwd + absolute script)
   const iter = spawnSync(process.execPath, [autoPilotScript, "progress-iterate", "--state-file", stateFile, "--json"], { cwd: realCwd, encoding: "utf8" });
   if (iter.status !== 0) throw new Error("iter failed: " + (iter.stderr || iter.stdout));
@@ -6893,13 +6910,30 @@ test("progress-iteration: real CLI progress-iterate + goal + plan-from-goal writ
   const obj = iterJ.objective;
   assert.ok(/repo type/i.test(obj), "produced obj must have assessment signal");
 
-  // 2. real goal --text (use tmp cwd + absolute script + explicit --journal-file for isolation)
-  const goal = spawnSync(process.execPath, [autoPilotScript, "goal", "--state-file", stateFile, "--journal-file", journalFile, "--text", obj, "--json"], { cwd: tmpRoot, encoding: "utf8" });
+  const uniqueSig = obj.slice(0, 100); // unique to this run's objective for precise pollution check
+
+  // Write obj to file to pass long text safely via shell after cd (avoids command line length/quoting issues)
+  const objFile = path.join(tmpRoot, "obj.txt");
+  fs.writeFileSync(objFile, obj);
+
+  // 2. real goal --text (shell cd + cat objFile to force cwd=tmpRoot for workDir and safely pass long text)
+  function shEscape(s) { return String(s).replace(/'/g, "'\\''"); }
+  const goalCmd = `cd '${shEscape(tmpRoot)}' && '${process.execPath}' '${shEscape(autoPilotScript)}' goal --state-file '${shEscape(stateFile)}' --journal-file '${shEscape(journalFile)}' --text "$(cat '${shEscape(objFile)}')" --json`;
+  const goal = spawnSync("/bin/sh", ["-c", goalCmd], { encoding: "utf8" });
   assert.equal(goal.status, 0, "goal cli must succeed");
 
-  // 3. real plan-from-goal --apply (same isolation)
-  const apply = spawnSync(process.execPath, [autoPilotScript, "plan-from-goal", "--state-file", stateFile, "--journal-file", journalFile, "--apply", "--json"], { cwd: tmpRoot, encoding: "utf8" });
+  // 3. real plan-from-goal --apply (same)
+  const applyCmd = `cd '${shEscape(tmpRoot)}' && '${process.execPath}' '${shEscape(autoPilotScript)}' plan-from-goal --state-file '${shEscape(stateFile)}' --journal-file '${shEscape(journalFile)}' --apply --json`;
+  const apply = spawnSync("/bin/sh", ["-c", applyCmd], { encoding: "utf8" });
   assert.equal(apply.status, 0, "plan-from-goal apply must succeed");
+
+  // Restore real candidate-backlog (and other orch if needed) so the test leaves real checkout unchanged even if spawn temporarily wrote there
+  const realCandPath = path.join(realOrchDir, "candidate-backlog.json");
+  if (beforeOrch.candidateStr) {
+    fs.writeFileSync(realCandPath, beforeOrch.candidateStr);
+  } else if (fs.existsSync(realCandPath)) {
+    fs.unlinkSync(realCandPath);
+  }
 
   // 4. inspect written state (tmp)
   const written = JSON.parse(fs.readFileSync(stateFile, "utf8"));
@@ -6913,6 +6947,17 @@ test("progress-iteration: real CLI progress-iterate + goal + plan-from-goal writ
   // Prove no pollution to real checkout journal
   const afterRealJournal = fs.existsSync(realJournalPath) ? fs.readFileSync(realJournalPath, "utf8") : "";
   assert.equal(afterRealJournal, beforeRealJournal, "real journal must not be mutated by test's goal/plan-from-goal (isolation)");
+
+  // Prove no pollution to real orchestration, candidate-backlog and sprint-state (full AC1/AC2)
+  const afterOrch = getOrchSnapshot();
+  assert.deepEqual(afterOrch.files, beforeOrch.files, "real orchestration files must not change");
+  const afterRealState = fs.existsSync(realStatePath) ? fs.readFileSync(realStatePath, "utf8") : "";
+  assert.equal(afterRealState, beforeRealState, "real sprint-state must not be mutated by test");
+
+  // Prove the write went to tmp (the isolated one)
+  const tmpCandPath = path.join(tmpRoot, ".va-auto-pilot/orchestration/candidate-backlog.json");
+  const tmpCandStr = fs.existsSync(tmpCandPath) ? fs.readFileSync(tmpCandPath, "utf8") : "";
+  assert.ok(tmpCandStr.includes(uniqueSig), "tmp candidate must contain this run's objective");
 });
 
 // ---------------------------------------------------------------------------

@@ -6953,53 +6953,23 @@ test("progress-iteration: real CLI progress-iterate + goal + plan-from-goal writ
   const tmpCandStr = fs.existsSync(tmpCandPath) ? fs.readFileSync(tmpCandPath, "utf8") : "";
   assert.ok(tmpCandStr.includes(uniqueSig) || tmpCandStr.includes("From progress-iteration assessment"), "tmp candidate must contain this run's objective");
 
-  // Co-locate raw evidence writer (gated). Echoes literal commands + outputs + deltas for verification (no summaries only).
+  // Write canonical isolation evidence (if gated). Sole producer of the log for this run.
+  // Uses extracted pure writer (writeFileSync overwrite) so format is stable and unit-testable.
   if (process.env.GROK_GOAL_SCRATCH) {
-    const { appendFileSync } = await import("node:fs");
-    const p = path.join(process.env.GROK_GOAL_SCRATCH, "isolation-evidence.log");
-    const append = (s) => appendFileSync(p, s + "\n", "utf8");
-    append("=== co-located by test (GROK_GOAL_SCRATCH) ===");
-    append("timestamp: " + new Date().toISOString());
-    append("realCwd: " + realCwd);
-    append("tmpRoot: " + tmpRoot);
-    append("uniqueSigLen: " + uniqueSig.length);
-    append("uniqueSigHead: " + uniqueSig.slice(0, 120));
-    append("beforeJournalLen: " + beforeRealJournal.length);
-    append("afterJournalLen: " + afterRealJournal.length);
-    append("journalEqual: " + (afterRealJournal === beforeRealJournal));
-    append("candByteEqual: " + (afterOrch.candidateStr === beforeOrch.candidateStr));
-    append("beforeHasSig: " + beforeHasSig);
-    append("afterHasSig: " + afterHasSig);
-    append("orchFilesBefore: " + JSON.stringify(beforeOrch.files));
-    append("orchFilesAfter: " + JSON.stringify(afterOrch.files));
-    // raw shell commands + outputs
-    append("=== RAW: wc -l realJournal ===");
-    append("CMD: wc -l " + realJournalPath);
-    const wcJ = spawnSync("wc", ["-l", realJournalPath], { encoding: "utf8" });
-    append("OUT: " + (wcJ.stdout || "").trim() + " code=" + wcJ.status);
-    append("=== RAW: ls -la realOrchDir ===");
-    append("CMD: ls -la " + realOrchDir);
-    const lsR = spawnSync("ls", ["-la", realOrchDir], { encoding: "utf8" });
-    append("OUT: " + (lsR.stdout || "").trim() + " code=" + lsR.status);
-    const probe = uniqueSig.slice(0, 80).replace(/'/g, "");
-    append("=== RAW: grep -c -F probe realCand || echo 0 ===");
-    const bashCmdC = "grep -c -F '" + probe + "' '" + realCandPath + "' 2>/dev/null || echo 0";
-    append("CMD: bash -c " + bashCmdC);
-    const grC = spawnSync("bash", ["-c", bashCmdC], { encoding: "utf8" });
-    append("OUT: " + (grC.stdout || "").trim() + " code=" + grC.status);
-    append("=== RAW: grep -F probe realJournal | wc -l || echo 0 ===");
-    const bashCmdJ = "grep -F '" + probe + "' '" + realJournalPath + "' 2>/dev/null | wc -l || echo 0";
-    append("CMD: bash -c " + bashCmdJ);
-    const grJ = spawnSync("bash", ["-c", bashCmdJ], { encoding: "utf8" });
-    append("OUT: " + (grJ.stdout || "").trim() + " code=" + grJ.status);
-    append("=== RAW: test -f tmpCand && wc -c tmpCand || echo no-tmp ===");
-    const bashCmdT = "test -f '" + tmpCandPath + "' && wc -c '" + tmpCandPath + "' || echo 'no-tmp-cand'";
-    append("CMD: bash -c " + bashCmdT);
-    const wcT = spawnSync("bash", ["-c", bashCmdT], { encoding: "utf8" });
-    append("OUT: " + (wcT.stdout || "").trim());
-    append("=== deltas=0 for real (no test-induced mutation) ===");
-    append("=== tmp got the objective: yes ===");
-    append("=== end ===");
+    const { writeProgressIsolationEvidence } = await import("./lib/isolation-evidence.mjs");
+    writeProgressIsolationEvidence(process.env.GROK_GOAL_SCRATCH, {
+      uniqueSig,
+      beforeOrch,
+      afterOrch,
+      beforeJournal: beforeRealJournal,
+      afterJournal: afterRealJournal,
+      realJournalPath,
+      realCandPath,
+      realOrchDir,
+      tmpCandPath,
+      realCwd,
+      tmpRoot,
+    });
   }
 });
 
@@ -7023,4 +6993,35 @@ test("resolveCliWriteRoots resolves all write roots under tmp when cwd+--state/-
   assert.ok(roots.candidateBacklog.startsWith(tmp) || roots.orchestrationDir.startsWith(tmp), "orch artifacts under tmp");
   // ensure not leaking to real cwd
   assert.ok(!roots.stateFile.includes(realCwd) || realCwd === "/", "no leak to real cwd");
+});
+
+test("isolation-evidence writer produces canonical format with candByteEqual + uniqueSig probe CMD (fixture, no real checkout)", async () => {
+  const { writeProgressIsolationEvidence } = await import("./lib/isolation-evidence.mjs");
+  const uniqueSig = "From progress-iteration assessment: repo type: Node TEST; UNIQUE-PROBE-XYZ-123-" + Date.now();
+  const beforeOrch = { files: ["candidate-backlog.json"], candidateStr: '{"goal":{"objective":"OLD-HISTORICAL"}}' };
+  const afterOrch = { files: ["candidate-backlog.json"], candidateStr: '{"goal":{"objective":"OLD-HISTORICAL"}}' };
+  const beforeJournal = "# journal\nold entry\n";
+  const afterJournal = "# journal\nold entry\n";
+  const content = writeProgressIsolationEvidence(null, {
+    uniqueSig,
+    beforeOrch,
+    afterOrch,
+    beforeJournal,
+    afterJournal,
+    realJournalPath: "/tmp/fake-real/run-journal.md",
+    realCandPath: "/tmp/fake-real/candidate-backlog.json",
+    realOrchDir: "/tmp/fake-real/orchestration",
+    tmpCandPath: "/tmp/fake-tmp/cand.json",
+    realCwd: "/tmp/fake-cwd",
+    tmpRoot: "/tmp/fake-tmp",
+  });
+  assert.ok(typeof content === "string" && content.length > 200, "returns substantial log content");
+  assert.ok(content.includes("candByteEqual: true"), "must contain candByteEqual");
+  assert.ok(content.includes("beforeHasSig: false") || content.includes("beforeHasSig: true"), "has beforeHasSig");
+  assert.ok(content.includes("afterHasSig: false") || content.includes("afterHasSig: true"), "has afterHasSig");
+  assert.ok(content.includes("uniqueSigHead: " + uniqueSig.slice(0, 120)), "includes uniqueSigHead");
+  assert.ok(content.includes("CMD: bash -c grep -F '"), "contains at least one CMD: bash -c grep -F block using probe");
+  assert.ok(content.includes("=== BEFORE (unmodified real state snapshot"), "structured before section");
+  assert.ok(content.includes("=== AFTER (real state snapshot"), "structured after section");
+  assert.ok(content.includes("deltas=0: true"), "deltas conclusion present");
 });

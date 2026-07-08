@@ -974,20 +974,48 @@ function selectClaimableTasks(state, count, nowMs) {
 }
 
 /**
+ * Claim tasks for a run.
+ *
+ * Two modes:
+ *  - count mode (default): select up to `count` claimable Backlog tasks via
+ *    selectClaimableTasks (priority order, deps satisfied, unclaimed/expired).
+ *  - task mode (taskIds non-empty): claim the *specified* tasks regardless of
+ *    state. This lets orchestrate plan stamp ownership on the plan's task set,
+ *    which may include in-progress (non-Backlog) work. In task mode a task is
+ *    re-claimable if it is unclaimed, expired, OR already claimed by the same
+ *    runId (replan idempotency — a run replanning must reuse its own claims,
+ *    not get blocked by them).
+ *
  * @param {SprintState} state
  * @param {string} runId
  * @param {number} count
  * @param {number} ttlMs
  * @param {number} [nowMs]
+ * @param {string[]} [taskIds]  explicit task ids to claim (task mode)
  * @returns {{ runId: string, claimedTasks: Array<{ taskId: string, reclaimed: boolean }> }}
  */
-function claimTasksInState(state, runId, count, ttlMs, nowMs = Date.now()) {
+function claimTasksInState(state, runId, count, ttlMs, nowMs = Date.now(), taskIds = []) {
   const claimedTasks = [];
   const claimedAt = new Date(nowMs).toISOString();
   const claimExpiresAt = new Date(nowMs + ttlMs).toISOString();
 
-  for (const task of selectClaimableTasks(state, count, nowMs)) {
-    const reclaimed = Boolean(task.claimedBy) && isClaimExpired(task, nowMs);
+  let targets;
+  if (Array.isArray(taskIds) && taskIds.length > 0) {
+    // Task mode: resolve explicit ids. Re-claimable when unclaimed, expired, or
+    // already owned by this run. Tasks actively claimed by a *different* live run
+    // are skipped (not stolen — stealing only happens via expiry in count mode).
+    const want = new Set(taskIds.map((id) => String(id)));
+    targets = state.tasks.filter((task) => {
+      if (!want.has(task.id)) return false;
+      if (!task.claimedBy || isClaimExpired(task, nowMs)) return true;
+      return task.claimedBy === runId; // reuse own claim
+    });
+  } else {
+    targets = selectClaimableTasks(state, count, nowMs);
+  }
+
+  for (const task of targets) {
+    const reclaimed = Boolean(task.claimedBy) && task.claimedBy !== runId && isClaimExpired(task, nowMs);
     if (reclaimed) {
       task.previousClaimedBy = task.claimedBy;
       task.reclaimedAt = claimedAt;
@@ -1915,10 +1943,15 @@ async function main() {
 
   if (parsed.command === "claim") {
     const runId = requireOption(parsed.options, "run-id");
+    const taskOpt = String(parsed.options.task ?? "");
+    const taskIds = taskOpt
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
     const rawCount = parsed.options.count ?? "1";
     const count = Number.parseInt(String(rawCount), 10);
-    if (!Number.isFinite(count) || count <= 0) {
-      throw new Error("Invalid --count value. Expected a positive integer.");
+    if (taskIds.length === 0 && (!Number.isFinite(count) || count <= 0)) {
+      throw new Error("Invalid --count value. Expected a positive integer (or pass --task <ids>).");
     }
 
     const ttlMs = resolveClaimTtlMs(path.resolve(DEFAULT_CONFIG_FILE));
@@ -1926,7 +1959,7 @@ async function main() {
     let result = null;
     await withPilotFileLock(stateFile, async () => {
       const state = readState(stateFile);
-      result = claimTasksInState(state, runId, count, ttlMs);
+      result = claimTasksInState(state, runId, count, ttlMs, Date.now(), taskIds);
       writeState(stateFile, state);
       writeBoard(boardFile, state);
     });

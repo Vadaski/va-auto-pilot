@@ -7602,3 +7602,66 @@ test("orchestrate CLI: init with no workspace flags keeps zero-config single-run
   assert.equal(run.workspace.name, "default");
   assert.equal(run.workspace.type, "shared");
 });
+
+// ---------------------------------------------------------------------------
+// Batch 3 review fixes: claim semantics must not regress plan/next priority
+// ---------------------------------------------------------------------------
+
+test("batch3-fix P1: orchestrate plan keeps in-progress work as primary instead of skipping to backlog", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-b3-p1-"));
+  const stateFile = path.join(tmp, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmp, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  // An In Progress task takes priority over any Backlog item. A claim-only planner
+  // would skip it and start a new backlog task — that is the regression.
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "UT",
+    tasks: [
+      { id: "UT-001", title: "wip", priority: "P1", state: "In Progress", dependsOn: [] },
+      { id: "UT-002", title: "backlog", priority: "P2", state: "Backlog", dependsOn: [] },
+    ],
+  }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-p1", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  // init then plan
+  const planRes = spawnSync(process.execPath, [script, "orchestrate", "plan", "--json", "--state-file", stateFile], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.equal(planRes.status, 0, planRes.stderr);
+  const payload = JSON.parse(planRes.stdout);
+  assert.equal(payload.candidatePlan.primaryTaskId, "UT-001", "in-progress task must remain primary, not be skipped for backlog");
+  assert.equal(payload.candidatePlan.primaryAction, "continue-implementation");
+});
+
+test("batch3-fix P2a: replanning the same run reuses its own claims (idempotent, not PLAN_EMPTY)", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-010", title: "A", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-011", title: "B", priority: "P1", state: "Backlog", dependsOn: [] },
+  ]);
+  // First claim by run-a
+  const first = runBoard(["claim", "--run-id", "run-a", "--task", "UT-010,UT-011", "--json"], stateFile);
+  assert.equal(first.status, 0, first.stderr);
+  // Second claim of the SAME tasks by the SAME run must succeed (reuse), not be blocked
+  const second = runBoard(["claim", "--run-id", "run-a", "--task", "UT-010,UT-011", "--json"], stateFile);
+  assert.equal(second.status, 0, second.stderr);
+  const payload = JSON.parse(second.stdout);
+  assert.deepEqual(payload.claimedTasks.map((t) => t.taskId).sort(), ["UT-010", "UT-011"], "same run must reuse its own claims on replan");
+});
+
+test("batch3-fix P2b: next still sees a claimed task that has advanced beyond Backlog", () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-020", title: "claimed-wip", priority: "P1", state: "In Progress", dependsOn: [], claimedBy: "run-x", claimExpiresAt: "2099-01-01T00:00:00.000Z" },
+    { id: "UT-021", title: "fresh-backlog", priority: "P2", state: "Backlog", dependsOn: [] },
+  ]);
+  // next must return the in-progress task (claimed by run-x but visible), not hide it
+  // and fall through to the lower-priority backlog item.
+  const res = runBoard(["next", "--json"], stateFile);
+  assert.equal(res.status, 0, res.stderr);
+  const payload = JSON.parse(res.stdout);
+  assert.equal(payload.task.id, "UT-020", "next must surface claimed in-progress work, not hide it");
+});

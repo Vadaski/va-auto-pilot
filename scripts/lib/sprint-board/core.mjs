@@ -240,7 +240,13 @@ function findNextTask(tasks, nowMs = Date.now()) {
   );
 
   for (const state of NEXT_ORDER) {
-    let candidates = sortTasks(tasks.filter((task) => task.state === state && !hasActiveClaim(task, nowMs)));
+    // Claim only gates *Backlog* task assignment — it must not hide work that is
+    // already in progress (Failed/Testing/Review/In Progress). A claimed task that
+    // has advanced beyond Backlog is live work its owning run (or the board views)
+    // still needs to see. Hiding it caused next/summary/auto-pilot-loop to report
+    // null or start lower-priority backlog items.
+    const claimGate = (task) => state === "Backlog" ? !hasActiveClaim(task, nowMs) : true;
+    let candidates = sortTasks(tasks.filter((task) => task.state === state && claimGate(task)));
     if (state === "Backlog") {
       candidates = candidates.filter((task) => isDependencySatisfied(task, doneIds));
     }

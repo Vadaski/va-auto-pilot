@@ -65,6 +65,7 @@ import {
   readWorktreeIsolationConfig,
   squashMergeTrackCommit,
 } from "./lib/worktree-isolation.mjs";
+import { writeWorkspace } from "./lib/workspace.mjs";
 import { planTaskIds } from "./lib/plan-helpers.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -334,6 +335,21 @@ async function initRun(opts) {
   const runId = scopedRunId || createRunId();
   opts.runId = scopedRunId;
   const now = new Date().toISOString();
+  // Persist workspace definition when the user explicitly opted into a non-default
+  // workspace, so subsequent commands resolve the same backlog paths without re-passing flags.
+  if (opts.workspace && (opts.workspace.type === "isolated" || opts.workspace.name !== "default")) {
+    await writeWorkspace(opts.workDir, {
+      name: opts.workspace.name,
+      type: opts.workspace.type,
+      stateFile: opts.stateFile,
+      boardFile: opts.boardFile,
+      journalFile: opts.journalFile,
+      pitfallsFile: opts.pitfallsFile,
+      executionTree: opts.workspace.executionTree,
+      baseRef: "",
+      createdAt: now,
+    });
+  }
   const run = {
     schemaVersion: 1,
     runId,
@@ -345,6 +361,7 @@ async function initRun(opts) {
     candidatePlan: null,
     candidateBacklog: null,
     approvedCommitTasks: [],
+    workspace: opts.workspace ?? { name: "default", type: "shared", executionTree: "isolated" },
     locks: { executorPid: null },
     startedAt: now,
     updatedAt: now,

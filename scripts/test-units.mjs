@@ -7251,3 +7251,90 @@ test("isolation-evidence writer produces canonical format with candByteEqual + u
   assert.ok(content.includes("=== AFTER (real state snapshot"), "structured after section");
   assert.ok(content.includes("deltas=0: true"), "deltas conclusion present");
 });
+
+// ---------------------------------------------------------------------------
+// Batch 2: workspace routing layer
+// ---------------------------------------------------------------------------
+test("workspace: resolveWorkspacePaths defaults to shared project-root paths when unspecified", async () => {
+  const { resolveWorkspacePaths } = await import("./lib/workspace.mjs");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-ws-default-"));
+  const ws = resolveWorkspacePaths(tmp, { name: "default" });
+  assert.equal(ws.name, "default");
+  assert.equal(ws.type, "shared");
+  assert.equal(ws.stateFile, path.resolve(tmp, ".va-auto-pilot/sprint-state.json"));
+  assert.equal(ws.existed, false);
+});
+
+test("workspace: isolated flag routes backlog under workspace dir", async () => {
+  const { resolveWorkspacePaths, resolveWorkspaceDir } = await import("./lib/workspace.mjs");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-ws-iso-"));
+  const ws = resolveWorkspacePaths(tmp, { name: "featX", isolated: true });
+  assert.equal(ws.type, "isolated");
+  const wsDir = resolveWorkspaceDir(tmp, "featX");
+  assert.equal(ws.stateFile, path.join(wsDir, "sprint-state.json"));
+  assert.equal(ws.journalFile, path.join(wsDir, "run-journal.md"));
+  assert.equal(ws.pitfallsFile, path.join(wsDir, "pitfalls.json"));
+});
+
+test("workspace: named workspace (non-default) auto-isolates even without --isolated", async () => {
+  const { resolveWorkspacePaths, resolveWorkspaceDir } = await import("./lib/workspace.mjs");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-ws-named-"));
+  const ws = resolveWorkspacePaths(tmp, { name: "sprintY" });
+  assert.equal(ws.type, "isolated");
+  const wsDir = resolveWorkspaceDir(tmp, "sprintY");
+  assert.ok(ws.stateFile.startsWith(wsDir), "named workspace stateFile must live under its own dir");
+});
+
+test("workspace: writeWorkspace persists type and paths are re-read on next resolve", async () => {
+  const { resolveWorkspacePaths, writeWorkspace } = await import("./lib/workspace.mjs");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-ws-persist-"));
+  await writeWorkspace(tmp, {
+    name: "featZ",
+    type: "isolated",
+    stateFile: "/abs/state.json",
+    boardFile: "/abs/board.md",
+    journalFile: "/abs/journal.md",
+    pitfallsFile: "/abs/pitfalls.json",
+    executionTree: "isolated",
+    createdAt: "2026-07-08T00:00:00.000Z",
+  });
+  const ws = resolveWorkspacePaths(tmp, { name: "featZ" });
+  assert.equal(ws.existed, true);
+  assert.equal(ws.type, "isolated");
+  assert.equal(ws.stateFile, "/abs/state.json");
+});
+
+test("orchestrate CLI: init with --isolated routes state-file under workspace dir", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-ws-cli-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  const init = spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-iso", "--isolated", "--workspace", "featX", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.equal(init.status, 0, init.stderr);
+  // workspace.json persisted
+  const wsFile = path.join(tmp, ".va-auto-pilot", "workspaces", "featX", "workspace.json");
+  assert.ok(fs.existsSync(wsFile), "workspace.json must be persisted on init");
+  const ws = JSON.parse(fs.readFileSync(wsFile, "utf8"));
+  assert.equal(ws.type, "isolated");
+  assert.equal(ws.executionTree, "isolated");
+  // run.json records the workspace binding
+  const run = JSON.parse(fs.readFileSync(path.join(tmp, ".va-auto-pilot", "orchestration", "runs", "run-iso", "run.json"), "utf8"));
+  assert.equal(run.workspace.name, "featX");
+  assert.equal(run.workspace.type, "isolated");
+});
+
+test("orchestrate CLI: init with no workspace flags keeps zero-config single-run behavior (backward compat)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-ws-zero-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  const init = spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.equal(init.status, 0, init.stderr);
+  // No workspace.json should be written for the default shared workspace.
+  const wsFile = path.join(tmp, ".va-auto-pilot", "workspaces", "default", "workspace.json");
+  assert.ok(!fs.existsSync(wsFile), "zero-config init must not persist a workspace.json");
+  // run.json still binds to default shared workspace.
+  const run = JSON.parse(fs.readFileSync(path.join(tmp, ".va-auto-pilot", "orchestration", "run.json"), "utf8"));
+  assert.equal(run.workspace.name, "default");
+  assert.equal(run.workspace.type, "shared");
+});

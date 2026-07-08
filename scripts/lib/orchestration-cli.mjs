@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { DEFAULT_AGENT_TEMPLATE, parseArgv, resolveDefaults } from "./sprint-utils.mjs";
 import { resolveHumanBoardPath } from "./human-board.mjs";
 import { resolveActiveRunId, resolveOrchestrationDir } from "./orchestration-state.mjs";
+import { resolveWorkspacePaths } from "./workspace.mjs";
 import { DEFAULT_TRACK_TIMEOUT_MS, DEFAULT_MAX_PARALLEL } from "./constants.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -28,6 +29,9 @@ export const ORCHESTRATE_BOOL_FLAGS = new Set([
   "apply",
   "delegate-readonly",
   "with-delegates",
+  "isolated",
+  "isolated-tree",
+  "shared-tree",
 ]);
 
 export function buildOrchestrationOpts(argv, extra = {}) {
@@ -36,6 +40,31 @@ export function buildOrchestrationOpts(argv, extra = {}) {
   const defaults = resolveDefaults(workDir);
   const explicitRunId = parsed.options["run-id"] ?? "";
   const runId = explicitRunId || (extra.resolveActiveRunId === false ? "" : resolveActiveRunId(workDir));
+
+  // Workspace routing: resolve which backlog paths this run sees. Only activates
+  // when the user explicitly selects a workspace (named, --isolated, or execution-
+  // tree flags). Unspecified → "default" shared workspace → project-root defaults
+  // (zero-config single-run behavior unchanged).
+  const workspaceName = parsed.options["workspace"] ?? "";
+  const isolatedWorkspace = parsed.flags.has("isolated") || workspaceName !== "";
+  const workspace = resolveWorkspacePaths(workDir, {
+    name: workspaceName || "default",
+    isolated: isolatedWorkspace,
+    fallback: {
+      stateFile: defaults.stateFile,
+      boardFile: defaults.boardFile,
+      journalFile: defaults.journalFile,
+      pitfallsFile: ".va-auto-pilot/pitfalls.json",
+    },
+  });
+  const executionTree = parsed.flags.has("shared-tree")
+    ? "shared"
+    : parsed.flags.has("isolated-tree")
+      ? "isolated"
+      : workspace.type === "shared"
+        ? "isolated" // 甲模式默认 isolated-tree (batch 4 enforces); shared-tree is expert opt-in
+        : "isolated";
+
   return {
     ...extra,
     parsed,
@@ -51,12 +80,18 @@ export function buildOrchestrationOpts(argv, extra = {}) {
     tasks: parsed.options.tasks ?? "",
     reason: parsed.options.reason ?? "",
     worker: parsed.options.worker ?? "",
+    workspace: {
+      name: workspace.name,
+      type: workspace.type,
+      dir: workspace.dir,
+      executionTree,
+    },
     timeoutMs: Number.parseInt(parsed.options.timeout ?? String(DEFAULT_TRACK_TIMEOUT_MS), 10),
     pollIntervalMs: Number.parseInt(parsed.options["poll-interval"] ?? "2000", 10),
-    stateFile: path.resolve(parsed.options["state-file"] ?? defaults.stateFile),
-    boardFile: path.resolve(parsed.options["board-file"] ?? defaults.boardFile),
-    journalFile: path.resolve(parsed.options["journal-file"] ?? defaults.journalFile),
-    pitfallsFile: path.resolve(parsed.options["pitfalls-file"] ?? ".va-auto-pilot/pitfalls.json"),
+    stateFile: path.resolve(parsed.options["state-file"] ?? workspace.stateFile),
+    boardFile: path.resolve(parsed.options["board-file"] ?? workspace.boardFile),
+    journalFile: path.resolve(parsed.options["journal-file"] ?? workspace.journalFile),
+    pitfallsFile: path.resolve(parsed.options["pitfalls-file"] ?? workspace.pitfallsFile),
     workDir: process.cwd(),
     agentTemplate: parsed.options["agent-template"] ?? DEFAULT_AGENT_TEMPLATE,
     trackTimeout: Number.parseInt(parsed.options["track-timeout"] ?? String(DEFAULT_TRACK_TIMEOUT_MS), 10),

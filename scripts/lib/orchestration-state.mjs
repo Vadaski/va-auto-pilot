@@ -276,8 +276,26 @@ export function computeGitHead(workDir) {
   }
 }
 
-export function buildCheckpoint({ stateFile, workDir, approvedPlanId, candidatePlan }) {
+function normalizeCheckpointWorkspace(workspace) {
+  if (!workspace || typeof workspace !== "object") {
+    return null;
+  }
+  return {
+    name: String(workspace.name ?? "default"),
+    type: workspace.type === "isolated" ? "isolated" : "shared",
+    executionTree: workspace.executionTree === "shared" ? "shared" : "isolated",
+  };
+}
+
+function checkpointInvalidatesOn(workspace) {
+  return workspace?.type === "shared"
+    ? ["sprint-state", "human-board"]
+    : ["sprint-state", "human-board", "git-head"];
+}
+
+export function buildCheckpoint({ stateFile, workDir, approvedPlanId, candidatePlan, workspace = undefined }) {
   const obsPaths = observabilityPaths(workDir);
+  const checkpointWorkspace = normalizeCheckpointWorkspace(workspace);
   return {
     schemaVersion: ORCHESTRATION_SCHEMA_VERSION,
     approvedPlanId,
@@ -292,9 +310,12 @@ export function buildCheckpoint({ stateFile, workDir, approvedPlanId, candidateP
       decisionPoint: "plan.approved",
       approvalScope: ["plan", "dispatch"],
       requiredBefore: "dispatch",
-      invalidatesOn: ["sprint-state", "human-board", "git-head"],
+      invalidatesOn: checkpointInvalidatesOn(checkpointWorkspace),
       stalePolicy: "block-dispatch-and-require-approve-plan",
       resumePhase: "plan-approved",
+      approvalMode: null,
+      approvalPolicy: null,
+      ...(checkpointWorkspace ? { workspace: checkpointWorkspace } : {}),
     },
     observability: {
       schemaVersion: OBSERVABILITY_SCHEMA_VERSION,
@@ -305,7 +326,13 @@ export function buildCheckpoint({ stateFile, workDir, approvedPlanId, candidateP
   };
 }
 
-export function isCheckpointStale(checkpoint, { stateFile, workDir }) {
+function shouldEnforceGitHead(checkpoint, workspace) {
+  const effectiveWorkspace = normalizeCheckpointWorkspace(workspace)
+    ?? normalizeCheckpointWorkspace(checkpoint?.governance?.workspace);
+  return effectiveWorkspace?.type === "shared" ? false : true;
+}
+
+export function isCheckpointStale(checkpoint, { stateFile, workDir, workspace = undefined }) {
   if (!checkpoint) {
     return { stale: true, reason: "no checkpoint" };
   }
@@ -315,9 +342,11 @@ export function isCheckpointStale(checkpoint, { stateFile, workDir }) {
   if (checkpoint.humanBoardHash !== computeHumanBoardHash(stateFile)) {
     return { stale: true, reason: "human intent changed since approve-plan" };
   }
-  const head = computeGitHead(workDir);
-  if (checkpoint.gitHead && head && checkpoint.gitHead !== head) {
-    return { stale: true, reason: "git HEAD changed since approve-plan" };
+  if (shouldEnforceGitHead(checkpoint, workspace)) {
+    const head = computeGitHead(workDir);
+    if (checkpoint.gitHead && head && checkpoint.gitHead !== head) {
+      return { stale: true, reason: "git HEAD changed since approve-plan" };
+    }
   }
   return { stale: false, reason: "" };
 }

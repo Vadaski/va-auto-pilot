@@ -6123,6 +6123,63 @@ test("orchestration-state: checkpoint detects live human intent drift", () => {
   assert.equal(stale.reason, "human intent changed since approve-plan");
 });
 
+test("orchestration-state: shared workspace checkpoint ignores git HEAD drift", () => {
+  const repoDir = createTempGitRepo({ "README.md": "initial\n" });
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(repoDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ tasks: [{ id: "AP-001", state: "Backlog" }] }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  const checkpoint = buildCheckpoint({
+    stateFile,
+    workDir: repoDir,
+    approvedPlanId: "plan-shared",
+    candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
+    workspace: { name: "default", type: "shared", executionTree: "isolated" },
+  });
+
+  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board"]);
+  assert.equal(checkpoint.governance.workspace.type, "shared");
+
+  fs.writeFileSync(path.join(repoDir, "README.md"), "sibling commit\n", "utf8");
+  runGit(["add", "README.md"], repoDir);
+  runGit(["commit", "-m", "chore: sibling run landed"], repoDir);
+
+  const stale = isCheckpointStale(checkpoint, { stateFile, workDir: repoDir });
+  assert.equal(stale.stale, false);
+});
+
+test("orchestration-state: isolated workspace checkpoint still detects git HEAD drift", () => {
+  const repoDir = createTempGitRepo({ "README.md": "initial\n" });
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(repoDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ tasks: [{ id: "AP-001", state: "Backlog" }] }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  const checkpoint = buildCheckpoint({
+    stateFile,
+    workDir: repoDir,
+    approvedPlanId: "plan-isolated",
+    candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
+    workspace: { name: "feat-x", type: "isolated", executionTree: "isolated" },
+  });
+
+  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board", "git-head"]);
+  assert.equal(checkpoint.governance.workspace.type, "isolated");
+
+  fs.writeFileSync(path.join(repoDir, "README.md"), "isolated change\n", "utf8");
+  runGit(["add", "README.md"], repoDir);
+  runGit(["commit", "-m", "chore: head moved"], repoDir);
+
+  const stale = isCheckpointStale(checkpoint, { stateFile, workDir: repoDir });
+  assert.equal(stale.stale, true);
+  assert.equal(stale.reason, "git HEAD changed since approve-plan");
+});
+
 test("orchestration-state: hasHaltDirective detects halt-run", () => {
   assert.equal(hasHaltDirective({ directives: [{ type: "halt-run", halt: true }] }), true);
   assert.equal(hasHaltDirective({ directives: [{ type: "replan", taskId: "AP-001" }] }), false);
@@ -6348,7 +6405,7 @@ test("auto-pilot orchestrate: dispatch requires approve-plan", () => {
   });
   assert.equal(plan.status, 0, plan.stderr);
 
-  const dispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--json", "--state-file", stateFile], {
+  const dispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--dry-run", "--json", "--state-file", stateFile], {
     cwd: tmpDir,
     encoding: "utf8",
   });
@@ -6399,16 +6456,17 @@ test("auto-pilot orchestrate: governance events record approval, dispatch, and s
   assert.equal(approve.status, 0, approve.stderr);
   const checkpoint = JSON.parse(approve.stdout).checkpoint;
   assert.equal(checkpoint.governance.decisionPoint, "plan.approved");
-  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board", "git-head"]);
+  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board"]);
+  assert.equal(checkpoint.governance.workspace.type, "shared");
 
-  const dispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--json", "--state-file", stateFile], {
+  const dispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--dry-run", "--json", "--state-file", stateFile], {
     cwd: tmpDir,
     encoding: "utf8",
   });
   assert.equal(dispatch.status, 0, dispatch.stderr);
 
   fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n- [ ] Pause before re-dispatch\n", "utf8");
-  const staleDispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--json", "--state-file", stateFile], {
+  const staleDispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--dry-run", "--json", "--state-file", stateFile], {
     cwd: tmpDir,
     encoding: "utf8",
   });
@@ -6897,7 +6955,7 @@ test("auto-pilot cockpit: stale approval blocks dispatch until reapproved", () =
   assert.equal(review.status, 0, review.stderr);
   const reapprove = spawnSync(process.execPath, [script, "orchestrate", "approve-plan", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
   assert.equal(reapprove.status, 0, reapprove.stderr);
-  const dispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
+  const dispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--dry-run", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
   assert.equal(dispatch.status, 0, dispatch.stderr);
 });
 
@@ -7568,6 +7626,89 @@ test("workspace: writeWorkspace persists type and paths are re-read on next reso
   assert.equal(ws.stateFile, "/abs/state.json");
 });
 
+test("worktree isolation: run-scoped path separates identical task ids across runs", async () => {
+  const { resolveTrackWorktreePath } = await import("./lib/worktree-isolation.mjs");
+  const root = "/tmp/va-root";
+  const config = { enabled: true, rootDir: ".va/worktrees" };
+  const runAlphaPath = resolveTrackWorktreePath(root, config, "run-alpha", "AP-001");
+  const runBetaPath = resolveTrackWorktreePath(root, config, "run-beta", "AP-001");
+  assert.equal(runAlphaPath, path.resolve(root, ".va/worktrees", "run-alpha", "AP-001"));
+  assert.equal(runBetaPath, path.resolve(root, ".va/worktrees", "run-beta", "AP-001"));
+  assert.notEqual(runAlphaPath, runBetaPath);
+});
+
+test("auto-pilot orchestrate: shared workspace isolated tree forces worktree preview even when disabled in config", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-shared-tree-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  const configFile = path.join(tmpDir, ".va-auto-pilot", "config.yaml");
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    tasks: [{ id: "AP-001", title: "t", priority: "P1", state: "Backlog", dependsOn: [] }],
+  }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+  fs.writeFileSync(configFile, [
+    "worktreeIsolation:",
+    "  enabled: false",
+    "  rootDir: .va/worktrees",
+    "",
+  ].join("\n"), "utf8");
+
+  const init = spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-shared", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(init.status, 0, init.stderr);
+
+  const plan = spawnSync(process.execPath, [script, "orchestrate", "plan", "--run-id", "run-shared", "--json", "--state-file", stateFile], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(plan.status, 0, plan.stderr);
+
+  const approve = spawnSync(process.execPath, [
+    script,
+    "orchestrate",
+    "approve-plan",
+    "--run-id",
+    "run-shared",
+    "--waive-review",
+    "--json",
+    "--state-file",
+    stateFile,
+  ], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(approve.status, 0, approve.stderr);
+
+  const dispatch = spawnSync(process.execPath, [
+    script,
+    "orchestrate",
+    "dispatch",
+    "--run-id",
+    "run-shared",
+    "--dry-run",
+    "--json",
+    "--state-file",
+    stateFile,
+  ], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(dispatch.status, 0, dispatch.stderr);
+  const payload = JSON.parse(dispatch.stdout);
+  assert.equal(payload.worktreeIsolation.enabled, true);
+  assert.equal(payload.worktreeIsolation.tracks[0].worktree.status, "preview");
+  assert.equal(
+    payload.worktreeIsolation.tracks[0].worktree.path,
+    path.join(fs.realpathSync(tmpDir), ".va", "worktrees", "run-shared", "AP-001")
+  );
+});
+
 test("orchestrate CLI: init with --isolated routes state-file under workspace dir", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-ws-cli-"));
   const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
@@ -7585,6 +7726,60 @@ test("orchestrate CLI: init with --isolated routes state-file under workspace di
   const run = JSON.parse(fs.readFileSync(path.join(tmp, ".va-auto-pilot", "orchestration", "runs", "run-iso", "run.json"), "utf8"));
   assert.equal(run.workspace.name, "featX");
   assert.equal(run.workspace.type, "isolated");
+});
+
+test("auto-pilot orchestrate: commit serialization waits on shared workspace commit lock", async () => {
+  const { resolveCommitLockPath, withSerializedCommit } = await import("./auto-pilot-orchestrate.mjs");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-commit-lock-"));
+  const opts = {
+    workDir: tmpDir,
+    workspace: {
+      name: "default",
+      type: "shared",
+      dir: path.join(tmpDir, ".va-auto-pilot", "workspaces", "default"),
+      executionTree: "isolated",
+    },
+  };
+  const events = [];
+  /** @type {null | ((value?: void | PromiseLike<void>) => void)} */
+  let releaseFirstLock = null;
+  /** @type {null | ((value?: void | PromiseLike<void>) => void)} */
+  let firstEnteredResolve = null;
+  const firstEntered = new Promise((resolve) => {
+    firstEnteredResolve = resolve;
+  });
+
+  const first = withSerializedCommit(opts, async () => {
+    events.push("first-enter");
+    assert.ok(fs.existsSync(`${resolveCommitLockPath(opts)}.lock`));
+    if (!firstEnteredResolve) {
+      throw new Error("expected first commit lock entry resolver");
+    }
+    firstEnteredResolve();
+    await new Promise((resolve) => {
+      releaseFirstLock = resolve;
+    });
+    events.push("first-exit");
+  });
+
+  await firstEntered;
+
+  let secondEntered = false;
+  const second = withSerializedCommit(opts, async () => {
+    secondEntered = true;
+    events.push("second-enter");
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(secondEntered, false);
+  assert.deepEqual(events, ["first-enter"]);
+
+  if (!releaseFirstLock) {
+    throw new Error("expected first commit lock release callback");
+  }
+  releaseFirstLock();
+  await Promise.all([first, second]);
+  assert.deepEqual(events, ["first-enter", "first-exit", "second-enter"]);
 });
 
 test("orchestrate CLI: init with no workspace flags keeps zero-config single-run behavior (backward compat)", () => {

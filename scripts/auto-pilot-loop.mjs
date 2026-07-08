@@ -202,15 +202,19 @@ function resolveObservabilityRunId(opts) {
   return opts.observabilityRunId;
 }
 
+function resolveObservabilityWorkDir(opts) {
+  return opts.observabilityWorkDir ?? opts.workDir ?? process.cwd();
+}
+
 function relativeToWorkDir(filePath, opts) {
-  return path.relative(opts.workDir ?? process.cwd(), path.resolve(filePath)).replace(/\\/g, "/");
+  return path.relative(resolveObservabilityWorkDir(opts), path.resolve(filePath)).replace(/\\/g, "/");
 }
 
 async function appendTaskEvent(task, eventType, phase, payload, opts) {
   if (opts.dryRun || !task?.id) {
     return null;
   }
-  const paths = observabilityPaths(opts.workDir ?? process.cwd());
+  const paths = observabilityPaths(resolveObservabilityWorkDir(opts));
   const event = buildEvent({
     eventType,
     runId: resolveObservabilityRunId(opts),
@@ -261,7 +265,7 @@ async function materializeTaskEvidenceBundle(task, state, opts, outcomeExtra = {
     return null;
   }
 
-  const workDir = opts.workDir ?? process.cwd();
+  const workDir = resolveObservabilityWorkDir(opts);
   const runId = resolveObservabilityRunId(opts);
   const bundlePaths = taskEvidenceBundlePaths(workDir, runId, task.id);
   const globalEventsLog = observabilityPaths(workDir).eventsLog;
@@ -1575,6 +1579,9 @@ async function listChangedFiles(opts) {
 function isOrchestrationRuntimeFile(file, opts = {}) {
   const normalized = String(file ?? "").replace(/\\/g, "/");
   if (normalized.startsWith(".va-auto-pilot/orchestration/")) {
+    return true;
+  }
+  if (normalized.startsWith(".va-auto-pilot/workspaces/") && normalized.endsWith(".lock.lock")) {
     return true;
   }
   return Boolean(opts.deferCommit) && normalized === ".va-auto-pilot/evidence/events.jsonl";

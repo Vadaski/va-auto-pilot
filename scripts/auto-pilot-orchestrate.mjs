@@ -19,6 +19,7 @@ import {
   buildCheckpoint,
   clearActiveRun,
   clearCheckpoint,
+  computeGitHead,
   createPlanId,
   createRunId,
   hasHaltDirective,
@@ -63,12 +64,15 @@ import {
   commitTrackWorktreeResult,
   prepareTrackWorktree,
   readWorktreeIsolationConfig,
+  resolveTrackWorktreePath,
   squashMergeTrackCommit,
 } from "./lib/worktree-isolation.mjs";
 import { writeWorkspace } from "./lib/workspace.mjs";
 import { planTaskIds } from "./lib/plan-helpers.mjs";
+import { withPilotFileLock } from "./lib/pilot-state.mjs";
 
 const execFileAsync = promisify(execFile);
+const MAX_SQUASH_MERGE_ATTEMPTS = 3;
 
 function tasksForPlan(state, plan) {
   const taskIds = new Set(planTaskIds(plan));
@@ -93,6 +97,28 @@ function buildTrackOpts(base, overrides = {}) {
   return child;
 }
 
+export function resolveDispatchWorktreeConfig(worktreeConfig, workspace) {
+  return {
+    ...(worktreeConfig ?? {}),
+    enabled: workspace?.executionTree === "isolated"
+      ? true
+      : worktreeConfig?.enabled === true,
+  };
+}
+
+export function resolveCommitLockPath(opts) {
+  const workspaceDir = opts.workspace?.dir
+    ? path.resolve(opts.workspace.dir)
+    : path.resolve(opts.workDir, ".va-auto-pilot", "orchestration");
+  return path.join(workspaceDir, "commit.lock");
+}
+
+export async function withSerializedCommit(opts, work, lockOptions = {}) {
+  const commitLockPath = resolveCommitLockPath(opts);
+  fs.mkdirSync(path.dirname(commitLockPath), { recursive: true });
+  return withPilotFileLock(commitLockPath, work, lockOptions);
+}
+
 function hasPendingTasks(state) {
   return (state.tasks ?? []).some((task) => task.state !== "Done");
 }
@@ -103,6 +129,50 @@ async function git(args, opts, cwd = opts.workDir) {
     encoding: "utf8",
     timeout: 30_000,
   });
+}
+
+function formatErrorMessage(error) {
+  return String(error?.stderr ?? error?.stdout ?? error?.message ?? error ?? "unknown error").trim();
+}
+
+async function resetSquashMergeState(opts) {
+  await git(["reset", "--merge"], opts);
+}
+
+async function squashMergeTrackCommitWithRetry({ opts, track, taskId, observedHead = "", maxAttempts = MAX_SQUASH_MERGE_ATTEMPTS }) {
+  let lastError = null;
+  let lastHead = computeGitHead(opts.workDir);
+  let headChangedWhileWaiting = Boolean(observedHead && lastHead && observedHead !== lastHead);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    lastHead = computeGitHead(opts.workDir);
+    headChangedWhileWaiting = Boolean(observedHead && lastHead && observedHead !== lastHead);
+    try {
+      const merge = await squashMergeTrackCommit({ workDir: opts.workDir, track });
+      return {
+        ...merge,
+        attempts: attempt,
+        headBeforeAttempt: lastHead,
+        headChangedWhileWaiting,
+      };
+    } catch (error) {
+      lastError = error;
+      try {
+        await resetSquashMergeState(opts);
+      } catch (resetError) {
+        throw new Error(
+          `failed to clean up squash merge for ${taskId}: ${formatErrorMessage(error)} (reset failed: ${formatErrorMessage(resetError)})`,
+          { cause: resetError }
+        );
+      }
+    }
+  }
+
+  throw new Error(
+    `failed to squash merge ${taskId} after ${maxAttempts} attempt(s): ${formatErrorMessage(lastError)}`
+    + (headChangedWhileWaiting ? ` (git HEAD changed while waiting for commit lock; latest HEAD ${lastHead})` : ""),
+    { cause: lastError instanceof Error ? lastError : undefined }
+  );
 }
 
 function toRepoPath(filePath, repoRoot) {
@@ -201,7 +271,7 @@ async function validatePreDispatch(run, opts) {
   }
 
   const checkpoint = readCheckpoint(opts.workDir, opts.runId);
-  const stale = isCheckpointStale(checkpoint, { stateFile: opts.stateFile, workDir: opts.workDir });
+  const stale = isCheckpointStale(checkpoint, { stateFile: opts.stateFile, workDir: opts.workDir, workspace: opts.workspace });
   if (stale.stale) {
     await appendGovernanceEvent(opts, run, "checkpoint.stale", {
       checkpointId: checkpoint?.governance?.checkpointId ?? checkpoint?.approvedPlanId ?? null,
@@ -313,7 +383,7 @@ async function orchestrateRecover(opts) {
   const state = readSprintState(opts.stateFile);
   const checkpoint = readCheckpoint(opts.workDir, opts.runId);
   const checkpointStatus = checkpoint
-    ? isCheckpointStale(checkpoint, { stateFile: opts.stateFile, workDir: opts.workDir })
+    ? isCheckpointStale(checkpoint, { stateFile: opts.stateFile, workDir: opts.workDir, workspace: opts.workspace })
     : { stale: false, reason: "" };
   const directives = readDirectives(opts.workDir, opts.runId);
   const plan = buildRecoveryPlan({
@@ -584,11 +654,13 @@ async function approveCandidatePlan(run, opts, { approvalMode = "human", policyD
     workDir: opts.workDir,
     approvedPlanId: planId,
     candidatePlan: run.candidatePlan,
+    workspace: opts.workspace,
   });
-  checkpoint.governance.approvalMode = approvalMode;
-  if (policyDecision) {
-    checkpoint.governance.approvalPolicy = policyDecision;
-  }
+  checkpoint.governance = {
+    ...checkpoint.governance,
+    approvalMode,
+    ...(policyDecision ? { approvalPolicy: policyDecision } : {}),
+  };
   await writeCheckpoint(opts.workDir, checkpoint, opts.runId);
   await appendGovernanceEvent(opts, run, "plan.approved", {
     planId,
@@ -643,7 +715,10 @@ async function orchestrateDispatch(opts) {
 
   const taskIds = planTaskIds(run.candidatePlan);
   const workerOverrides = readWorkerOverrides(opts.workDir, opts.runId);
-  const worktreeConfig = readWorktreeIsolationConfig(path.join(opts.workDir, ".va-auto-pilot", "config.yaml"));
+  const worktreeConfig = resolveDispatchWorktreeConfig(
+    readWorktreeIsolationConfig(path.join(opts.workDir, ".va-auto-pilot", "config.yaml")),
+    opts.workspace
+  );
   const tracks = [];
   for (const taskId of taskIds) {
     const track = {
@@ -657,7 +732,11 @@ async function orchestrateDispatch(opts) {
     };
     if (worktreeConfig.enabled === true) {
       track.worktree = opts.dryRun
-        ? { enabled: true, status: "preview", path: path.resolve(opts.workDir, worktreeConfig.rootDir, taskId) }
+        ? {
+          enabled: true,
+          status: "preview",
+          path: resolveTrackWorktreePath(opts.workDir, worktreeConfig, run.runId, taskId),
+        }
         : await prepareTrackWorktree({ workDir: opts.workDir, runId: run.runId, taskId, config: worktreeConfig });
     }
     tracks.push(track);
@@ -743,6 +822,7 @@ async function orchestrateAwaitWorkers(opts) {
     ...opts,
     runId: run.runId,
     deferCommit: true,
+    observabilityWorkDir: opts.workDir,
     workerOverrides: buildWorkerOverrideCommands(opts.workDir, (workDir) => readWorkerOverrides(workDir, run.runId)),
   };
 
@@ -946,19 +1026,35 @@ async function orchestrateCommit(opts) {
 
   for (const { taskId, task } of tasksToCommit) {
     const track = tracksByTaskId.get(taskId);
-    let worktreeMerge = null;
-    if (track?.worktree?.enabled === true) {
-      try {
-        worktreeMerge = await squashMergeTrackCommit({ workDir: opts.workDir, track });
-      } catch (error) {
-        fail(opts, "WORKTREE_MERGE_FAILED", `failed to squash merge ${taskId} worktree result`, {
-          taskId,
-          worktree: track.worktree,
-          message: error instanceof Error ? error.message : String(error),
-        }, 1);
-      }
+    const observedHead = computeGitHead(opts.workDir);
+    let result;
+    let worktreeMerge;
+    try {
+      const lockedCommit = await withSerializedCommit(opts, async () => {
+        let lockedMergeResult = null;
+        if (track?.worktree?.enabled === true) {
+          lockedMergeResult = await squashMergeTrackCommitWithRetry({
+            opts,
+            track,
+            taskId,
+            observedHead,
+          });
+        }
+        const lockedCommitResult = await finalizeDoneTaskCommit(task, opts);
+        return {
+          result: lockedCommitResult,
+          worktreeMerge: lockedMergeResult,
+        };
+      });
+      result = lockedCommit.result;
+      worktreeMerge = lockedCommit.worktreeMerge;
+    } catch (error) {
+      fail(opts, "WORKTREE_MERGE_FAILED", `failed to squash merge ${taskId} worktree result`, {
+        taskId,
+        worktree: track?.worktree ?? null,
+        message: formatErrorMessage(error),
+      }, 1);
     }
-    const result = await finalizeDoneTaskCommit(task, opts);
     commits.push({ taskId, ok: result.ok, details: result.details, hash: result.commitResult?.hash, worktreeMerge });
     if (!result.ok) {
       run.phase = "awaiting-commit-approval";

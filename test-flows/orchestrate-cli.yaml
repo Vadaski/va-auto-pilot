@@ -83,7 +83,7 @@ flows:
         node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --dry-run --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
-        node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --dry-run --json >/dev/null
         out="$(node "$repo/scripts/auto-pilot.mjs" orchestrate await-workers --dry-run --json)"
         echo "$out" | grep -q '"phase": "dry-run-preview"'
         node "$repo/scripts/auto-pilot.mjs" observe --json | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8'));process.exit((j.snapshot?.anomalies?.length??0)===0?0:1)"
@@ -309,13 +309,13 @@ flows:
         git config user.name "Worktree Test"
         git add .
         git commit -q -m "seed"
-        node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
-        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
-        node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --dry-run --json >/dev/null
-        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
-        node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json \
-          | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); process.exit(j.worktreeIsolation?.tracks?.[0]?.worktree?.path?.includes('.va/worktrees/AP-001')?0:1)"
-        test -d "$tmpdir/.va/worktrees/AP-001"
+        node "$repo/scripts/auto-pilot.mjs" orchestrate init --run-id run-wt --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --run-id run-wt --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --run-id run-wt --dry-run --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --run-id run-wt --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --run-id run-wt --json \
+          | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); const p=j.worktreeIsolation?.tracks?.[0]?.worktree?.path || ''; process.exit(p.includes('.va/worktrees/run-wt/AP-001')?0:1)"
+        test -d "$tmpdir/.va/worktrees/run-wt/AP-001"
     env:
       ROOT: "."
     assert:
@@ -356,18 +356,20 @@ flows:
 
         approve_case() {
           local dir="$1"
-          (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null)
-          (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null)
-          (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --dry-run --json >/dev/null)
-          (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null)
+          shift
+          (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate init "$@" --json >/dev/null)
+          (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate plan "$@" --json >/dev/null)
+          (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan "$@" --dry-run --json >/dev/null)
+          (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan "$@" --json >/dev/null)
         }
 
         assert_stale_dispatch() {
           local dir="$1"
           local name="$2"
           local reason="$3"
+          shift 3
           local out="$evidence/$name-dispatch.txt"
-          if (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json > "$out" 2>&1); then
+          if (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch "$@" --json > "$out" 2>&1); then
             echo "dispatch unexpectedly succeeded for $name" >&2
             exit 1
           fi
@@ -399,9 +401,9 @@ flows:
 
         git_dir="$(mktemp -d)"
         setup_case "$git_dir"
-        approve_case "$git_dir"
+        approve_case "$git_dir" --isolated --workspace git-head --state-file .va-auto-pilot/sprint-state.json --board-file docs/todo/sprint.md --journal-file docs/todo/run-journal.md
         (cd "$git_dir" && echo "changed" >> seed.txt && git add seed.txt && git commit -q -m "chore: move head")
-        assert_stale_dispatch "$git_dir" "git-head" "git HEAD changed since approve-plan"
+        assert_stale_dispatch "$git_dir" "git-head" "git HEAD changed since approve-plan" --isolated --workspace git-head --state-file .va-auto-pilot/sprint-state.json --board-file docs/todo/sprint.md --journal-file docs/todo/run-journal.md
     env:
       ROOT: "."
     assert:
@@ -422,6 +424,7 @@ flows:
         cat > "$tmpdir/.gitignore" <<'EOF'
         .va-auto-pilot/orchestration/
         .va-auto-pilot/parallel-runs/
+        .va/worktrees/
         EOF
         cat > "$tmpdir/.va-auto-pilot/config.yaml" <<'EOF'
         version: 1
@@ -638,12 +641,15 @@ flows:
         const dir = process.argv[2];
         const payload = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
         const state = JSON.parse(fs.readFileSync(path.join(dir, '.va-auto-pilot/sprint-state.json'), 'utf8'));
+        const tracks = JSON.parse(fs.readFileSync(path.join(dir, '.va-auto-pilot/orchestration/tracks.json'), 'utf8'));
         const journal = fs.readFileSync(path.join(dir, 'docs/todo/run-journal.md'), 'utf8');
         const events = fs.readFileSync(path.join(dir, '.va-auto-pilot/evidence/events.jsonl'), 'utf8');
+        const worktreePath = tracks.tracks?.[0]?.worktree?.path;
         const assert = (condition, message) => { if (!condition) throw new Error(message); };
         assert(payload.results.some((item) => item.action === 'permission-failed'), 'await-workers did not report permission-failed');
         assert(state.tasks[0].state === 'Failed', 'out-of-scope worker did not fail the task');
-        assert(fs.existsSync(path.join(dir, 'outside.txt')), 'fixture did not create outside file before enforcement');
+        assert(worktreePath, 'worktree path missing from tracks.json');
+        assert(fs.existsSync(path.join(worktreePath, 'outside.txt')), 'fixture did not create outside file inside the isolated worktree before enforcement');
         assert(journal.includes('permission-scope:out-of-scope'), 'permission scope signal missing from journal');
         assert(journal.includes('outside.txt'), 'out-of-scope file missing from journal');
         assert(events.includes('"permissionAction":"allow"'), 'worker command permission decision missing from event log');
@@ -709,6 +715,7 @@ flows:
         cat > "$tmpdir/.gitignore" <<'EOF'
         .va-auto-pilot/orchestration/
         .va-auto-pilot/parallel-runs/
+        .va/worktrees/
         EOF
         cat > "$tmpdir/.va-auto-pilot/config.yaml" <<'EOF'
         version: 1

@@ -8,7 +8,6 @@ import {
   resolveDefaults,
   nowIso,
 } from "./sprint-utils.mjs";
-import { resolveHumanBoardPath, readHumanBoardInstructions } from "./human-board.mjs";
 import { countPendingTasks } from "./sprint-board/core.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -167,8 +166,6 @@ export function synthesizeRisks(input = {}) {
 export function detectDocImplDiffs(input = {}) {
   const publicNarrativeResult = input.publicNarrativeResult || "";
   const distributionResult = input.distributionResult || "";
-  const recentJournal = input.recentJournal || "";
-  const packageScripts = input.packageScripts || [];
   const gates = input.gates || input.gateConfig || {};
   const diffs = [];
   if (publicNarrativeResult && publicNarrativeResult.includes("passed")) {
@@ -195,7 +192,7 @@ export function detectDocImplDiffs(input = {}) {
 }
 
 export function pickHighestValueGoal(assessment = {}) {
-  const { repo = {}, gates = {}, risks = [], diffs = [] } = assessment;
+  const { repo = {}, gates = {}, diffs = [] } = assessment;
   const rt = repo.repoType || "project";
   const g = gates || {};
   // Data-driven highest value for arbitrary repo

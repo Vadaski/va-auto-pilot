@@ -24,8 +24,24 @@ function sanitizeRefPart(value) {
     .replace(/^-+|-+$/g, "") || "track";
 }
 
+export function resolveTrackWorktreePath(root, config, runId, taskId) {
+  const normalized = { ...DEFAULT_WORKTREE_ISOLATION, ...(config ?? {}) };
+  return path.resolve(
+    root,
+    normalized.rootDir,
+    sanitizeRefPart(runId),
+    sanitizeRefPart(taskId)
+  );
+}
+
 function splitLines(value) {
   return String(value ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+function isWorktreeRuntimeFile(file) {
+  const normalized = String(file ?? "").replace(/\\/g, "/");
+  return normalized.startsWith(".va-auto-pilot/orchestration/")
+    || normalized.startsWith(".va-auto-pilot/evidence/");
 }
 
 function readConfig(configPath) {
@@ -78,7 +94,7 @@ export async function prepareTrackWorktree({ workDir, runId, taskId, config }) {
   }
 
   const root = (await git(["rev-parse", "--show-toplevel"], workDir, 10_000)).stdout.trim() || workDir;
-  const targetPath = path.resolve(root, normalized.rootDir, sanitizeRefPart(taskId));
+  const targetPath = resolveTrackWorktreePath(root, normalized, runId, taskId);
   const branch = `${sanitizeRefPart(normalized.branchPrefix)}/${sanitizeRefPart(taskId)}-${sanitizeRefPart(runId).slice(0, 24)}`;
 
   if (fs.existsSync(targetPath)) {
@@ -117,7 +133,9 @@ export async function commitTrackWorktreeResult({ task, worktree }) {
     ...splitLines((await git(["diff", "--name-only", "--relative", "HEAD", "--"], worktree.path)).stdout),
     ...splitLines((await git(["ls-files", "--others", "--exclude-standard"], worktree.path)).stdout),
   ];
-  const files = [...new Set(changed)].sort((left, right) => left.localeCompare(right));
+  const files = [...new Set(changed)]
+    .filter((file) => !isWorktreeRuntimeFile(file))
+    .sort((left, right) => left.localeCompare(right));
   if (files.length === 0) {
     return { committed: false, skipped: true, reason: "worktree clean", hash: "", files: [] };
   }

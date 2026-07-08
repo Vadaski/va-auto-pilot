@@ -52,6 +52,11 @@ export async function acquireLock(lockPath, options = {}) {
       }
       try {
         const raw = await fs.readFile(lockPath, "utf8");
+        if (!raw.trim()) {
+          await sleep(delayMs);
+          delayMs = Math.min(delayMs * 2, 500);
+          continue;
+        }
         let current;
         try {
           current = JSON.parse(raw);

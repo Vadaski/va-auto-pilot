@@ -13,6 +13,9 @@
 /** Default per-task/agent track timeout in milliseconds (10 minutes). */
 export const DEFAULT_TRACK_TIMEOUT_MS = 600_000;
 
+/** Default persisted task-claim TTL in milliseconds. */
+export const DEFAULT_TASK_CLAIM_TTL_MS = Math.max(60 * 60 * 1000, 2 * DEFAULT_TRACK_TIMEOUT_MS);
+
 /** Default timeout for individual quality gates in milliseconds (30 seconds). */
 export const DEFAULT_GATE_TIMEOUT_MS = 30_000;
 

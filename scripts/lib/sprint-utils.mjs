@@ -54,6 +54,12 @@ export const DEFAULT_AGENT_TEMPLATE_HELP = "vendor-neutral placeholder; configur
  * @property {string} reason
  * @property {string} verification
  * @property {string} notes
+ * @property {string} claimedBy
+ * @property {string} claimedAt
+ * @property {string} claimExpiresAt
+ * @property {string} previousClaimedBy
+ * @property {string} reclaimedAt
+ * @property {Record<string, unknown>} [permissionPolicy]
  * @property {ReviewDetail} review
  * @property {TestingDetail} testing
  * @property {string[]} dependsOn

@@ -75,6 +75,14 @@ function normalizeTask(task) {
     reason: String(task.reason ?? ""),
     verification: String(task.verification ?? ""),
     notes: String(task.notes ?? ""),
+    claimedBy: String(task.claimedBy ?? ""),
+    claimedAt: String(task.claimedAt ?? ""),
+    claimExpiresAt: String(task.claimExpiresAt ?? ""),
+    previousClaimedBy: String(task.previousClaimedBy ?? ""),
+    reclaimedAt: String(task.reclaimedAt ?? ""),
+    permissionPolicy: task.permissionPolicy && typeof task.permissionPolicy === "object"
+      ? JSON.parse(JSON.stringify(task.permissionPolicy))
+      : undefined,
     review: {
       implementer: String(task.review?.implementer ?? ""),
       security: String(task.review?.security ?? ""),
@@ -132,6 +140,33 @@ function sortTasks(tasks) {
  */
 function isDependencySatisfied(task, doneIds) {
   return task.dependsOn.every((dependencyId) => doneIds.has(dependencyId));
+}
+
+/**
+ * @param {Task} task
+ * @param {number} [nowMs]
+ * @returns {boolean}
+ */
+function isClaimExpired(task, nowMs = Date.now()) {
+  if (!task.claimExpiresAt) {
+    return false;
+  }
+
+  const expiresAtMs = Date.parse(task.claimExpiresAt);
+  if (!Number.isFinite(expiresAtMs)) {
+    return false;
+  }
+
+  return expiresAtMs < nowMs;
+}
+
+/**
+ * @param {Task} task
+ * @param {number} [nowMs]
+ * @returns {boolean}
+ */
+function hasActiveClaim(task, nowMs = Date.now()) {
+  return Boolean(task.claimedBy) && !isClaimExpired(task, nowMs);
 }
 
 /**
@@ -194,9 +229,10 @@ function detectCycles(tasks) {
 
 /**
  * @param {Task[]} tasks
+ * @param {number} [nowMs]
  * @returns {NextTaskResult | null}
  */
-function findNextTask(tasks) {
+function findNextTask(tasks, nowMs = Date.now()) {
   const doneIds = new Set(
     tasks
       .filter((task) => task.state === "Done")
@@ -204,7 +240,7 @@ function findNextTask(tasks) {
   );
 
   for (const state of NEXT_ORDER) {
-    let candidates = sortTasks(tasks.filter((task) => task.state === state));
+    let candidates = sortTasks(tasks.filter((task) => task.state === state && !hasActiveClaim(task, nowMs)));
     if (state === "Backlog") {
       candidates = candidates.filter((task) => isDependencySatisfied(task, doneIds));
     }
@@ -230,9 +266,10 @@ function findNextTask(tasks) {
 /**
  * @param {Task[]} tasks
  * @param {number} maxParallel
+ * @param {number} [nowMs]
  * @returns {ParallelPlan | null}
  */
-function buildParallelPlan(tasks, maxParallel) {
+function buildParallelPlan(tasks, maxParallel, nowMs = Date.now()) {
   // Guard: report cycles before planning to prevent silent deadlocks.
   const cycles = detectCycles(tasks);
   if (cycles.length > 0) {
@@ -243,7 +280,7 @@ function buildParallelPlan(tasks, maxParallel) {
     );
   }
 
-  const primary = findNextTask(tasks);
+  const primary = findNextTask(tasks, nowMs);
   if (!primary) return null;
 
   const parallelAllowedActions = new Set(["start-task", "continue-implementation"]);
@@ -270,7 +307,11 @@ function buildParallelPlan(tasks, maxParallel) {
   }
 
   const tracks = [];
-  const backlog = sortTasks(tasks.filter((task) => task.state === "Backlog" && task.id !== primaryTask.id));
+  const backlog = sortTasks(tasks.filter(
+    (task) => task.state === "Backlog"
+      && task.id !== primaryTask.id
+      && !hasActiveClaim(task, nowMs)
+  ));
 
   for (const task of backlog) {
     if (tracks.length >= maxParallel) break;
@@ -312,6 +353,8 @@ export {
   escapeCell,
   sortTasks,
   isDependencySatisfied,
+  isClaimExpired,
+  hasActiveClaim,
   detectCycles,
   findNextTask,
   buildParallelPlan,

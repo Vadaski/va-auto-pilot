@@ -29,7 +29,7 @@ import {
   resolveEvalHistoryFile,
   summarizeEvalHistory,
 } from "./lib/eval-history.mjs";
-import { DEFAULT_SPRINT_BOARD_TIMEOUT_MS } from "./lib/constants.mjs";
+import { DEFAULT_SPRINT_BOARD_TIMEOUT_MS, DEFAULT_TASK_CLAIM_TTL_MS } from "./lib/constants.mjs";
 import {
   VALID_STATES,
   PRIORITY_WEIGHT,
@@ -38,6 +38,8 @@ import {
   normalizeTask,
   escapeCell,
   sortTasks,
+  isDependencySatisfied,
+  isClaimExpired,
   findNextTask,
   buildParallelPlan
 } from "./lib/sprint-board/core.mjs";
@@ -108,6 +110,8 @@ function printHelp() {
 
 Usage:
   node scripts/sprint-board.mjs summary [--state-file <path>]
+  node scripts/sprint-board.mjs claim --run-id <id> [--count <n>] [--json] [--state-file <path>]
+  node scripts/sprint-board.mjs release --run-id <id> [--task <id>] [--json] [--state-file <path>]
   node scripts/sprint-board.mjs next [--json] [--strict] [--state-file <path>]
   node scripts/sprint-board.mjs plan [--json] [--max-parallel <n>] [--state-file <path>]
   node scripts/sprint-board.mjs suggest-gate [--pitfalls-file <path>]
@@ -172,6 +176,11 @@ Options (pitfall):
 
 Options (next):
   --strict                  Keep pending human intent as a hard block
+
+Options (claim/release):
+  --run-id <id>             Run identity that owns the task claim
+  --count <n>               Number of claim slots to reserve (claim only)
+  --task <id>               Release a single claimed task instead of all (release only)
 
 Global options:
   --max-parallel <n>
@@ -914,6 +923,116 @@ function readConfigDocument(filePath) {
   } catch {
     return {};
   }
+}
+
+/**
+ * @param {string} configFile
+ * @returns {number}
+ */
+function resolveClaimTtlMs(configFile) {
+  const config = /** @type {{ sprint?: { claimTtlMs?: number | string } }} */ (readConfigDocument(configFile));
+  const configured = Number(config.sprint?.claimTtlMs);
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_TASK_CLAIM_TTL_MS;
+}
+
+/**
+ * @param {SprintState} state
+ * @param {number} count
+ * @param {number} nowMs
+ * @returns {Task[]}
+ */
+function selectClaimableTasks(state, count, nowMs) {
+  const doneIds = new Set(
+    state.tasks
+      .filter((task) => task.state === "Done")
+      .map((task) => task.id)
+  );
+  const backlog = sortTasks(state.tasks.filter(
+    (task) => task.state === "Backlog"
+      && isDependencySatisfied(task, doneIds)
+      && (!task.claimedBy || isClaimExpired(task, nowMs))
+  ));
+
+  if (backlog.length === 0 || count <= 0) {
+    return [];
+  }
+
+  const selected = [backlog[0]];
+  for (const task of backlog.slice(1)) {
+    if (selected.length >= count) {
+      break;
+    }
+    if (task.dependsOn.includes(selected[0].id)) {
+      continue;
+    }
+    selected.push(task);
+  }
+
+  return selected;
+}
+
+/**
+ * @param {SprintState} state
+ * @param {string} runId
+ * @param {number} count
+ * @param {number} ttlMs
+ * @param {number} [nowMs]
+ * @returns {{ runId: string, claimedTasks: Array<{ taskId: string, reclaimed: boolean }> }}
+ */
+function claimTasksInState(state, runId, count, ttlMs, nowMs = Date.now()) {
+  const claimedTasks = [];
+  const claimedAt = new Date(nowMs).toISOString();
+  const claimExpiresAt = new Date(nowMs + ttlMs).toISOString();
+
+  for (const task of selectClaimableTasks(state, count, nowMs)) {
+    const reclaimed = Boolean(task.claimedBy) && isClaimExpired(task, nowMs);
+    if (reclaimed) {
+      task.previousClaimedBy = task.claimedBy;
+      task.reclaimedAt = claimedAt;
+    }
+    task.claimedBy = runId;
+    task.claimedAt = claimedAt;
+    task.claimExpiresAt = claimExpiresAt;
+    claimedTasks.push({ taskId: task.id, reclaimed });
+  }
+
+  if (claimedTasks.length > 0) {
+    state.updatedAt = nowIso();
+  }
+
+  return { runId, claimedTasks };
+}
+
+/**
+ * @param {SprintState} state
+ * @param {string} runId
+ * @param {string} [taskId]
+ * @returns {{ runId: string, releasedTasks: string[] }}
+ */
+function releaseClaimsInState(state, runId, taskId = "") {
+  const releasedTasks = [];
+  for (const task of state.tasks) {
+    if (task.claimedBy !== runId) {
+      continue;
+    }
+    if (taskId && task.id !== taskId) {
+      continue;
+    }
+    task.claimedBy = "";
+    task.claimedAt = "";
+    task.claimExpiresAt = "";
+    task.previousClaimedBy = "";
+    task.reclaimedAt = "";
+    releasedTasks.push(task.id);
+  }
+
+  if (releasedTasks.length > 0) {
+    state.updatedAt = nowIso();
+  }
+
+  return { runId, releasedTasks };
 }
 
 /**
@@ -1791,6 +1910,70 @@ async function main() {
     }
     const state = readState(stateFile);
     printSummary(state, pitfallsFile);
+    return;
+  }
+
+  if (parsed.command === "claim") {
+    const runId = requireOption(parsed.options, "run-id");
+    const rawCount = parsed.options.count ?? "1";
+    const count = Number.parseInt(String(rawCount), 10);
+    if (!Number.isFinite(count) || count <= 0) {
+      throw new Error("Invalid --count value. Expected a positive integer.");
+    }
+
+    const ttlMs = resolveClaimTtlMs(path.resolve(DEFAULT_CONFIG_FILE));
+    /** @type {{ runId: string, claimedTasks: Array<{ taskId: string, reclaimed: boolean }> } | null} */
+    let result = null;
+    await withPilotFileLock(stateFile, async () => {
+      const state = readState(stateFile);
+      result = claimTasksInState(state, runId, count, ttlMs);
+      writeState(stateFile, state);
+      writeBoard(boardFile, state);
+    });
+
+    if (!result) {
+      throw new Error("Task claim did not produce a result.");
+    }
+
+    if (parsed.flags.has("json")) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    if (result.claimedTasks.length === 0) {
+      console.log(`No claimable tasks for ${runId}.`);
+    } else {
+      console.log(`Claimed for ${runId}: ${result.claimedTasks.map((task) => task.taskId).join(", ")}`);
+    }
+    return;
+  }
+
+  if (parsed.command === "release") {
+    const runId = requireOption(parsed.options, "run-id");
+    const taskId = parsed.options.task ?? "";
+    /** @type {{ runId: string, releasedTasks: string[] } | null} */
+    let result = null;
+    await withPilotFileLock(stateFile, async () => {
+      const state = readState(stateFile);
+      result = releaseClaimsInState(state, runId, taskId);
+      writeState(stateFile, state);
+      writeBoard(boardFile, state);
+    });
+
+    if (!result) {
+      throw new Error("Task release did not produce a result.");
+    }
+
+    if (parsed.flags.has("json")) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    if (result.releasedTasks.length === 0) {
+      console.log(`No claims released for ${runId}.`);
+    } else {
+      console.log(`Released for ${runId}: ${result.releasedTasks.join(", ")}`);
+    }
     return;
   }
 

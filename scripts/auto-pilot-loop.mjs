@@ -1306,6 +1306,17 @@ async function transitionToTesting(task, opts, expectedState = "Review") {
   ], opts, `transition ${task.id} -> Testing`);
 }
 
+async function releaseTaskClaim(taskId, opts) {
+  if (opts.dryRun || !opts.runId) {
+    return;
+  }
+  await requireSprintBoard(
+    ["release", "--run-id", String(opts.runId), "--task", taskId],
+    opts,
+    `release claim for ${taskId}`
+  );
+}
+
 async function transitionToDone(task, opts, expectedState = "Testing") {
   if (opts.dryRun) return;
   const bundlePaths = taskEvidenceBundlePaths(opts.workDir ?? process.cwd(), resolveObservabilityRunId(opts), task.id);
@@ -1314,6 +1325,7 @@ async function transitionToDone(task, opts, expectedState = "Testing") {
     "--verification", `Auto-pilot loop: all gates passed at ${nowIso()}`,
     "--if-state", expectedState
   ], opts, `transition ${task.id} -> Done`);
+  await releaseTaskClaim(task.id, opts);
   await appendTaskEvent(task, "task.completed", "done", {
     state: "completed",
     evidenceBundle: relativeToWorkDir(bundlePaths.manifest, opts),
@@ -1334,6 +1346,7 @@ async function transitionToFailed(task, gate, output, opts, expectedState) {
   }
 
   await requireSprintBoard(args, opts, `transition ${task.id} -> Failed`);
+  await releaseTaskClaim(task.id, opts);
   await appendTaskEvent(task, "task.failed", "failed", {
     state: "failed",
     failureType: mapGateToFailureType(gate),

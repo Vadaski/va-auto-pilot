@@ -67,6 +67,7 @@ import {
 } from "./lib/worktree-isolation.mjs";
 import { writeWorkspace } from "./lib/workspace.mjs";
 import { planTaskIds } from "./lib/plan-helpers.mjs";
+import { normalizeTask } from "./lib/sprint-board/core.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -95,6 +96,47 @@ function buildTrackOpts(base, overrides = {}) {
 
 function hasPendingTasks(state) {
   return (state.tasks ?? []).some((task) => task.state !== "Done");
+}
+
+function buildClaimedCandidatePlan(state, claimedTaskIds, maxParallel) {
+  const tasksById = new Map(
+    (Array.isArray(state?.tasks) ? state.tasks : [])
+      .map((task) => normalizeTask(task))
+      .map((task) => [task.id, task])
+  );
+  const claimedTasks = claimedTaskIds
+    .map((taskId) => tasksById.get(taskId))
+    .filter(Boolean);
+
+  if (claimedTasks.length === 0) {
+    return null;
+  }
+
+  const primaryTask = claimedTasks[0];
+  const dependencyGraph = {
+    [primaryTask.id]: [...primaryTask.dependsOn],
+  };
+  const parallelTracks = [];
+
+  for (const task of claimedTasks.slice(1)) {
+    if (parallelTracks.length >= maxParallel) {
+      break;
+    }
+    if (task.dependsOn.includes(primaryTask.id)) {
+      continue;
+    }
+    parallelTracks.push(task.id);
+    dependencyGraph[task.id] = [...task.dependsOn];
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    primaryTaskId: primaryTask.id,
+    primaryAction: "start-task",
+    parallelTracks,
+    dependencyGraph,
+    syncPoints: ["quality-gates"],
+  };
 }
 
 async function git(args, opts, cwd = opts.workDir) {
@@ -219,6 +261,13 @@ async function orchestrateClose(opts) {
   const run = readRun(opts.workDir, opts.runId);
   if (!run) {
     return emitResult(opts, { ok: true, action: "close", message: "no active run" });
+  }
+  const releaseResult = await sprintBoardExec(
+    ["release", "--run-id", run.runId, "--json"],
+    opts
+  );
+  if (releaseResult.exitCode !== 0) {
+    fail(opts, "RELEASE_FAILED", releaseResult.stderr || releaseResult.stdout, {}, 1);
   }
   run.phase = "done";
   run.locks = { executorPid: null };
@@ -397,20 +446,31 @@ async function orchestratePlan(opts) {
     }, 2);
   }
 
-  const planResult = await sprintBoardExec(
-    ["plan", "--json", "--max-parallel", String(opts.maxParallel)],
+  const claimResult = await sprintBoardExec(
+    [
+      "claim",
+      "--run-id", run.runId,
+      "--count", String(Math.max(1, opts.maxParallel + 1)),
+      "--json",
+    ],
     opts
   );
-  if (planResult.exitCode !== 0) {
-    fail(opts, "PLAN_FAILED", planResult.stderr || planResult.stdout, {}, 1);
+  if (claimResult.exitCode !== 0) {
+    fail(opts, "CLAIM_FAILED", claimResult.stderr || claimResult.stdout, {}, 1);
   }
 
-  const parsed = tryParseJson(planResult.stdout.trim());
-  if (!parsed.parsed || !parsed.value?.primaryTaskId) {
-    fail(opts, "PLAN_EMPTY", "no parallel plan available", { stdout: planResult.stdout }, 1);
+  const parsed = tryParseJson(claimResult.stdout.trim());
+  if (!parsed.parsed || !Array.isArray(parsed.value?.claimedTasks)) {
+    fail(opts, "CLAIM_FAILED", "task claim returned invalid payload", { stdout: claimResult.stdout }, 1);
   }
 
-  run.candidatePlan = parsed.value;
+  const claimedTaskIds = parsed.value.claimedTasks.map((task) => String(task?.taskId ?? "")).filter(Boolean);
+  const candidatePlan = buildClaimedCandidatePlan(readSprintState(opts.stateFile), claimedTaskIds, opts.maxParallel);
+  if (!candidatePlan?.primaryTaskId) {
+    fail(opts, "PLAN_EMPTY", "no parallel plan available", { stdout: claimResult.stdout }, 1);
+  }
+
+  run.candidatePlan = candidatePlan;
   run.candidateBacklog = goalBacklogResult.ok ? goalBacklogResult.candidateBacklog : (run.candidateBacklog ?? null);
   run.approvedPlanId = null;
   run.approvedCommitTasks = [];

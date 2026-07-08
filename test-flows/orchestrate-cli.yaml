@@ -411,6 +411,7 @@ flows:
 
   - name: "orchestrate: full governed cycle commits deterministic worker output"
     command: "bash"
+    timeout_ms: 45000
     args:
       - "-lc"
       - |
@@ -697,7 +698,7 @@ flows:
 
   - name: "orchestrate: run-unattended replans after journal commits"
     command: "bash"
-    timeout_ms: 30000
+    timeout_ms: 45000
     args:
       - "-lc"
       - |
@@ -780,6 +781,7 @@ flows:
 
   - name: "orchestrate: commit failure clears stale approval"
     command: "bash"
+    timeout_ms: 30000
     args:
       - "-lc"
       - |

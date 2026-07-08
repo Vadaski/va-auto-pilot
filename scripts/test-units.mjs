@@ -81,6 +81,11 @@ import {
 } from "./lib/eval-history.mjs";
 import { withPilotFileLock, writeTextFileAtomicSync } from "./lib/pilot-state.mjs";
 import { buildRecoveryPlan } from "./lib/orchestration-state.mjs";
+import {
+  buildParallelPlan,
+  findNextTask,
+  normalizeTask,
+} from "./lib/sprint-board/core.mjs";
 
 // ---------------------------------------------------------------------------
 // Sprint-board surface
@@ -3402,6 +3407,34 @@ function runBoard(args, stateFile) {
   });
 }
 
+function runBoardAsync(args, stateFile) {
+  const allArgs = stateFile ? [...args, "--state-file", stateFile] : args;
+  const env = { ...process.env };
+
+  if (stateFile && fs.existsSync(stateFile)) {
+    const tempRoot = path.dirname(stateFile);
+    const tempBoardFile = path.join(tempRoot, "docs", "todo", "sprint.md");
+    const tempHumanBoardFile = path.join(tempRoot, "docs", "todo", "human-board.md");
+    fs.mkdirSync(path.dirname(tempHumanBoardFile), { recursive: true });
+    if (!fs.existsSync(tempHumanBoardFile)) {
+      fs.writeFileSync(tempHumanBoardFile, "# Human Board\n\n## Instructions\n\n", "utf8");
+    }
+    env.AUTO_PILOT_SPRINT_BOARD_FILE = tempBoardFile;
+  }
+
+  return new Promise((resolve) => {
+    const child = spawn("node", [BOARD_SCRIPT, ...allArgs], {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("close", (code, signal) => resolve({ code, signal, stdout, stderr }));
+  });
+}
+
 function writeTempHumanBoardFromState(stateFile, lines) {
   const tempRoot = path.dirname(stateFile);
   const tempHumanBoardFile = path.join(tempRoot, "docs", "todo", "human-board.md");
@@ -3509,6 +3542,64 @@ test("next: empty backlog returns no actionable task", () => {
   const r = runBoard(["next"], stateFile);
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes("No actionable task found"), r.stdout);
+});
+
+test("findNextTask: skips backlog tasks with active claims", () => {
+  const nowMs = Date.parse("2026-07-08T12:00:00.000Z");
+  const next = findNextTask([
+    normalizeTask({
+      id: "UT-001",
+      title: "claimed",
+      priority: "P1",
+      state: "Backlog",
+      dependsOn: [],
+      claimedBy: "run-a",
+      claimExpiresAt: "2026-07-08T12:30:00.000Z",
+    }),
+    normalizeTask({
+      id: "UT-002",
+      title: "free",
+      priority: "P2",
+      state: "Backlog",
+      dependsOn: [],
+    }),
+  ], nowMs);
+
+  assert.equal(next?.task.id, "UT-002");
+});
+
+test("buildParallelPlan: skips active claimed tasks but allows expired claims", () => {
+  const nowMs = Date.parse("2026-07-08T12:00:00.000Z");
+  const plan = buildParallelPlan([
+    normalizeTask({
+      id: "UT-001",
+      title: "primary",
+      priority: "P1",
+      state: "Backlog",
+      dependsOn: [],
+    }),
+    normalizeTask({
+      id: "UT-002",
+      title: "actively claimed",
+      priority: "P1",
+      state: "Backlog",
+      dependsOn: [],
+      claimedBy: "run-a",
+      claimExpiresAt: "2026-07-08T12:30:00.000Z",
+    }),
+    normalizeTask({
+      id: "UT-003",
+      title: "expired claim",
+      priority: "P2",
+      state: "Backlog",
+      dependsOn: [],
+      claimedBy: "run-b",
+      claimExpiresAt: "2026-07-08T11:00:00.000Z",
+    }),
+  ], 2, nowMs);
+
+  assert.equal(plan?.primaryTaskId, "UT-001");
+  assert.deepEqual(plan?.parallelTracks, ["UT-003"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -5118,6 +5209,126 @@ test("plan: invalid --max-parallel value errors", () => {
   assert.ok(r.stderr.includes("Invalid --max-parallel"), r.stderr);
 });
 
+test("claim: persists claimedBy and release clears it", () => {
+  const { stateFile } = writeTmpState([
+    {
+      id: "UT-001",
+      title: "A",
+      priority: "P1",
+      state: "Backlog",
+      dependsOn: [],
+      permissionPolicy: {
+        schemaVersion: 1,
+        fileScopes: [{ path: "UT-001.txt", access: "read-write", reason: "fixture" }],
+        commands: { allow: [], deny: [], destructiveRequiresOptIn: true, destructiveAllow: [] },
+        network: { mode: "none", allowlist: [] },
+        review: { warnOnOutOfScopeDiff: true },
+      },
+    },
+    { id: "UT-002", title: "B", priority: "P2", state: "Backlog", dependsOn: [] },
+  ]);
+
+  const claim = runBoard(["claim", "--run-id", "run-a", "--json"], stateFile);
+  assert.equal(claim.status, 0, claim.stderr);
+  const claimPayload = JSON.parse(claim.stdout);
+  assert.equal(claimPayload.runId, "run-a");
+  assert.equal(claimPayload.claimedTasks[0].taskId, "UT-001");
+
+  let state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(state.tasks[0].claimedBy, "run-a");
+  assert.ok(state.tasks[0].claimedAt);
+  assert.ok(state.tasks[0].claimExpiresAt);
+  assert.equal(state.tasks[0].permissionPolicy.fileScopes[0].path, "UT-001.txt");
+
+  const release = runBoard(["release", "--run-id", "run-a", "--json"], stateFile);
+  assert.equal(release.status, 0, release.stderr);
+  const releasePayload = JSON.parse(release.stdout);
+  assert.deepEqual(releasePayload.releasedTasks, ["UT-001"]);
+
+  state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(state.tasks[0].claimedBy, "");
+  assert.equal(state.tasks[0].claimedAt, "");
+  assert.equal(state.tasks[0].claimExpiresAt, "");
+});
+
+test("claim: expired claim can be stolen and retains audit fields", () => {
+  const { stateFile } = writeTmpState([
+    {
+      id: "UT-001",
+      title: "Expired claim",
+      priority: "P1",
+      state: "Backlog",
+      dependsOn: [],
+      claimedBy: "run-old",
+      claimedAt: "2026-07-08T08:00:00.000Z",
+      claimExpiresAt: "2026-07-08T09:00:00.000Z",
+    },
+  ]);
+
+  const claim = runBoard(["claim", "--run-id", "run-new", "--json"], stateFile);
+  assert.equal(claim.status, 0, claim.stderr);
+  const payload = JSON.parse(claim.stdout);
+  assert.deepEqual(payload.claimedTasks, [{ taskId: "UT-001", reclaimed: true }]);
+
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(state.tasks[0].claimedBy, "run-new");
+  assert.equal(state.tasks[0].previousClaimedBy, "run-old");
+  assert.ok(state.tasks[0].reclaimedAt);
+});
+
+test("next --json: does not return tasks claimed by another run", () => {
+  const { stateFile } = writeTmpState([
+    {
+      id: "UT-001",
+      title: "Claimed elsewhere",
+      priority: "P1",
+      state: "Backlog",
+      dependsOn: [],
+      claimedBy: "run-a",
+      claimExpiresAt: "2099-01-01T00:00:00.000Z",
+    },
+    {
+      id: "UT-002",
+      title: "Free",
+      priority: "P2",
+      state: "Backlog",
+      dependsOn: [],
+    },
+  ]);
+
+  const r = runBoard(["next", "--json"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const parsed = JSON.parse(r.stdout);
+  assert.equal(parsed.task.id, "UT-002");
+});
+
+test("claim: concurrent runs receive disjoint task sets", async () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-001", title: "A", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-002", title: "B", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-003", title: "C", priority: "P2", state: "Backlog", dependsOn: [] },
+    { id: "UT-004", title: "D", priority: "P2", state: "Backlog", dependsOn: [] },
+  ]);
+
+  const [first, second] = await Promise.all([
+    runBoardAsync(["claim", "--run-id", "run-a", "--count", "2", "--json"], stateFile),
+    runBoardAsync(["claim", "--run-id", "run-b", "--count", "2", "--json"], stateFile),
+  ]);
+
+  assert.equal(first.code, 0, first.stderr);
+  assert.equal(second.code, 0, second.stderr);
+
+  const firstPayload = JSON.parse(first.stdout);
+  const secondPayload = JSON.parse(second.stdout);
+  const firstTasks = firstPayload.claimedTasks.map((task) => task.taskId);
+  const secondTasks = secondPayload.claimedTasks.map((task) => task.taskId);
+  const overlap = firstTasks.filter((taskId) => secondTasks.includes(taskId));
+
+  assert.equal(overlap.length, 0, `claims overlapped: ${overlap.join(", ")}`);
+  assert.equal(firstTasks.length, 2);
+  assert.equal(secondTasks.length, 2);
+});
+
 // ---------------------------------------------------------------------------
 // sprint-board CLI: nextTaskId edge cases
 // ---------------------------------------------------------------------------
@@ -6050,6 +6261,42 @@ test("auto-pilot orchestrate: plan without --run-id resolves active run from act
   assert.equal(readRun(tmpDir), null);
 });
 
+test("auto-pilot orchestrate: plan claims the candidate tasks for the run", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-claim-plan-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    tasks: [
+      { id: "AP-001", title: "primary", priority: "P1", state: "Backlog", dependsOn: [] },
+      { id: "AP-002", title: "parallel", priority: "P2", state: "Backlog", dependsOn: [] },
+    ],
+  }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  const init = spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-claim", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(init.status, 0, init.stderr);
+
+  const plan = spawnSync(process.execPath, [script, "orchestrate", "plan", "--run-id", "run-claim", "--json", "--state-file", stateFile], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(plan.status, 0, plan.stderr);
+  const payload = JSON.parse(plan.stdout);
+  assert.equal(payload.candidatePlan.primaryTaskId, "AP-001");
+  assert.deepEqual(payload.candidatePlan.parallelTracks, ["AP-002"]);
+
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(state.tasks[0].claimedBy, "run-claim");
+  assert.equal(state.tasks[1].claimedBy, "run-claim");
+});
+
 test("auto-pilot orchestrate: approve-plan requires plan-review", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-review-"));
   const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
@@ -6196,9 +6443,21 @@ test("auto-pilot orchestrate: close marks run done and clears tracks", () => {
   const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
   const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
   fs.mkdirSync(path.dirname(stateFile), { recursive: true });
-  fs.writeFileSync(stateFile, JSON.stringify({ projectPrefix: "AP", tasks: [] }), "utf8");
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    tasks: [
+      {
+        id: "AP-001",
+        title: "claimed",
+        priority: "P1",
+        state: "Backlog",
+        dependsOn: [],
+      },
+    ],
+  }), "utf8");
   spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], { cwd: tmpDir, encoding: "utf8" });
-  spawnSync(process.execPath, [script, "orchestrate", "plan", "--json", "--state-file", stateFile], { cwd: tmpDir, encoding: "utf8" });
+  const plan = spawnSync(process.execPath, [script, "orchestrate", "plan", "--json", "--state-file", stateFile], { cwd: tmpDir, encoding: "utf8" });
+  assert.equal(plan.status, 0, plan.stderr);
   spawnSync(process.execPath, [script, "orchestrate", "approve-plan", "--json", "--state-file", stateFile], { cwd: tmpDir, encoding: "utf8" });
   const close = spawnSync(process.execPath, [script, "orchestrate", "close", "--json"], { cwd: tmpDir, encoding: "utf8" });
   assert.equal(close.status, 0, close.stderr);
@@ -6206,12 +6465,17 @@ test("auto-pilot orchestrate: close marks run done and clears tracks", () => {
   assert.equal(run.phase, "done");
   assert.equal(run.locks?.executorPid, null);
   assert.equal(readCheckpoint(tmpDir), null);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(state.tasks[0].claimedBy, "");
 });
 
 test("auto-pilot orchestrate: close clears only run-scoped plan-review", async () => {
   const { writePlanReview, readPlanReview } = await import("./lib/plan-review.mjs");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-close-scope-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
   const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ projectPrefix: "AP", tasks: [] }), "utf8");
 
   assert.equal(spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-a", "--json"], {
     cwd: tmpDir,

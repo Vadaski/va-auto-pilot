@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 
 import { readQualityGateConfig } from "./lib/sprint-utils.mjs";
@@ -97,11 +97,25 @@ function buildTrackOpts(base, overrides = {}) {
   return child;
 }
 
-export function resolveDispatchWorktreeConfig(worktreeConfig, workspace) {
+/**
+ * Decide whether dispatch should build per-track git worktrees.
+ *
+ * Isolated execution trees force worktree isolation on — BUT only when the project
+ * is actually a git repo. Forcing `git worktree add` in a non-git directory (local
+ * sandboxes, scratch projects) hard-fails inside prepareTrackWorktree, which would
+ * regress zero-config orchestration. So a non-git project gracefully degrades to a
+ * shared working tree regardless of executionTree.
+ *
+ * @param {object} [worktreeConfig]  raw config from readWorktreeIsolationConfig
+ * @param {{ executionTree?: string }} [workspace]
+ * @param {boolean} [isGitRepo]  whether the workDir is inside a git work tree
+ */
+export function resolveDispatchWorktreeConfig(worktreeConfig, workspace, isGitRepo = true) {
+  const wantIsolated = workspace?.executionTree === "isolated";
   return {
     ...(worktreeConfig ?? {}),
-    enabled: workspace?.executionTree === "isolated"
-      ? true
+    enabled: wantIsolated
+      ? Boolean(isGitRepo)
       : worktreeConfig?.enabled === true,
   };
 }
@@ -133,6 +147,25 @@ async function git(args, opts, cwd = opts.workDir) {
 
 function formatErrorMessage(error) {
   return String(error?.stderr ?? error?.stdout ?? error?.message ?? error ?? "unknown error").trim();
+}
+
+/**
+ * Synchronously detect whether workDir is inside a git work tree. Used to decide
+ * whether isolated-execution-tree dispatch can build per-track worktrees — non-git
+ * directories gracefully degrade to a shared working tree instead of hard-failing
+ * inside `git worktree add`.
+ */
+function detectGitRepo(workDir) {
+  try {
+    const result = execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: workDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return result.trim() === "true";
+  } catch {
+    return false;
+  }
 }
 
 async function resetSquashMergeState(opts) {
@@ -715,9 +748,11 @@ async function orchestrateDispatch(opts) {
 
   const taskIds = planTaskIds(run.candidatePlan);
   const workerOverrides = readWorkerOverrides(opts.workDir, opts.runId);
+  const isGitRepo = detectGitRepo(opts.workDir);
   const worktreeConfig = resolveDispatchWorktreeConfig(
     readWorktreeIsolationConfig(path.join(opts.workDir, ".va-auto-pilot", "config.yaml")),
-    opts.workspace
+    opts.workspace,
+    isGitRepo
   );
   const tracks = [];
   for (const taskId of taskIds) {

@@ -6123,7 +6123,10 @@ test("orchestration-state: checkpoint detects live human intent drift", () => {
   assert.equal(stale.reason, "human intent changed since approve-plan");
 });
 
-test("orchestration-state: shared workspace checkpoint ignores git HEAD drift", () => {
+test("orchestration-state: isolated-tree checkpoint detects git HEAD drift (approval contract)", () => {
+  // With an isolated execution tree, worktrees are built from the repo HEAD at dispatch
+  // time. If HEAD moves after approve-plan (sibling commit), dispatch would run workers
+  // against code the approver never reviewed — so the checkpoint MUST go stale.
   const repoDir = createTempGitRepo({ "README.md": "initial\n" });
   const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
   const humanBoard = path.join(repoDir, "docs", "todo", "human-board.md");
@@ -6135,20 +6138,81 @@ test("orchestration-state: shared workspace checkpoint ignores git HEAD drift", 
   const checkpoint = buildCheckpoint({
     stateFile,
     workDir: repoDir,
-    approvedPlanId: "plan-shared",
+    approvedPlanId: "plan-iso",
     candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
     workspace: { name: "default", type: "shared", executionTree: "isolated" },
   });
 
-  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board"]);
-  assert.equal(checkpoint.governance.workspace.type, "shared");
+  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board", "git-head"]);
 
   fs.writeFileSync(path.join(repoDir, "README.md"), "sibling commit\n", "utf8");
   runGit(["add", "README.md"], repoDir);
   runGit(["commit", "-m", "chore: sibling run landed"], repoDir);
 
   const stale = isCheckpointStale(checkpoint, { stateFile, workDir: repoDir });
-  assert.equal(stale.stale, false);
+  assert.equal(stale.stale, true, "isolated-tree checkpoint must go stale when HEAD drifts (approval contract)");
+});
+
+test("orchestration-state: shared-tree checkpoint ignores git HEAD drift", () => {
+  // With a shared execution tree (expert opt-in), all runs share one checkout and HEAD
+  // is expected to move as commits land. HEAD drift is not an approval violation here.
+  const repoDir = createTempGitRepo({ "README.md": "initial\n" });
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(repoDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ tasks: [{ id: "AP-001", state: "Backlog" }] }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  const checkpoint = buildCheckpoint({
+    stateFile,
+    workDir: repoDir,
+    approvedPlanId: "plan-shared-tree",
+    candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
+    workspace: { name: "default", type: "shared", executionTree: "shared" },
+  });
+
+  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board"]);
+
+  fs.writeFileSync(path.join(repoDir, "README.md"), "sibling commit\n", "utf8");
+  runGit(["add", "README.md"], repoDir);
+  runGit(["commit", "-m", "chore: sibling run landed"], repoDir);
+
+  const stale = isCheckpointStale(checkpoint, { stateFile, workDir: repoDir });
+  assert.equal(stale.stale, false, "shared-tree checkpoint must not stale on HEAD drift");
+});
+
+test("orchestration-state: current --shared-tree flag cannot bypass isolated-tree approval", () => {
+  // Approval-contract guard (P1 fix): isCheckpointStale must read the execution tree
+  // recorded in the checkpoint, NOT the current command's flags. An approval taken
+  // under isolated tree cannot be bypassed by re-dispatching with --shared-tree.
+  const repoDir = createTempGitRepo({ "README.md": "initial\n" });
+  const stateFile = path.join(repoDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(repoDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ tasks: [{ id: "AP-001", state: "Backlog" }] }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  const checkpoint = buildCheckpoint({
+    stateFile,
+    workDir: repoDir,
+    approvedPlanId: "plan-iso",
+    candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
+    workspace: { name: "default", type: "shared", executionTree: "isolated" },
+  });
+
+  fs.writeFileSync(path.join(repoDir, "README.md"), "drift\n", "utf8");
+  runGit(["add", "README.md"], repoDir);
+  runGit(["commit", "-m", "drift"], repoDir);
+
+  // Caller tries to bypass by passing --shared-tree NOW; must still be stale.
+  const stale = isCheckpointStale(checkpoint, {
+    stateFile,
+    workDir: repoDir,
+    workspace: { name: "default", type: "shared", executionTree: "shared" },
+  });
+  assert.equal(stale.stale, true, "current flags must not override the approval-time execution tree");
 });
 
 test("orchestration-state: isolated workspace checkpoint still detects git HEAD drift", () => {
@@ -6456,7 +6520,9 @@ test("auto-pilot orchestrate: governance events record approval, dispatch, and s
   assert.equal(approve.status, 0, approve.stderr);
   const checkpoint = JSON.parse(approve.stdout).checkpoint;
   assert.equal(checkpoint.governance.decisionPoint, "plan.approved");
-  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board"]);
+  // Default workspace is shared backlog + isolated execution tree, so git-head drift
+  // invalidates the checkpoint (worktrees build from repo HEAD; drift = unreviewed code).
+  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board", "git-head"]);
   assert.equal(checkpoint.governance.workspace.type, "shared");
 
   const dispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--dry-run", "--json", "--state-file", stateFile], {
@@ -7637,8 +7703,8 @@ test("worktree isolation: run-scoped path separates identical task ids across ru
   assert.notEqual(runAlphaPath, runBetaPath);
 });
 
-test("auto-pilot orchestrate: shared workspace isolated tree forces worktree preview even when disabled in config", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-shared-tree-"));
+test("auto-pilot orchestrate: shared workspace isolated tree forces worktree preview even when disabled in config (git repo)", () => {
+  const tmpDir = createTempGitRepo({ "README.md": "initial\n" });
   const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
   const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
   const configFile = path.join(tmpDir, ".va-auto-pilot", "config.yaml");
@@ -7859,4 +7925,25 @@ test("batch3-fix P2b: next still sees a claimed task that has advanced beyond Ba
   assert.equal(res.status, 0, res.stderr);
   const payload = JSON.parse(res.stdout);
   assert.equal(payload.task.id, "UT-020", "next must surface claimed in-progress work, not hide it");
+});
+
+test("batch4-fix P2: non-git project does not force worktree isolation (zero-config compat)", async () => {
+  // resolveDispatchWorktreeConfig must not enable worktrees in a non-git directory
+  // even when executionTree is "isolated" — forcing git worktree add there hard-fails.
+  // Non-git projects gracefully degrade to a shared working tree.
+  const { resolveDispatchWorktreeConfig } = await import("./auto-pilot-orchestrate.mjs");
+  const cfg = resolveDispatchWorktreeConfig(
+    { enabled: false, rootDir: ".va/worktrees", branchPrefix: "va-track", cleanup: "keep" },
+    { executionTree: "isolated" },
+    false // isGitRepo = false
+  );
+  assert.equal(cfg.enabled, false, "non-git project must not force worktree isolation");
+
+  // A git project with isolated tree still forces it on.
+  const cfgGit = resolveDispatchWorktreeConfig(
+    { enabled: false, rootDir: ".va/worktrees", branchPrefix: "va-track", cleanup: "keep" },
+    { executionTree: "isolated" },
+    true
+  );
+  assert.equal(cfgGit.enabled, true, "git project with isolated tree forces worktree isolation");
 });

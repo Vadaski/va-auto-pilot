@@ -287,8 +287,15 @@ function normalizeCheckpointWorkspace(workspace) {
   };
 }
 
+/**
+ * Which inputs invalidate the checkpoint. Bound to the **execution tree** recorded
+ * at approval time (not workspace.type): an isolated execution tree builds worktrees
+ * from repo HEAD, so HEAD drift after approve-plan means the worker would run against
+ * unreviewed code — git-head must invalidate. A shared execution tree shares one
+ * checkout where HEAD is expected to move, so git-head drift is not a violation.
+ */
 function checkpointInvalidatesOn(workspace) {
-  return workspace?.type === "shared"
+  return workspace?.executionTree === "shared"
     ? ["sprint-state", "human-board"]
     : ["sprint-state", "human-board", "git-head"];
 }
@@ -326,13 +333,34 @@ export function buildCheckpoint({ stateFile, workDir, approvedPlanId, candidateP
   };
 }
 
-function shouldEnforceGitHead(checkpoint, workspace) {
-  const effectiveWorkspace = normalizeCheckpointWorkspace(workspace)
-    ?? normalizeCheckpointWorkspace(checkpoint?.governance?.workspace);
-  return effectiveWorkspace?.type === "shared" ? false : true;
+/**
+ * Whether git-HEAD drift should invalidate this checkpoint.
+ *
+ * This decision is bound to the **approval-time** execution tree recorded in the
+ * checkpoint (checkpoint.governance.workspace), NOT the current command's flags.
+ * The approval contract is: "the approver reviewed code at this HEAD, for this
+ * execution-tree mode." Letting the current --shared-tree/--isolated-tree flag
+ * override that would let a caller bypass re-approval after HEAD moved — dispatching
+ * workers against code the approver never saw. So we read only the checkpoint's
+ * recorded workspace. (For legacy checkpoints with no recorded workspace we fall
+ * back to enforcing HEAD, the historically safest default.)
+ */
+function shouldEnforceGitHead(checkpoint) {
+  const approvedWorkspace = normalizeCheckpointWorkspace(checkpoint?.governance?.workspace);
+  if (!approvedWorkspace) {
+    return true; // legacy checkpoint without workspace metadata — enforce HEAD (safe default)
+  }
+  // shared execution tree: HEAD is expected to move (sibling commits), so drift is
+  // not an approval violation. isolated tree: HEAD drift means the reviewed code
+  // base changed — must re-approve.
+  return approvedWorkspace.executionTree !== "shared";
 }
 
-export function isCheckpointStale(checkpoint, { stateFile, workDir, workspace = undefined }) {
+// `workspace` is accepted from callers for API symmetry but intentionally unused:
+// HEAD enforcement reads only the approval-time execution tree recorded in the
+// checkpoint (see shouldEnforceGitHead), so the current command's flags cannot
+// override the approval contract.
+export function isCheckpointStale(checkpoint, { stateFile, workDir, workspace: _workspace = undefined }) {
   if (!checkpoint) {
     return { stale: true, reason: "no checkpoint" };
   }
@@ -342,7 +370,7 @@ export function isCheckpointStale(checkpoint, { stateFile, workDir, workspace = 
   if (checkpoint.humanBoardHash !== computeHumanBoardHash(stateFile)) {
     return { stale: true, reason: "human intent changed since approve-plan" };
   }
-  if (shouldEnforceGitHead(checkpoint, workspace)) {
+  if (shouldEnforceGitHead(checkpoint)) {
     const head = computeGitHead(workDir);
     if (checkpoint.gitHead && head && checkpoint.gitHead !== head) {
       return { stale: true, reason: "git HEAD changed since approve-plan" };

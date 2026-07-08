@@ -39,6 +39,23 @@ node scripts/auto-pilot.mjs orchestrate close   # when backlog empty / stale run
 
 Tactical overrides: `node scripts/auto-pilot.mjs intervene …` → `.va-auto-pilot/orchestration/directives.json`. Strategic goals stay in `docs/todo/human-board.md`.
 
+### Multiple concurrent runs
+
+Multiple agents can run auto-pilot in the same project at once. The first run is zero-config; once one exists, a bare `init` is rejected (`INIT_AMBIGUOUS`) and you must choose explicitly:
+
+```bash
+# join the shared backlog (协作 — split one sprint across agents)
+node scripts/auto-pilot.mjs orchestrate init --workspace default --run-id run-b
+# independent sprint line (独立 — own backlog, own worktree)
+node scripts/auto-pilot.mjs orchestrate init --workspace featY --isolated --run-id run-c
+# list active runs
+node scripts/auto-pilot.mjs orchestrate list-runs --json
+# release claims held by dead runs (lease expired, no live worker)
+node scripts/auto-pilot.mjs orchestrate recover --apply --json
+```
+
+Tasks are claimed atomically so concurrent runs never grab the same task; each run executes in its own git worktree and commits are serialized. See `docs/operations/va-auto-pilot-protocol.md` → Multi-Run Concurrency.
+
 ## Quality Gate
 
 Quality gates are **pluggable per project** — see `docs/operations/va-auto-pilot-protocol.md` Quality Gates section.

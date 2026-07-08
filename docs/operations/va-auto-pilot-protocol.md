@@ -88,7 +88,38 @@ commands belong in `nextCommands[].argv` for the session agent.
 
 ### Worktree isolation
 
-When `.va-auto-pilot/config.yaml` sets `worktreeIsolation.enabled: true`, `dispatch` maps each track to `.va/worktrees/<taskId>`. Workers execute and gate inside their own git worktree. If a track reaches Done, Auto-Pilot creates a track-local result commit. During `orchestrate commit`, the manager squash-merges the approved track commit into the main worktree, then creates the final governed commit.
+When a run uses an isolated execution tree (the default for shared workspaces), `dispatch` maps each track to `.va/worktrees/<runId>/<taskId>`. Workers execute and gate inside their own git worktree. If a track reaches Done, Auto-Pilot creates a track-local result commit. During `orchestrate commit`, the manager squash-merges the approved track commit into the main worktree under a workspace-level commit lock, then creates the final governed commit.
+
+### Multi-Run Concurrency
+
+Multiple agents can run auto-pilot in the same project simultaneously. Two isolation primitives compose to keep them from interfering:
+
+- **Run** isolates orchestration state (phase, tracks, checkpoint) under `.va-auto-pilot/orchestration/runs/<runId>/`. Each run is a self-contained execution instance.
+- **Workspace** isolates the task backlog (sprint-state + board/journal/pitfalls). Runs bind to a workspace.
+
+Two workspace modes cover the two collaboration patterns:
+
+| Mode | Backlog | Execution tree | Use when |
+|------|---------|----------------|----------|
+| **Shared (协作)** | one backlog at project root, all runs consume it | each run gets its own git worktree (isolated-tree) | splitting one sprint across N agents — parallel task consumption |
+| **Isolated (独立)** | each run has its own backlog under `.va-auto-pilot/workspaces/<name>/` | each run in its own worktree | independent sprint lines that must not touch each other's tasks |
+
+**Task claiming prevents two runs from grabbing the same task.** `orchestrate plan` claims the plan's task set atomically (file-lock CAS). `findNextTask`/`buildParallelPlan` skip tasks actively claimed by another run. Claims carry a TTL (`max(60min, 2×trackTimeout)`); an expired claim can be lazily stolen by the next run with an audit trail (`previousClaimedBy`/`reclaimedAt`). `orchestrate recover --apply` releases claims held by runs whose lease expired and that have no live track.
+
+**Starting a second run.** The first run is zero-config (`orchestrate init` works as before). Once an active run exists, a bare `init` is rejected with `INIT_AMBIGUOUS` and prints the explicit options:
+
+```bash
+# join the shared backlog (协作)
+node scripts/auto-pilot.mjs orchestrate init --workspace default
+# start an independent sprint line (独立)
+node scripts/auto-pilot.mjs orchestrate init --workspace <name> --isolated
+# bind to a specific existing run
+node scripts/auto-pilot.mjs orchestrate init --run-id <id>
+```
+
+List active runs: `node scripts/auto-pilot.mjs orchestrate list-runs --json`.
+
+**Commit safety.** On a shared workspace, commits are serialized through a workspace-level `commit.lock`; the squash-merge retries if HEAD moved while waiting. The checkpoint binds its staleness policy to the approval-time execution tree: an isolated-tree approval is invalidated by HEAD drift (worktrees build from HEAD, so drift means unreviewed code); a shared-tree approval tolerates HEAD movement (expected sibling commits).
 
 ### Manager loop (one cycle)
 

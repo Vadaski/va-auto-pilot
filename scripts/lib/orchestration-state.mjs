@@ -14,20 +14,30 @@ export const GOVERNANCE_SCHEMA_VERSION = 1;
 /** Phases where plan/dispatch/await must not run without a fresh init. */
 export const TERMINAL_RUN_PHASES = new Set(["done", "error", "halted"]);
 
-export function resolveOrchestrationDir(workDir = process.cwd()) {
-  return path.resolve(workDir, ".va-auto-pilot", "orchestration");
+export function resolveOrchestrationDir(workDir = process.cwd(), runId = "") {
+  const rootDir = path.resolve(workDir, ".va-auto-pilot", "orchestration");
+  if (!runId) {
+    return rootDir;
+  }
+  return path.join(rootDir, "runs", String(runId));
 }
 
-export function orchestrationPaths(workDir = process.cwd()) {
-  const dir = resolveOrchestrationDir(workDir);
+export function orchestrationPaths(workDir = process.cwd(), runId = "") {
+  const rootDir = resolveOrchestrationDir(workDir);
+  const dir = resolveOrchestrationDir(workDir, runId);
   return {
+    rootDir,
     dir,
+    runsDir: path.join(rootDir, "runs"),
+    active: path.join(rootDir, "active.json"),
     run: path.join(dir, "run.json"),
     tracks: path.join(dir, "tracks.json"),
     checkpoint: path.join(dir, "checkpoint.json"),
     snapshot: path.join(dir, "snapshot.json"),
     directives: path.join(dir, "directives.json"),
     candidateBacklog: path.join(dir, "candidate-backlog.json"),
+    candidatePlan: path.join(dir, "candidate-plan.json"),
+    planReview: path.join(dir, "plan-review.json"),
   };
 }
 
@@ -43,78 +53,115 @@ function readJsonFile(filePath, fallback) {
   }
 }
 
-export function readRun(workDir) {
-  const { run } = orchestrationPaths(workDir);
+export function readActiveRun(workDir = process.cwd()) {
+  const { active } = orchestrationPaths(workDir);
+  return readJsonFile(active, null);
+}
+
+export function resolveActiveRunId(workDir = process.cwd()) {
+  const runId = readActiveRun(workDir)?.runId;
+  return typeof runId === "string" ? runId : "";
+}
+
+export function readRun(workDir, runId = "") {
+  const { run } = orchestrationPaths(workDir, runId);
   return readJsonFile(run, null);
 }
 
-export function readTracks(workDir) {
-  const { tracks } = orchestrationPaths(workDir);
+export function readTracks(workDir, runId = "") {
+  const { tracks } = orchestrationPaths(workDir, runId);
   return readJsonFile(tracks, { tracks: [] });
 }
 
-export function readCheckpoint(workDir) {
-  const { checkpoint } = orchestrationPaths(workDir);
+export function readCheckpoint(workDir, runId = "") {
+  const { checkpoint } = orchestrationPaths(workDir, runId);
   return readJsonFile(checkpoint, null);
 }
 
-export function readCandidateBacklog(workDir) {
-  const { candidateBacklog } = orchestrationPaths(workDir);
+export function readCandidateBacklog(workDir, runId = "") {
+  const { candidateBacklog } = orchestrationPaths(workDir, runId);
   return readJsonFile(candidateBacklog, null);
 }
 
-export function readDirectives(workDir) {
-  const { directives } = orchestrationPaths(workDir);
+export function readDirectives(workDir, runId = "") {
+  const { directives } = orchestrationPaths(workDir, runId);
   return readJsonFile(directives, { schemaVersion: ORCHESTRATION_SCHEMA_VERSION, directives: [] });
 }
 
-function ensureOrchestrationDir(workDir) {
+function ensureOrchestrationDir(workDir, runId = "") {
+  fs.mkdirSync(resolveOrchestrationDir(workDir, runId), { recursive: true });
+}
+
+function ensureOrchestrationRootDir(workDir) {
   fs.mkdirSync(resolveOrchestrationDir(workDir), { recursive: true });
 }
 
-export async function writeRun(workDir, value) {
-  ensureOrchestrationDir(workDir);
-  const { run } = orchestrationPaths(workDir);
+export async function writeActiveRun(workDir, value) {
+  ensureOrchestrationRootDir(workDir);
+  const { active } = orchestrationPaths(workDir);
+  await withPilotFileLock(active, async () => {
+    writeJsonFileAtomicSync(active, value);
+  });
+}
+
+export function clearActiveRun(workDir, runId = "") {
+  const { active } = orchestrationPaths(workDir);
+  if (!fs.existsSync(active)) {
+    return false;
+  }
+  if (runId) {
+    const current = readActiveRun(workDir);
+    if (current?.runId && current.runId !== runId) {
+      return false;
+    }
+  }
+  fs.unlinkSync(active);
+  return true;
+}
+
+export async function writeRun(workDir, value, runId = "") {
+  ensureOrchestrationDir(workDir, runId);
+  const { run } = orchestrationPaths(workDir, runId);
   await withPilotFileLock(run, async () => {
     writeJsonFileAtomicSync(run, value);
   });
 }
 
-export async function writeTracks(workDir, value) {
-  ensureOrchestrationDir(workDir);
-  const { tracks } = orchestrationPaths(workDir);
+export async function writeTracks(workDir, value, runId = "") {
+  ensureOrchestrationDir(workDir, runId);
+  const { tracks } = orchestrationPaths(workDir, runId);
   await withPilotFileLock(tracks, async () => {
     writeJsonFileAtomicSync(tracks, value);
   });
 }
 
-export async function writeCheckpoint(workDir, value) {
-  ensureOrchestrationDir(workDir);
-  const { checkpoint } = orchestrationPaths(workDir);
+export async function writeCheckpoint(workDir, value, runId = "") {
+  ensureOrchestrationDir(workDir, runId);
+  const { checkpoint } = orchestrationPaths(workDir, runId);
   await withPilotFileLock(checkpoint, async () => {
     writeJsonFileAtomicSync(checkpoint, value);
   });
 }
 
-export async function writeDirectives(workDir, value) {
-  ensureOrchestrationDir(workDir);
-  const { directives } = orchestrationPaths(workDir);
+export async function writeDirectives(workDir, value, runId = "") {
+  ensureOrchestrationDir(workDir, runId);
+  const { directives } = orchestrationPaths(workDir, runId);
   await withPilotFileLock(directives, async () => {
     writeJsonFileAtomicSync(directives, value);
   });
 }
 
-export async function writeSnapshot(workDir, value) {
-  ensureOrchestrationDir(workDir);
-  const { snapshot } = orchestrationPaths(workDir);
+export async function writeSnapshot(workDir, value, runId = "") {
+  ensureOrchestrationDir(workDir, runId);
+  const { snapshot } = orchestrationPaths(workDir, runId);
   await withPilotFileLock(snapshot, async () => {
     writeJsonFileAtomicSync(snapshot, value);
   });
 }
 
-export async function writeCandidateBacklog(workDir, value) {
-  ensureOrchestrationDir(workDir);
-  const { candidateBacklog } = orchestrationPaths(workDir);
+export async function writeCandidateBacklog(workDir, value, runId = "") {
+  ensureOrchestrationDir(workDir, runId);
+  const { candidateBacklog } = orchestrationPaths(workDir, runId);
   await withPilotFileLock(candidateBacklog, async () => {
     writeJsonFileAtomicSync(candidateBacklog, value);
   });
@@ -226,8 +273,8 @@ export function createPlanId() {
 }
 
 /** @returns {Map<string, string>} taskId → worker id */
-export function readWorkerOverrides(workDir) {
-  const doc = readDirectives(workDir);
+export function readWorkerOverrides(workDir, runId = "") {
+  const doc = readDirectives(workDir, runId);
   const list = Array.isArray(doc.directives) ? doc.directives : [];
   const overrides = new Map();
   for (const item of list) {
@@ -398,8 +445,8 @@ export function buildRecoveryPlan(input = {}) {
   };
 }
 
-export function clearCheckpoint(workDir) {
-  const { checkpoint } = orchestrationPaths(workDir);
+export function clearCheckpoint(workDir, runId = "") {
+  const { checkpoint } = orchestrationPaths(workDir, runId);
   if (fs.existsSync(checkpoint)) {
     fs.unlinkSync(checkpoint);
   }

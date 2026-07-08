@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 
 import { DEFAULT_AGENT_TEMPLATE, parseArgv, resolveDefaults } from "./sprint-utils.mjs";
 import { resolveHumanBoardPath } from "./human-board.mjs";
-import { resolveOrchestrationDir } from "./orchestration-state.mjs";
+import { resolveActiveRunId, resolveOrchestrationDir } from "./orchestration-state.mjs";
 import { DEFAULT_TRACK_TIMEOUT_MS, DEFAULT_MAX_PARALLEL } from "./constants.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -34,6 +34,8 @@ export function buildOrchestrationOpts(argv, extra = {}) {
   const parsed = parseArgv(argv, ORCHESTRATE_BOOL_FLAGS);
   const workDir = process.cwd();
   const defaults = resolveDefaults(workDir);
+  const explicitRunId = parsed.options["run-id"] ?? "";
+  const runId = explicitRunId || (extra.resolveActiveRunId === false ? "" : resolveActiveRunId(workDir));
   return {
     ...extra,
     parsed,
@@ -44,7 +46,7 @@ export function buildOrchestrationOpts(argv, extra = {}) {
     strict: parsed.flags.has("strict"),
     waiveApprovals: parsed.flags.has("waive-approvals"),
     maxParallel: Number.parseInt(parsed.options["max-parallel"] ?? String(DEFAULT_MAX_PARALLEL), 10),
-    runId: parsed.options["run-id"] ?? "",
+    runId,
     managerSurface: parsed.options["manager-surface"] ?? "unknown",
     tasks: parsed.options.tasks ?? "",
     reason: parsed.options.reason ?? "",

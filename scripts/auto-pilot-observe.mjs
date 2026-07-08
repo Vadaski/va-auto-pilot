@@ -870,11 +870,11 @@ export function buildCockpit(snapshot) {
 }
 
 export async function refreshSnapshot(opts) {
-  const run = readRun(opts.workDir);
-  const tracks = readTracks(opts.workDir);
-  const checkpoint = readCheckpoint(opts.workDir);
-  const candidateBacklog = readCandidateBacklog(opts.workDir);
-  const directives = readDirectives(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
+  const tracks = readTracks(opts.workDir, opts.runId);
+  const checkpoint = readCheckpoint(opts.workDir, opts.runId);
+  const candidateBacklog = readCandidateBacklog(opts.workDir, opts.runId);
+  const directives = readDirectives(opts.workDir, opts.runId);
   const state = readSprintState(opts.stateFile);
   const stopCondition = detectStopCondition(state);
 
@@ -971,7 +971,7 @@ export async function refreshSnapshot(opts) {
 
   snapshot.cockpit = buildCockpit(snapshot);
 
-  await writeSnapshot(opts.workDir, snapshot);
+  await writeSnapshot(opts.workDir, snapshot, opts.runId);
   return snapshot;
 }
 

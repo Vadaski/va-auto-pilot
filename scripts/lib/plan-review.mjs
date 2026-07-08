@@ -12,12 +12,12 @@ export function computeCandidatePlanHash(candidatePlan) {
   return hashString(JSON.stringify(candidatePlan ?? {}));
 }
 
-export function planReviewPath(workDir) {
-  return path.join(orchestrationPaths(workDir).dir, "plan-review.json");
+export function planReviewPath(workDir, runId = "") {
+  return orchestrationPaths(workDir, runId).planReview;
 }
 
-export function readPlanReview(workDir) {
-  const filePath = planReviewPath(workDir);
+export function readPlanReview(workDir, runId = "") {
+  const filePath = planReviewPath(workDir, runId);
   if (!fs.existsSync(filePath)) {
     return null;
   }
@@ -28,14 +28,14 @@ export function readPlanReview(workDir) {
   }
 }
 
-export async function writePlanReview(workDir, value) {
-  const filePath = planReviewPath(workDir);
+export async function writePlanReview(workDir, value, runId = "") {
+  const filePath = planReviewPath(workDir, runId);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-export function clearPlanReview(workDir) {
-  const filePath = planReviewPath(workDir);
+export function clearPlanReview(workDir, runId = "") {
+  const filePath = planReviewPath(workDir, runId);
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
   }
@@ -96,7 +96,7 @@ export function validatePlanReviewForApprove({ review, candidatePlan, runId }) {
 
 export async function runPlanReviewCommand({ workDir, candidatePlan, runId, reviewCommand, dryRun }) {
   const planHash = computeCandidatePlanHash(candidatePlan);
-  const planFile = path.join(orchestrationPaths(workDir).dir, "candidate-plan.json");
+  const planFile = orchestrationPaths(workDir, runId).candidatePlan;
   fs.mkdirSync(path.dirname(planFile), { recursive: true });
   fs.writeFileSync(planFile, `${JSON.stringify(candidatePlan, null, 2)}\n`, "utf8");
 

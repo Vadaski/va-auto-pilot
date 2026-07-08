@@ -36,6 +36,7 @@ Usage:
   node scripts/auto-pilot.mjs orchestrate journal [--json]
   node scripts/auto-pilot.mjs orchestrate recover [--apply] [--json]
   node scripts/auto-pilot.mjs orchestrate close [--json]
+  node scripts/auto-pilot.mjs orchestrate list-runs [--json]
   node scripts/auto-pilot.mjs orchestrate run-unattended --waive-approvals [--max-cycles N]
 
   node scripts/auto-pilot.mjs observe [--json]
@@ -57,7 +58,7 @@ Usage:
   node scripts/auto-pilot.mjs intervene set-worker --task AP-001 --worker codex
 
 Shared options:
-  --state-file, --board-file, --journal-file, --dry-run, --no-commit, --no-colony, --strict, --json
+  --state-file, --board-file, --journal-file, --run-id, --dry-run, --no-commit, --no-colony, --strict, --json
 
 Interactive default loop (session agent):
   init → plan → review-plan → approve-plan → dispatch → observe → await-workers → approve-commit → commit → journal

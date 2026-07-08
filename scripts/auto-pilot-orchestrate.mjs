@@ -17,18 +17,22 @@ import {
   assertActiveRun,
   buildRecoveryPlan,
   buildCheckpoint,
+  clearActiveRun,
   clearCheckpoint,
   createPlanId,
   createRunId,
   hasHaltDirective,
   isCheckpointStale,
-  isProcessAlive,
   isTerminalRunPhase,
+  orchestrationPaths,
+  readActiveRun,
   readCheckpoint,
   readDirectives,
   readRun,
   readTracks,
   readWorkerOverrides,
+  resolveActiveRunId,
+  writeActiveRun,
   writeCheckpoint,
   writeRun,
   writeTracks,
@@ -157,7 +161,7 @@ async function commitControlFiles(files, header, opts) {
 }
 
 async function appendGovernanceEvent(opts, run, eventType, payload) {
-  const checkpoint = readCheckpoint(opts.workDir);
+  const checkpoint = readCheckpoint(opts.workDir, opts.runId);
   const logFile = checkpoint?.observability?.eventLogPath ?? observabilityPaths(opts.workDir).eventsLog;
   await appendEventLog(
     logFile,
@@ -186,7 +190,7 @@ function assertRunnablePhase(run, opts) {
 }
 
 async function validatePreDispatch(run, opts) {
-  const directives = readDirectives(opts.workDir);
+  const directives = readDirectives(opts.workDir, opts.runId);
   if (hasHaltDirective(directives)) {
     fail(opts, "HALTED", "directives.json contains halt-run", { directives }, 2);
   }
@@ -195,7 +199,7 @@ async function validatePreDispatch(run, opts) {
     fail(opts, "APPROVAL_REQUIRED", "approve-plan required before dispatch", {}, 2);
   }
 
-  const checkpoint = readCheckpoint(opts.workDir);
+  const checkpoint = readCheckpoint(opts.workDir, opts.runId);
   const stale = isCheckpointStale(checkpoint, { stateFile: opts.stateFile, workDir: opts.workDir });
   if (stale.stale) {
     await appendGovernanceEvent(opts, run, "checkpoint.stale", {
@@ -208,13 +212,10 @@ async function validatePreDispatch(run, opts) {
     fail(opts, "STALE_CONTEXT", stale.reason, { checkpoint }, 2);
   }
 
-  if (run.locks?.executorPid && isProcessAlive(run.locks.executorPid)) {
-    fail(opts, "RUN_LOCKED", `another executor pid is active: ${run.locks.executorPid}`, {}, 2);
-  }
 }
 
 async function orchestrateClose(opts) {
-  const run = readRun(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
   if (!run) {
     return emitResult(opts, { ok: true, action: "close", message: "no active run" });
   }
@@ -225,13 +226,11 @@ async function orchestrateClose(opts) {
   run.approvedPlanId = null;
   run.approvedCommitTasks = [];
   run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run);
-  await writeTracks(opts.workDir, { runId: run.runId, tracks: [] });
-  clearCheckpoint(opts.workDir);
-  const reviewPath = path.join(opts.workDir, ".va-auto-pilot", "orchestration", "plan-review.json");
-  if (fs.existsSync(reviewPath)) {
-    fs.unlinkSync(reviewPath);
-  }
+  await writeRun(opts.workDir, run, opts.runId);
+  await writeTracks(opts.workDir, { runId: run.runId, tracks: [] }, opts.runId);
+  clearCheckpoint(opts.workDir, opts.runId);
+  clearPlanReview(opts.workDir, opts.runId);
+  clearActiveRun(opts.workDir, opts.runId ? run.runId : "");
   await refreshSnapshot(opts);
   return emitResult(opts, { ok: true, action: "close", runId: run.runId });
 }
@@ -256,7 +255,7 @@ async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
     if (mutation.type === "return-to-plan-approval") {
       run.approvedPlanId = null;
       run.phase = "awaiting-plan-approval";
-      clearCheckpoint(opts.workDir);
+      clearCheckpoint(opts.workDir, opts.runId);
       runChanged = true;
       applied.push(mutation);
     }
@@ -278,7 +277,7 @@ async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
       run.locks = { ...(run.locks ?? {}), executorPid: null };
       run.approvedPlanId = null;
       run.approvedCommitTasks = [];
-      clearCheckpoint(opts.workDir);
+      clearCheckpoint(opts.workDir, opts.runId);
       runChanged = true;
       applied.push(mutation);
     }
@@ -286,10 +285,10 @@ async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
 
   if (runChanged) {
     run.updatedAt = now;
-    await writeRun(opts.workDir, run);
+    await writeRun(opts.workDir, run, opts.runId);
   }
   if (tracksChanged) {
-    await writeTracks(opts.workDir, tracksDoc);
+    await writeTracks(opts.workDir, tracksDoc, opts.runId);
   }
   if (applied.length > 0) {
     await sprintBoardExec(
@@ -301,14 +300,14 @@ async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
 }
 
 async function orchestrateRecover(opts) {
-  const run = readRun(opts.workDir);
-  const tracksDoc = readTracks(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
+  const tracksDoc = readTracks(opts.workDir, opts.runId);
   const state = readSprintState(opts.stateFile);
-  const checkpoint = readCheckpoint(opts.workDir);
+  const checkpoint = readCheckpoint(opts.workDir, opts.runId);
   const checkpointStatus = checkpoint
     ? isCheckpointStale(checkpoint, { stateFile: opts.stateFile, workDir: opts.workDir })
     : { stale: false, reason: "" };
-  const directives = readDirectives(opts.workDir);
+  const directives = readDirectives(opts.workDir, opts.runId);
   const plan = buildRecoveryPlan({
     run,
     tracksDoc,
@@ -331,17 +330,10 @@ async function orchestrateRecover(opts) {
 }
 
 async function initRun(opts) {
-  const existing = readRun(opts.workDir);
-  if (
-    existing?.phase
-    && !["done", "error", "halted"].includes(existing.phase)
-    && existing.locks?.executorPid
-    && isProcessAlive(existing.locks.executorPid)
-  ) {
-    fail(opts, "RUN_LOCKED", `active run ${existing.runId} still holds lock`, { runId: existing.runId }, 2);
-  }
-
-  const runId = opts.runId || createRunId();
+  const scopedRunId = opts.parsed?.options?.["run-id"] ? (opts.runId || createRunId()) : "";
+  const runId = scopedRunId || createRunId();
+  opts.runId = scopedRunId;
+  const now = new Date().toISOString();
   const run = {
     schemaVersion: 1,
     runId,
@@ -354,18 +346,27 @@ async function initRun(opts) {
     candidateBacklog: null,
     approvedCommitTasks: [],
     locks: { executorPid: null },
-    startedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    startedAt: now,
+    updatedAt: now,
   };
-  await writeRun(opts.workDir, run);
-  await writeTracks(opts.workDir, { runId, tracks: [] });
-  clearCheckpoint(opts.workDir);
-  clearPlanReview(opts.workDir);
+  await writeRun(opts.workDir, run, scopedRunId);
+  await writeTracks(opts.workDir, { runId, tracks: [] }, scopedRunId);
+  clearCheckpoint(opts.workDir, scopedRunId);
+  clearPlanReview(opts.workDir, scopedRunId);
+  if (scopedRunId) {
+    await writeActiveRun(opts.workDir, {
+      runId,
+      startedAt: run.startedAt,
+      heartbeatAt: now,
+    });
+  } else {
+    clearActiveRun(opts.workDir);
+  }
   return run;
 }
 
 async function orchestratePlan(opts) {
-  const run = readRun(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
 
   const goalBacklogResult = await planFromGoal(opts, {
@@ -398,8 +399,8 @@ async function orchestratePlan(opts) {
   run.approvedCommitTasks = [];
   run.phase = "awaiting-plan-approval";
   run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run);
-  clearPlanReview(opts.workDir);
+  await writeRun(opts.workDir, run, opts.runId);
+  clearPlanReview(opts.workDir, opts.runId);
 
   const payload = {
     ok: true,
@@ -420,7 +421,7 @@ async function orchestratePlan(opts) {
 }
 
 async function orchestrateReviewPlan(opts) {
-  const run = readRun(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
 
   if (!run.candidatePlan?.primaryTaskId) {
@@ -438,14 +439,14 @@ async function orchestrateReviewPlan(opts) {
   });
 
   if (!review.passed) {
-    await writePlanReview(opts.workDir, review);
+    await writePlanReview(opts.workDir, review, opts.runId);
     fail(opts, "PLAN_REVIEW_CRITICAL", "plan review found CRITICAL findings", { review }, 1);
   }
 
-  await writePlanReview(opts.workDir, review);
+  await writePlanReview(opts.workDir, review, opts.runId);
   run.phase = "plan-reviewed";
   run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run);
+  await writeRun(opts.workDir, run, opts.runId);
 
   await sprintBoardExec(
     [
@@ -493,7 +494,7 @@ async function orchestrateReviewPlan(opts) {
       ...(run.approvalPolicyDecisions ?? {}),
       plan: approvalPolicy,
     };
-    await writeRun(opts.workDir, run);
+    await writeRun(opts.workDir, run, opts.runId);
   }
 
   const payload = {
@@ -518,7 +519,7 @@ async function approveCandidatePlan(run, opts, { approvalMode = "human", policyD
     ...(run.approvalPolicyDecisions ?? {}),
     ...(policyDecision ? { plan: policyDecision } : {}),
   };
-  await writeRun(opts.workDir, run);
+  await writeRun(opts.workDir, run, opts.runId);
 
   const checkpoint = buildCheckpoint({
     stateFile: opts.stateFile,
@@ -530,7 +531,7 @@ async function approveCandidatePlan(run, opts, { approvalMode = "human", policyD
   if (policyDecision) {
     checkpoint.governance.approvalPolicy = policyDecision;
   }
-  await writeCheckpoint(opts.workDir, checkpoint);
+  await writeCheckpoint(opts.workDir, checkpoint, opts.runId);
   await appendGovernanceEvent(opts, run, "plan.approved", {
     planId,
     checkpointId: checkpoint.governance.checkpointId,
@@ -546,7 +547,7 @@ async function approveCandidatePlan(run, opts, { approvalMode = "human", policyD
 }
 
 async function orchestrateApprovePlan(opts) {
-  const run = readRun(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
 
   if (!run.candidatePlan?.primaryTaskId) {
@@ -556,7 +557,7 @@ async function orchestrateApprovePlan(opts) {
   const waiveReason = opts.parsed?.options?.["waive-review-with-reason"] ?? "";
   if (!waiveReason && !opts.parsed?.flags?.has("waive-review")) {
     const validation = validatePlanReviewForApprove({
-      review: readPlanReview(opts.workDir),
+      review: readPlanReview(opts.workDir, opts.runId),
       candidatePlan: run.candidatePlan,
       runId: run.runId,
     });
@@ -578,12 +579,12 @@ async function orchestrateApprovePlan(opts) {
 }
 
 async function orchestrateDispatch(opts) {
-  const run = readRun(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
   await validatePreDispatch(run, opts);
 
   const taskIds = planTaskIds(run.candidatePlan);
-  const workerOverrides = readWorkerOverrides(opts.workDir);
+  const workerOverrides = readWorkerOverrides(opts.workDir, opts.runId);
   const worktreeConfig = readWorktreeIsolationConfig(path.join(opts.workDir, ".va-auto-pilot", "config.yaml"));
   const tracks = [];
   for (const taskId of taskIds) {
@@ -606,10 +607,10 @@ async function orchestrateDispatch(opts) {
 
   run.phase = "dispatch-queued";
   run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run);
-  await writeTracks(opts.workDir, { runId: run.runId, tracks });
+  await writeRun(opts.workDir, run, opts.runId);
+  await writeTracks(opts.workDir, { runId: run.runId, tracks }, opts.runId);
   await appendGovernanceEvent(opts, run, "dispatch.queued", {
-    checkpointId: readCheckpoint(opts.workDir)?.governance?.checkpointId ?? run.approvedPlanId,
+    checkpointId: readCheckpoint(opts.workDir, opts.runId)?.governance?.checkpointId ?? run.approvedPlanId,
     queuedTasks: taskIds,
     worktreeIsolation: {
       enabled: worktreeConfig.enabled === true,
@@ -645,10 +646,10 @@ async function createBridge(opts) {
 }
 
 async function orchestrateAwaitWorkers(opts) {
-  const run = readRun(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
 
-  const tracksDoc = readTracks(opts.workDir);
+  const tracksDoc = readTracks(opts.workDir, opts.runId);
   const queued = (tracksDoc.tracks ?? []).filter((track) => track.state === "queued");
   if (queued.length === 0) {
     fail(opts, "NO_QUEUED_TRACKS", "no queued tracks; run orchestrate dispatch first", {}, 2);
@@ -661,10 +662,10 @@ async function orchestrateAwaitWorkers(opts) {
       track.lastHeartbeat = previewAt;
       track.resultAction = "dry-run-skipped";
     }
-    await writeTracks(opts.workDir, tracksDoc);
+    await writeTracks(opts.workDir, tracksDoc, opts.runId);
     run.phase = "dry-run-preview";
     run.updatedAt = previewAt;
-    await writeRun(opts.workDir, run);
+    await writeRun(opts.workDir, run, opts.runId);
     const payload = {
       ok: true,
       phase: run.phase,
@@ -684,12 +685,12 @@ async function orchestrateAwaitWorkers(opts) {
     ...opts,
     runId: run.runId,
     deferCommit: true,
-    workerOverrides: buildWorkerOverrideCommands(opts.workDir, readWorkerOverrides),
+    workerOverrides: buildWorkerOverrideCommands(opts.workDir, (workDir) => readWorkerOverrides(workDir, run.runId)),
   };
 
   run.phase = "running";
   run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run);
+  await writeRun(opts.workDir, run, opts.runId);
 
   const now = new Date().toISOString();
   for (const track of queued) {
@@ -700,7 +701,7 @@ async function orchestrateAwaitWorkers(opts) {
     track.startedAt = now;
     track.lastHeartbeat = now;
   }
-  await writeTracks(opts.workDir, tracksDoc);
+  await writeTracks(opts.workDir, tracksDoc, opts.runId);
 
   const runTrack = async (track) => {
     if (track.state === "halted") {
@@ -759,7 +760,7 @@ async function orchestrateAwaitWorkers(opts) {
     }
   }
 
-  await writeTracks(opts.workDir, tracksDoc);
+  await writeTracks(opts.workDir, tracksDoc, opts.runId);
 
   if (!opts.dryRun && sharedBridge?.shutdown) {
     await sharedBridge.shutdown();
@@ -814,7 +815,7 @@ async function orchestrateAwaitWorkers(opts) {
     }
   }
   run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run);
+  await writeRun(opts.workDir, run, opts.runId);
 
   const payload = {
     ok: true,
@@ -830,7 +831,7 @@ async function orchestrateAwaitWorkers(opts) {
 }
 
 async function orchestrateApproveCommit(opts) {
-  const run = readRun(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
 
   const tasks = String(opts.tasks || "")
@@ -844,7 +845,7 @@ async function orchestrateApproveCommit(opts) {
   run.approvedCommitTasks = tasks;
   run.phase = "commit-approved";
   run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run);
+  await writeRun(opts.workDir, run, opts.runId);
 
   const payload = { ok: true, phase: run.phase, runId: run.runId, approvedCommitTasks: tasks };
   await refreshSnapshot(opts);
@@ -852,7 +853,7 @@ async function orchestrateApproveCommit(opts) {
 }
 
 async function orchestrateCommit(opts) {
-  const run = readRun(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
 
   if (!opts.waiveApprovals && run.phase !== "commit-approved") {
@@ -865,7 +866,7 @@ async function orchestrateCommit(opts) {
 
   const approved = new Set(run.approvedCommitTasks ?? []);
   const state = readSprintState(opts.stateFile);
-  const tracksDoc = readTracks(opts.workDir);
+  const tracksDoc = readTracks(opts.workDir, opts.runId);
   const tracksByTaskId = new Map((tracksDoc.tracks ?? []).map((track) => [track.taskId, track]));
   const tasksToCommit = [];
   const commits = [];
@@ -905,7 +906,7 @@ async function orchestrateCommit(opts) {
       run.phase = "awaiting-commit-approval";
       run.approvedCommitTasks = [];
       run.updatedAt = new Date().toISOString();
-      await writeRun(opts.workDir, run);
+      await writeRun(opts.workDir, run, opts.runId);
       await refreshSnapshot(opts);
       return emitResult(opts, { ok: false, phase: run.phase, runId: run.runId, commits }, 1);
     }
@@ -916,14 +917,14 @@ async function orchestrateCommit(opts) {
     run.phase = "awaiting-commit-approval";
     run.approvedCommitTasks = [];
     run.updatedAt = new Date().toISOString();
-    await writeRun(opts.workDir, run);
+    await writeRun(opts.workDir, run, opts.runId);
     await refreshSnapshot(opts);
     return emitResult(opts, { ok: false, phase: run.phase, runId: run.runId, commits }, 1);
   }
 
   run.phase = "committed";
   run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run);
+  await writeRun(opts.workDir, run, opts.runId);
   await refreshSnapshot(opts);
 
   const payload = { ok: true, phase: run.phase, runId: run.runId, commits };
@@ -931,7 +932,7 @@ async function orchestrateCommit(opts) {
 }
 
 async function orchestrateJournal(opts) {
-  const run = readRun(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
 
   const state = readSprintState(opts.stateFile);
@@ -946,7 +947,7 @@ async function orchestrateJournal(opts) {
   run.cycle = Number(run.cycle ?? 0) + 1;
   run.phase = "cycle-closed";
   run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run);
+  await writeRun(opts.workDir, run, opts.runId);
   await appendGovernanceEvent(opts, run, "journal", {
     summary,
     cycle: run.cycle,
@@ -954,12 +955,12 @@ async function orchestrateJournal(opts) {
   });
   const snapshot = await refreshSnapshot(opts);
 
-  const paths = path.join(opts.workDir, ".va-auto-pilot", "orchestration");
+  const paths = orchestrationPaths(opts.workDir, opts.runId);
   const eventsLog = snapshot.checkpoint?.observability?.eventLogPath ?? observabilityPaths(opts.workDir).eventsLog;
   const journalCommit = await commitControlFiles(
     [
-      path.join(paths, "run.json"),
-      path.join(paths, "snapshot.json"),
+      paths.run,
+      paths.snapshot,
       opts.journalFile,
       eventsLog,
     ],
@@ -972,7 +973,7 @@ async function orchestrateJournal(opts) {
 }
 
 async function approveCurrentPlanForUnattended(opts) {
-  const run = readRun(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
   if (!run?.candidatePlan?.primaryTaskId) {
     fail(opts, "NO_CANDIDATE_PLAN", "run orchestrate plan first", {}, 2);
   }
@@ -1025,16 +1026,16 @@ async function orchestrateRunUnattended(opts) {
     }
   }
 
-  const finalRun = readRun(opts.workDir);
+  const finalRun = readRun(opts.workDir, opts.runId);
   finalRun.phase = "done";
   finalRun.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, finalRun);
+  await writeRun(opts.workDir, finalRun, opts.runId);
   await refreshSnapshot(opts);
-  const paths = path.join(opts.workDir, ".va-auto-pilot", "orchestration");
+  const paths = orchestrationPaths(opts.workDir, opts.runId);
   const finalCommit = await commitControlFiles(
     [
-      path.join(paths, "run.json"),
-      path.join(paths, "snapshot.json"),
+      paths.run,
+      paths.snapshot,
     ],
     `chore(orchestration): finish run ${finalRun.runId}`,
     opts
@@ -1042,12 +1043,42 @@ async function orchestrateRunUnattended(opts) {
   return emitResult(opts, { ok: true, phase: "done", runId: finalRun.runId, finalCommit });
 }
 
+async function orchestrateListRuns(opts) {
+  const paths = orchestrationPaths(opts.workDir);
+  const active = readActiveRun(opts.workDir);
+  if (!fs.existsSync(paths.runsDir)) {
+    return emitResult(opts, { ok: true, action: "list-runs", runs: [] });
+  }
+
+  const runs = fs.readdirSync(paths.runsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const run = readRun(opts.workDir, entry.name);
+      if (!run?.runId) {
+        return null;
+      }
+      return {
+        runId: run.runId,
+        phase: run.phase ?? null,
+        startedAt: run.startedAt ?? null,
+        updatedAt: run.updatedAt ?? null,
+        active: active?.runId === run.runId,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => String(right.startedAt ?? "").localeCompare(String(left.startedAt ?? "")));
+
+  return emitResult(opts, { ok: true, action: "list-runs", runs });
+}
+
 export async function runOrchestrateCommand(subcommand, argv) {
-  const opts = buildOrchestrationOpts(argv);
-  if (opts.runId) {
-    const run = readRun(opts.workDir);
-    if (run && !opts.parsed.options["run-id"]) {
-      opts.runId = run.runId;
+  const opts = buildOrchestrationOpts(argv, {
+    resolveActiveRunId: !["init", "run-unattended", "list-runs"].includes(subcommand),
+  });
+  if (!opts.parsed.options["run-id"] && !opts.runId && !["init", "run-unattended", "list-runs"].includes(subcommand)) {
+    const activeRunId = resolveActiveRunId(opts.workDir);
+    if (activeRunId) {
+      opts.runId = activeRunId;
     }
   }
 
@@ -1077,6 +1108,8 @@ export async function runOrchestrateCommand(subcommand, argv) {
       return orchestrateClose(opts);
     case "recover":
       return orchestrateRecover(opts);
+    case "list-runs":
+      return orchestrateListRuns(opts);
     case "run-unattended":
       return orchestrateRunUnattended(opts);
     default:

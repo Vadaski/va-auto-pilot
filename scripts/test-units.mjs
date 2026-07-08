@@ -5853,8 +5853,10 @@ import {
   hasHaltDirective,
   isCheckpointStale,
   orchestrationPaths,
+  readActiveRun,
   readCheckpoint,
   readRun,
+  resolveOrchestrationDir,
   readWorkerOverrides,
   writeDirectives,
 } from "./lib/orchestration-state.mjs";
@@ -5908,6 +5910,41 @@ test("orchestration-state: checkpoint detects live human intent drift", () => {
 test("orchestration-state: hasHaltDirective detects halt-run", () => {
   assert.equal(hasHaltDirective({ directives: [{ type: "halt-run", halt: true }] }), true);
   assert.equal(hasHaltDirective({ directives: [{ type: "replan", taskId: "AP-001" }] }), false);
+});
+
+test("orchestration-state: resolveOrchestrationDir supports base and run-scoped directories", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-paths-"));
+  assert.equal(
+    resolveOrchestrationDir(tmpDir),
+    path.join(tmpDir, ".va-auto-pilot", "orchestration")
+  );
+  assert.equal(
+    resolveOrchestrationDir(tmpDir, "run-alpha"),
+    path.join(tmpDir, ".va-auto-pilot", "orchestration", "runs", "run-alpha")
+  );
+});
+
+test("auto-pilot orchestrate: init keeps run-scoped state isolated across run ids", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-multi-init-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+
+  const first = spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-alpha", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  const second = spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-beta", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(readRun(tmpDir, "run-alpha")?.runId, "run-alpha");
+  assert.equal(readRun(tmpDir, "run-beta")?.runId, "run-beta");
+  assert.equal(readRun(tmpDir), null);
+  assert.ok(fs.existsSync(orchestrationPaths(tmpDir, "run-alpha").run));
+  assert.ok(fs.existsSync(orchestrationPaths(tmpDir, "run-beta").run));
+  assert.equal(readActiveRun(tmpDir)?.runId, "run-beta");
 });
 
 test("plan-review: parseReviewFindings extracts CRITICAL lines", async () => {
@@ -5976,6 +6013,36 @@ test("auto-pilot orchestrate: new plan clears stale plan-review", () => {
   });
   assert.equal(plan.status, 0, plan.stderr);
   assert.equal(fs.existsSync(reviewFile), false);
+});
+
+test("auto-pilot orchestrate: plan without --run-id resolves active run from active.json", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-active-run-"));
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "AP",
+    tasks: [{ id: "AP-001", title: "t", priority: "P1", state: "Backlog", dependsOn: [] }],
+  }), "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  const init = spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-active", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(init.status, 0, init.stderr);
+
+  const plan = spawnSync(process.execPath, [script, "orchestrate", "plan", "--json", "--state-file", stateFile], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(plan.status, 0, plan.stderr);
+  const payload = JSON.parse(plan.stdout);
+  assert.equal(payload.runId, "run-active");
+  assert.equal(readRun(tmpDir, "run-active")?.phase, "awaiting-plan-approval");
+  assert.equal(readRun(tmpDir), null);
 });
 
 test("auto-pilot orchestrate: approve-plan requires plan-review", () => {
@@ -6136,6 +6203,32 @@ test("auto-pilot orchestrate: close marks run done and clears tracks", () => {
   assert.equal(readCheckpoint(tmpDir), null);
 });
 
+test("auto-pilot orchestrate: close clears only run-scoped plan-review", async () => {
+  const { writePlanReview, readPlanReview } = await import("./lib/plan-review.mjs");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-close-scope-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+
+  assert.equal(spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-a", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  }).status, 0);
+  assert.equal(spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-b", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  }).status, 0);
+
+  await writePlanReview(tmpDir, { schemaVersion: 1, runId: "run-a", planHash: "a", passed: true, findings: { critical: [] } }, "run-a");
+  await writePlanReview(tmpDir, { schemaVersion: 1, runId: "run-b", planHash: "b", passed: true, findings: { critical: [] } }, "run-b");
+
+  const close = spawnSync(process.execPath, [script, "orchestrate", "close", "--run-id", "run-a", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(close.status, 0, close.stderr);
+  assert.equal(readPlanReview(tmpDir, "run-a"), null);
+  assert.equal(readPlanReview(tmpDir, "run-b")?.runId, "run-b");
+});
+
 test("auto-pilot orchestrate: PLAN_EMPTY exits 1", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-empty-"));
   const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
@@ -6181,6 +6274,89 @@ test("auto-pilot observe: writes snapshot.json", () => {
   assert.deepEqual(payload.snapshot.nextCommands, snapshot.nextCommands);
   assert.equal(payload.snapshot.cockpit.principle, "agent manages mechanics; human judges goal, risk, and evidence");
   assert.ok(payload.snapshot.cockpit.hiddenMechanics.includes("sprint-state"));
+});
+
+test("auto-pilot orchestrate: journal writes run-scoped snapshot for explicit run id", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-journal-scope-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
+  const journalFile = path.join(tmpDir, "docs", "todo", "run-journal.md");
+  const humanBoard = path.join(tmpDir, "docs", "todo", "human-board.md");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(journalFile), { recursive: true });
+  fs.mkdirSync(path.dirname(humanBoard), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({ projectPrefix: "AP", tasks: [] }), "utf8");
+  fs.writeFileSync(journalFile, "# Run Journal\n\n", "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+
+  assert.equal(spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-a", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  }).status, 0);
+  const journal = spawnSync(process.execPath, [
+    script,
+    "orchestrate",
+    "journal",
+    "--run-id",
+    "run-a",
+    "--json",
+    "--state-file",
+    stateFile,
+    "--journal-file",
+    journalFile,
+    "--no-commit",
+  ], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(journal.status, 0, journal.stderr);
+  assert.ok(fs.existsSync(orchestrationPaths(tmpDir, "run-a").snapshot));
+  assert.equal(fs.existsSync(orchestrationPaths(tmpDir).snapshot), false);
+  assert.equal(readRun(tmpDir, "run-a")?.phase, "cycle-closed");
+});
+
+test("plan-review: run-scoped paths isolate candidate plan and review files", async () => {
+  const { readPlanReview, runPlanReviewCommand } = await import("./lib/plan-review.mjs");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-plan-review-scope-"));
+  const review = await runPlanReviewCommand({
+    workDir: tmpDir,
+    candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
+    runId: "run-a",
+    reviewCommand: "",
+    dryRun: true,
+  });
+
+  assert.equal(review.runId, "run-a");
+  assert.ok(fs.existsSync(orchestrationPaths(tmpDir, "run-a").candidatePlan));
+  assert.equal(fs.existsSync(orchestrationPaths(tmpDir).candidatePlan), false);
+  await import("./lib/plan-review.mjs").then(({ writePlanReview }) =>
+    writePlanReview(tmpDir, review, "run-a")
+  );
+  assert.equal(readPlanReview(tmpDir, "run-a")?.runId, "run-a");
+  assert.equal(readPlanReview(tmpDir, "run-b"), null);
+});
+
+test("auto-pilot orchestrate: list-runs reads run-scoped run directories", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-list-runs-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+
+  assert.equal(spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-a", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  }).status, 0);
+  assert.equal(spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-b", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  }).status, 0);
+
+  const list = spawnSync(process.execPath, [script, "orchestrate", "list-runs", "--json"], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(list.status, 0, list.stderr);
+  const payload = JSON.parse(list.stdout);
+  assert.deepEqual(payload.runs.map((item) => item.runId).sort(), ["run-a", "run-b"]);
+  assert.equal(payload.runs.find((item) => item.runId === "run-b")?.active, true);
 });
 
 test("auto-pilot CLI: runs when invoked through a symlinked script path", (t) => {
@@ -6896,7 +7072,7 @@ test("progress-iteration: real CLI progress-iterate + goal + plan-from-goal writ
     const files = fs.readdirSync(realOrchDir).sort();
     let candidateStr = "";
     if (fs.existsSync(realCandPath)) {
-      try { candidateStr = fs.readFileSync(realCandPath, "utf8"); } catch {}
+      try { candidateStr = fs.readFileSync(realCandPath, "utf8"); } catch { candidateStr = ""; }
     }
     return { files, candidateStr };
   }

@@ -16,26 +16,26 @@ import {
 import { refreshSnapshot } from "./auto-pilot-observe.mjs";
 
 async function appendDirective(opts, directive) {
-  const doc = readDirectives(opts.workDir);
+  const doc = readDirectives(opts.workDir, opts.runId);
   const list = Array.isArray(doc.directives) ? doc.directives : [];
   list.push({
     ...directive,
     at: new Date().toISOString(),
     reason: opts.reason || directive.reason || "",
   });
-  await writeDirectives(opts.workDir, { schemaVersion: 1, runId: readRun(opts.workDir)?.runId, directives: list });
+  await writeDirectives(opts.workDir, { schemaVersion: 1, runId: readRun(opts.workDir, opts.runId)?.runId, directives: list }, opts.runId);
 }
 
 export async function runIntervene(subcommand, argv) {
   const opts = buildOrchestrationOpts(argv);
-  const run = readRun(opts.workDir);
+  const run = readRun(opts.workDir, opts.runId);
   assertActiveRun(run, opts.runId || undefined);
 
   switch (subcommand) {
     case "halt-run": {
       await appendDirective(opts, { type: "halt-run", halt: true });
       run.phase = "halted";
-      await writeRun(opts.workDir, run);
+      await writeRun(opts.workDir, run, opts.runId);
       await refreshSnapshot(opts);
       return emitResult(opts, { ok: true, action: "halt-run" });
     }
@@ -45,7 +45,7 @@ export async function runIntervene(subcommand, argv) {
       }
       const taskId = opts.parsed.options.task;
       await appendDirective(opts, { type: "halt-track", taskId });
-      const tracks = readTracks(opts.workDir);
+      const tracks = readTracks(opts.workDir, opts.runId);
       let cancelled = false;
       for (const track of tracks.tracks ?? []) {
         if (track.taskId !== taskId) {
@@ -61,7 +61,7 @@ export async function runIntervene(subcommand, argv) {
           }
         }
       }
-      await writeTracks(opts.workDir, tracks);
+      await writeTracks(opts.workDir, tracks, opts.runId);
       await refreshSnapshot(opts);
       return emitResult(opts, { ok: true, action: "halt-track", taskId, cancelled });
     }
@@ -79,7 +79,7 @@ export async function runIntervene(subcommand, argv) {
       run.approvedPlanId = null;
       run.candidatePlan = null;
       run.phase = "awaiting-plan-approval";
-      await writeRun(opts.workDir, run);
+      await writeRun(opts.workDir, run, opts.runId);
       await refreshSnapshot(opts);
       return emitResult(opts, { ok: true, action: "replan", taskId });
     }
@@ -88,7 +88,7 @@ export async function runIntervene(subcommand, argv) {
       run.approvedPlanId = null;
       run.candidatePlan = null;
       run.phase = "awaiting-plan-approval";
-      await writeRun(opts.workDir, run);
+      await writeRun(opts.workDir, run, opts.runId);
       await refreshSnapshot(opts);
       return emitResult(opts, { ok: true, action: "supersede-plan" });
     }

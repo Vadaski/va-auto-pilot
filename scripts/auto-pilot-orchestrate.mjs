@@ -230,7 +230,7 @@ async function orchestrateClose(opts) {
   await writeTracks(opts.workDir, { runId: run.runId, tracks: [] }, opts.runId);
   clearCheckpoint(opts.workDir, opts.runId);
   clearPlanReview(opts.workDir, opts.runId);
-  clearActiveRun(opts.workDir, opts.runId ? run.runId : "");
+  await clearActiveRun(opts.workDir, opts.runId ? run.runId : "");
   await refreshSnapshot(opts);
   return emitResult(opts, { ok: true, action: "close", runId: run.runId });
 }
@@ -360,7 +360,7 @@ async function initRun(opts) {
       heartbeatAt: now,
     });
   } else {
-    clearActiveRun(opts.workDir);
+    await clearActiveRun(opts.workDir);
   }
   return run;
 }

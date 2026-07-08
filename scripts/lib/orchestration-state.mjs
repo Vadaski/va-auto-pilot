@@ -53,9 +53,50 @@ function readJsonFile(filePath, fallback) {
   }
 }
 
-export function readActiveRun(workDir = process.cwd()) {
+/**
+ * active.json is a run *index table* (list), not a single-run pointer.
+ * Shape: { schemaVersion: 1, runs: [{ runId, startedAt, heartbeatAt }] }
+ * Newest entry wins for "default active run" resolution. Closing a run
+ * removes only its entry — other live runs stay reachable (bug: close used
+ * to delete the whole file, orphaning sibling runs).
+ * Legacy single-object shape ({ runId, ... }) is tolerated on read for
+ * backward compatibility with state written before this change.
+ */
+const ACTIVE_SCHEMA_VERSION = 1;
+
+function readActiveIndex(workDir) {
   const { active } = orchestrationPaths(workDir);
-  return readJsonFile(active, null);
+  const raw = readJsonFile(active, null);
+  if (!raw) {
+    return { schemaVersion: ACTIVE_SCHEMA_VERSION, runs: [] };
+  }
+  // Tolerate legacy single-object shape.
+  if (Array.isArray(raw?.runs)) {
+    return { schemaVersion: ACTIVE_SCHEMA_VERSION, ...raw, runs: raw.runs };
+  }
+  if (raw?.runId) {
+    return {
+      schemaVersion: ACTIVE_SCHEMA_VERSION,
+      runs: [{ runId: raw.runId, startedAt: raw.startedAt ?? "", heartbeatAt: raw.heartbeatAt ?? raw.startedAt ?? "" }],
+    };
+  }
+  return { schemaVersion: ACTIVE_SCHEMA_VERSION, runs: [] };
+}
+
+export function readActiveRun(workDir = process.cwd()) {
+  const index = readActiveIndex(workDir);
+  if (index.runs.length === 0) {
+    return null;
+  }
+  // Newest heartbeat wins.
+  const latest = index.runs.reduce((best, entry) =>
+    String(entry?.heartbeatAt ?? "") > String(best?.heartbeatAt ?? "") ? entry : best
+  );
+  return latest ?? null;
+}
+
+export function readActiveRuns(workDir = process.cwd()) {
+  return readActiveIndex(workDir).runs.filter((entry) => entry && typeof entry.runId === "string");
 }
 
 export function resolveActiveRunId(workDir = process.cwd()) {
@@ -99,24 +140,47 @@ function ensureOrchestrationRootDir(workDir) {
 export async function writeActiveRun(workDir, value) {
   ensureOrchestrationRootDir(workDir);
   const { active } = orchestrationPaths(workDir);
+  const entry = {
+    runId: String(value?.runId ?? ""),
+    startedAt: value?.startedAt ?? "",
+    heartbeatAt: value?.heartbeatAt ?? value?.startedAt ?? "",
+  };
+  if (!entry.runId) {
+    return false;
+  }
   await withPilotFileLock(active, async () => {
-    writeJsonFileAtomicSync(active, value);
+    const index = readActiveIndex(workDir);
+    const others = index.runs.filter((item) => item?.runId !== entry.runId);
+    index.runs = [...others, entry];
+    writeJsonFileAtomicSync(active, index);
   });
+  return true;
 }
 
-export function clearActiveRun(workDir, runId = "") {
+export async function clearActiveRun(workDir, runId = "") {
   const { active } = orchestrationPaths(workDir);
   if (!fs.existsSync(active)) {
     return false;
   }
-  if (runId) {
-    const current = readActiveRun(workDir);
-    if (current?.runId && current.runId !== runId) {
-      return false;
+  // Serialize read-check-write under the same lock writeActiveRun uses,
+  // so concurrent close(run-a) + init(run-b) cannot orphan run-b's entry.
+  let removed = false;
+  await withPilotFileLock(active, async () => {
+    const index = readActiveIndex(workDir);
+    const before = index.runs.length;
+    index.runs = runId
+      ? index.runs.filter((item) => item?.runId !== runId)
+      : [];
+    removed = index.runs.length < before;
+    if (index.runs.length === 0) {
+      if (fs.existsSync(active)) {
+        fs.unlinkSync(active);
+      }
+    } else {
+      writeJsonFileAtomicSync(active, index);
     }
-  }
-  fs.unlinkSync(active);
-  return true;
+  });
+  return removed;
 }
 
 export async function writeRun(workDir, value, runId = "") {

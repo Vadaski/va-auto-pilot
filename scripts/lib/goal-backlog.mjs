@@ -171,7 +171,7 @@ export async function planFromGoal(opts, options = {}) {
   }
 
   const candidateBacklog = built.candidateBacklog;
-  await writeCandidateBacklog(opts.workDir, candidateBacklog);
+  await writeCandidateBacklog(opts.workDir, candidateBacklog, opts.runId);
 
   const shouldApply = options.apply === true;
   if (!shouldApply || opts.dryRun) {
@@ -234,7 +234,7 @@ export async function planFromGoal(opts, options = {}) {
   candidateBacklog.appliedAt = new Date().toISOString();
   candidateBacklog.appliedTasks = appliedTasks;
   candidateBacklog.handledIntent = handledIntent;
-  await writeCandidateBacklog(opts.workDir, candidateBacklog);
+  await writeCandidateBacklog(opts.workDir, candidateBacklog, opts.runId);
 
   await sprintBoardExec([
     "journal",

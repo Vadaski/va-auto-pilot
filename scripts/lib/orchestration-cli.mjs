@@ -159,17 +159,18 @@ export function fail(opts, code, message, context = {}, exitCode = 2) {
  * Pure helper to resolve the write roots for CLI operations given the
  * effective cwd and explicit flags. Used to make isolation testable
  * without spawning.
- * @param {{cwd?: string, stateFile?: string, journalFile?: string}} [input]
+ * @param {{cwd?: string, stateFile?: string, journalFile?: string, runId?: string}} [input]
  */
 export function resolveCliWriteRoots(input = {}) {
   const cwd = input.cwd || process.cwd();
   const stateOpt = input.stateFile;
   const journalOpt = input.journalFile;
+  const runId = typeof input.runId === "string" ? input.runId : "";
   const d = resolveDefaults(cwd);
   const stateFile = path.resolve(stateOpt ?? path.resolve(cwd, d.stateFile));
   const journalFile = path.resolve(journalOpt ?? path.resolve(cwd, d.journalFile));
   const boardFile = resolveHumanBoardPath(stateFile);
-  const orchDir = resolveOrchestrationDir(cwd);
+  const orchDir = resolveOrchestrationDir(cwd, runId);
   return {
     cwd,
     stateFile,

@@ -5854,10 +5854,15 @@ import {
   isCheckpointStale,
   orchestrationPaths,
   readActiveRun,
+  readActiveRuns,
   readCheckpoint,
   readRun,
   resolveOrchestrationDir,
   readWorkerOverrides,
+  writeActiveRun,
+  clearActiveRun,
+  writeCandidateBacklog,
+  readCandidateBacklog,
   writeDirectives,
 } from "./lib/orchestration-state.mjs";
 
@@ -6357,6 +6362,51 @@ test("auto-pilot orchestrate: list-runs reads run-scoped run directories", () =>
   const payload = JSON.parse(list.stdout);
   assert.deepEqual(payload.runs.map((item) => item.runId).sort(), ["run-a", "run-b"]);
   assert.equal(payload.runs.find((item) => item.runId === "run-b")?.active, true);
+});
+
+test("active run index: closing one run keeps the other reachable (no orphan)", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-active-multi-"));
+  await writeActiveRun(tmpDir, { runId: "run-a", startedAt: "2026-07-08T01:00:00.000Z", heartbeatAt: "2026-07-08T01:00:00.000Z" });
+  await writeActiveRun(tmpDir, { runId: "run-b", startedAt: "2026-07-08T02:00:00.000Z", heartbeatAt: "2026-07-08T02:00:00.000Z" });
+
+  // Closing run-b must remove ONLY run-b; run-a stays the default active run.
+  const removed = await clearActiveRun(tmpDir, "run-b");
+  assert.equal(removed, true);
+  assert.deepEqual(readActiveRuns(tmpDir).map((item) => item.runId), ["run-a"]);
+  assert.equal(readActiveRun(tmpDir)?.runId, "run-a");
+});
+
+test("active run index: clearActiveRun is serialized under the active lock (no orphan on concurrent close+init)", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-active-race-"));
+  await writeActiveRun(tmpDir, { runId: "run-a", startedAt: "2026-07-08T01:00:00.000Z", heartbeatAt: "2026-07-08T01:00:00.000Z" });
+
+  // Simulate concurrent close(run-a) + init(run-b). Both touch active.json;
+  // run-b must survive — the final index must contain run-b.
+  await Promise.all([
+    clearActiveRun(tmpDir, "run-a"),
+    writeActiveRun(tmpDir, { runId: "run-b", startedAt: "2026-07-08T02:00:00.000Z", heartbeatAt: "2026-07-08T02:00:00.000Z" }),
+  ]);
+
+  const ids = readActiveRuns(tmpDir).map((item) => item.runId);
+  assert.ok(ids.includes("run-b"), "run-b must survive the concurrent close+init race");
+});
+
+test("orchestration-state: candidate-backlog write/read honors runId (path-mismatch regression)", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-cand-rwid-"));
+  const payload = { schemaVersion: 1, status: "proposed", items: [{ id: "AP-001", title: "t" }] };
+
+  // Write under run-alpha scope.
+  await writeCandidateBacklog(tmpDir, payload, "run-alpha");
+
+  const candScoped = orchestrationPaths(tmpDir, "run-alpha").candidateBacklog;
+  const candRoot = orchestrationPaths(tmpDir).candidateBacklog;
+
+  // run-scoped read returns the payload; root file must not exist — this is the bug:
+  // planFromGoal used to write to root while refreshSnapshot read run-scoped.
+  assert.ok(fs.existsSync(candScoped), `run-scoped candidate-backlog must exist at ${candScoped}`);
+  assert.ok(!fs.existsSync(candRoot), "root candidate-backlog must not be written when runId is given");
+  assert.deepEqual(readCandidateBacklog(tmpDir, "run-alpha"), payload);
+  assert.equal(readCandidateBacklog(tmpDir, "run-alpha")?.status, "proposed");
 });
 
 test("auto-pilot CLI: runs when invoked through a symlinked script path", (t) => {

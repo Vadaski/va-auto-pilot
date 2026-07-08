@@ -27,6 +27,8 @@ import {
   isTerminalRunPhase,
   orchestrationPaths,
   readActiveRun,
+  readActiveRuns,
+  isProcessAlive,
   readCheckpoint,
   readDirectives,
   readRun,
@@ -67,6 +69,7 @@ import {
   resolveTrackWorktreePath,
   squashMergeTrackCommit,
 } from "./lib/worktree-isolation.mjs";
+import { DEFAULT_TASK_CLAIM_TTL_MS } from "./lib/constants.mjs";
 import { writeWorkspace } from "./lib/workspace.mjs";
 import { planTaskIds } from "./lib/plan-helpers.mjs";
 import { withPilotFileLock } from "./lib/pilot-state.mjs";
@@ -428,19 +431,101 @@ async function orchestrateRecover(opts) {
     trackTimeoutMs: opts.trackTimeout,
   });
   const application = run ? await applyRecoveryPlan(plan, run, tracksDoc, opts) : { applied: false, mutations: [] };
+  // Lazily release claims held by dead runs (lease expired + no active track). This is
+  // the "steal expired claim" half of the lazy-takeover policy: recover is the only
+  // place that actively scans for dead runs. Only mutates under --apply.
+  const claimRelease = opts.parsed?.flags?.has("apply")
+    ? await recoverDeadRunClaims(opts)
+    : { released: [], skipped: true };
   const snapshot = await refreshSnapshot(opts);
-  const recovered = application.applied && application.mutations.length > 0;
+  const recovered = (application.applied && application.mutations.length > 0) || claimRelease.released.length > 0;
   const ok = plan.ok || recovered;
   return emitResult(opts, {
     ok,
     action: "recover",
     applied: application.applied,
     plan,
+    releasedClaims: claimRelease.released,
     snapshot,
   }, ok ? 0 : 1);
 }
 
+/**
+ * Scan all active runs and release claims held by runs whose lease has expired
+ * (heartbeat older than the claim TTL) AND that have no live track. A run with a
+ * running track whose own heartbeat is within the track timeout is NOT considered
+ * dead — the worker may still be executing even if the manager has been quiet.
+ *
+ * @returns {Promise<{ released: Array<{ runId: string, taskIds: string[] }>, skipped: boolean }>}
+ */
+async function recoverDeadRunClaims(opts) {
+  const activeRuns = readActiveRuns(opts.workDir);
+  if (activeRuns.length === 0) {
+    return { released: [], skipped: true };
+  }
+  const now = Date.now();
+  const ttlMs = DEFAULT_TASK_CLAIM_TTL_MS;
+  const released = [];
+
+  for (const entry of activeRuns) {
+    const heartbeatMs = entry.heartbeatAt ? Date.parse(entry.heartbeatAt) : NaN;
+    if (Number.isFinite(heartbeatMs) && (now - heartbeatMs) < ttlMs) {
+      continue; // lease still live
+    }
+    // Lease expired — but confirm no live track before releasing. A track whose pid is
+    // alive, or whose heartbeat is within track timeout, means work is still running.
+    const tracksDoc = readTracks(opts.workDir, entry.runId);
+    const tracks = tracksDoc?.tracks ?? [];
+    const hasLiveTrack = tracks.some((track) => {
+      if (track.state !== "running") return false;
+      if (track.pid && isProcessAlive(track.pid)) return true;
+      const trackMs = track.lastHeartbeat ? Date.parse(track.lastHeartbeat) : NaN;
+      return Number.isFinite(trackMs) && (now - trackMs) < opts.trackTimeout;
+    });
+    if (hasLiveTrack) {
+      continue;
+    }
+
+    // Find tasks this dead run still claims and release them.
+    const state = readSprintState(opts.stateFile);
+    const claimedByDead = (state.tasks ?? [])
+      .filter((task) => task.claimedBy === entry.runId && task.state !== "Done" && task.state !== "Failed")
+      .map((task) => task.id);
+    if (claimedByDead.length === 0) {
+      continue;
+    }
+
+    const releaseResult = await sprintBoardExec(
+      ["release", "--run-id", entry.runId, "--json"],
+      opts
+    );
+    if (releaseResult.exitCode === 0) {
+      released.push({ runId: entry.runId, taskIds: claimedByDead });
+    }
+  }
+
+  return { released, skipped: false };
+}
+
 async function initRun(opts) {
+  // B4 default-startup guard: the first run is zero-config (bare init == today's
+  // single-run behavior). But once an active run exists, a bare init is ambiguous —
+  // does the user want to join the shared backlog or start an isolated sprint? Force
+  // an explicit choice instead of silently joining or silently forking. Explicit
+  // --run-id / --workspace / --isolated opts bypass this (the user already chose).
+  const hasExplicitRunId = Boolean(opts.parsed?.options?.["run-id"]);
+  const hasExplicitWorkspace = Boolean(opts.parsed?.options?.["workspace"])
+    || opts.parsed?.flags?.has("isolated")
+    || opts.parsed?.flags?.has("isolated-tree")
+    || opts.parsed?.flags?.has("shared-tree");
+  if (!hasExplicitRunId && !hasExplicitWorkspace) {
+    const active = readActiveRuns(opts.workDir);
+    if (active.length > 0) {
+      const lines = active.map((entry) => `  - ${entry.runId} (heartbeat ${entry.heartbeatAt || "unknown"})`).join("\n");
+      fail(opts, "INIT_AMBIGUOUS", `an active run already exists:\n${lines}\n\nChoose explicitly:\n  join shared:    orchestrate init --workspace default\n  isolated sprint: orchestrate init --workspace <name> --isolated\n  specific run:   orchestrate init --run-id <id>`, { activeRuns: active }, 2);
+    }
+  }
+
   const scopedRunId = opts.parsed?.options?.["run-id"] ? (opts.runId || createRunId()) : "";
   const runId = scopedRunId || createRunId();
   opts.runId = scopedRunId;
@@ -1268,6 +1353,22 @@ export async function runOrchestrateCommand(subcommand, argv) {
     const activeRunId = resolveActiveRunId(opts.workDir);
     if (activeRunId) {
       opts.runId = activeRunId;
+    }
+  }
+
+  // Lease heartbeat: each orchestrate command (except init/list-runs, which manage
+  // the index themselves) refreshes this run's heartbeatAt on entry. This is the
+  // lease that recover uses to detect dead runs and release their claims. One
+  // command = one process, so there is no long-lived daemon to write heartbeats —
+  // the command boundary IS the heartbeat.
+  if (opts.runId && !["init", "list-runs"].includes(subcommand)) {
+    const run = readRun(opts.workDir, opts.runId);
+    if (run?.runId) {
+      await writeActiveRun(opts.workDir, {
+        runId: run.runId,
+        startedAt: run.startedAt,
+        heartbeatAt: new Date().toISOString(),
+      });
     }
   }
 

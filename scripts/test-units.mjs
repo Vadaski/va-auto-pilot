@@ -7947,3 +7947,79 @@ test("batch4-fix P2: non-git project does not force worktree isolation (zero-con
   );
   assert.equal(cfgGit.enabled, true, "git project with isolated tree forces worktree isolation");
 });
+
+// ---------------------------------------------------------------------------
+// Batch 5: workspace lease + recover claim release + B4 default startup
+// ---------------------------------------------------------------------------
+
+test("batch5 B4: first bare init is zero-config, second bare init is rejected as ambiguous", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-b5-b4-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  // First bare init succeeds (no active run).
+  const first = spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.equal(first.status, 0, first.stderr);
+  // Default workspace run does NOT enter active.json index (only --run-id runs do),
+  // so a second bare init still succeeds. Test the real guard: a --run-id run IS indexed.
+  const indexed = spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-x", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.equal(indexed.status, 0, indexed.stderr);
+  // Now a bare init must be rejected (INIT_AMBIGUOUS) because run-x is active.
+  const bare = spawnSync(process.execPath, [script, "orchestrate", "init", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.notEqual(bare.status, 0, "bare init must fail when an active --run-id run exists");
+  // fail() writes the error payload to stderr in json mode.
+  const payload = JSON.parse(bare.stderr);
+  assert.equal(payload.error.code, "INIT_AMBIGUOUS");
+  // Explicit opts bypass the guard.
+  const explicit = spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-y", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.equal(explicit.status, 0, "explicit --run-id must bypass the ambiguity guard");
+});
+
+test("batch5 B4: explicit --workspace bypasses the ambiguity guard", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-b5-b4-ws-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  spawnSync(process.execPath, [script, "orchestrate", "init", "--run-id", "run-a", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  // --workspace default (explicit choice to join shared) must bypass the guard.
+  const join = spawnSync(process.execPath, [script, "orchestrate", "init", "--workspace", "default", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.equal(join.status, 0, join.stderr);
+});
+
+test("batch5 recover: --apply releases claims of a dead run (lease expired, no live track)", async () => {
+  const { writeActiveRun } = await import("./lib/orchestration-state.mjs");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-b5-recover-"));
+  const stateFile = path.join(tmp, ".va-auto-pilot", "sprint-state.json");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+
+  // A run whose heartbeat is far in the past (lease long expired).
+  const deadHeartbeat = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(); // 3h ago
+  await writeActiveRun(tmp, { runId: "run-dead", startedAt: deadHeartbeat, heartbeatAt: deadHeartbeat });
+
+  // sprint-state has a task claimed by the dead run.
+  fs.writeFileSync(stateFile, JSON.stringify({
+    projectPrefix: "UT",
+    tasks: [{ id: "UT-030", title: "t", priority: "P1", state: "Backlog", dependsOn: [], claimedBy: "run-dead", claimExpiresAt: deadHeartbeat }],
+  }), "utf8");
+
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  const recover = spawnSync(process.execPath, [script, "orchestrate", "recover", "--apply", "--json", "--state-file", stateFile], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.equal(recover.status, 0, recover.stderr);
+  const payload = JSON.parse(recover.stdout);
+  assert.ok(payload.releasedClaims.some((r) => r.runId === "run-dead" && r.taskIds.includes("UT-030")),
+    "recover --apply must release the dead run claim");
+
+  // Task should now be unclaimed (back to claimable Backlog).
+  const after = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(after.tasks[0].claimedBy, "", "claimedBy must be cleared after recover release");
+});

@@ -3,6 +3,34 @@
 Stack-specific examples live here so the main protocol can stay focused on gate semantics and decision rules.
 Replace `review-agent` with the reviewer command configured for your environment.
 
+## Review gate for generic CLI agents
+
+The review gate is **fail-closed** by default: missing CLI, timeout, crash, or unstructured output blocks the cycle.
+
+| Situation | Recommended config |
+|-----------|-------------------|
+| You have a dedicated review CLI agent | Set `qualityGate.reviewCommand` to that CLI (preferred) |
+| Review CLI may be absent on some machines | Set `reviewFallbackCommand` to a deterministic fallback (see below) |
+| Local dogfood only, accept weaker evidence | Opt in with `allowAdvisoryReview: true` (conscious governance downgrade; marks evidence risk) |
+
+```yaml
+# .va-auto-pilot/config.yaml
+qualityGate:
+  buildCommand: npm run check:all
+  reviewCommand: review-agent review --uncommitted
+  # Used only when the primary review runner hard-fails (missing binary / crash / timeout).
+  # Ships with the package as a generic-agent safety net — not multi-perspective review.
+  reviewFallbackCommand: node scripts/review-fallback.mjs
+  acceptanceTestCommand: npm run validate:distribution
+```
+
+Fallback contract:
+
+1. Prefer configuring a real `reviewCommand` for your agent.
+2. `review-fallback.mjs` runs local deterministic checks (`typecheck` / `check:units`) and emits `REVIEW STATUS: PASS|FAIL` plus WARNINGs.
+3. Fallback evidence is weaker than adversarial review — treat as operational continuity, not proof of design quality.
+4. Do **not** leave weak adaptive placeholder gates (`reason: ...`, `echo TODO`) in config; run `node scripts/auto-pilot.mjs gates maintain --apply` to prune resolved junk so cockpit evidence trust stays clean.
+
 ## Example: Godot Project
 
 ```yaml

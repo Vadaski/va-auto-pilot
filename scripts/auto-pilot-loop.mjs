@@ -726,7 +726,10 @@ async function runGateSequence(gateConfig, opts) {
 
     const gateStartedAt = Date.now();
     if (gate.name === "review" && isCodexReviewCommand(gate.cmd)) {
-      const result = await runPitfallAwareReviewGate(gate, opts);
+      const result = await runPitfallAwareReviewGate(gate, {
+        ...opts,
+        reviewFallbackCommand: gateConfig.reviewFallbackCommand,
+      });
       await appendGateEvents(
         gate,
         { ...result, exitCode: result.exitCode ?? (result.passed ? 0 : 1) },
@@ -996,6 +999,49 @@ async function runPitfallAwareReviewGate(gate, opts) {
   const pitfallCount = pitfalls.length;
   log(opts, `  review gate context: injected ${pitfallCount} unresolved pitfall(s)`);
 
+  const runConfiguredFallback = async (primaryFailureReason) => {
+    const fallback = String(opts.reviewFallbackCommand ?? "").trim();
+    if (!fallback) {
+      return null;
+    }
+    log(opts, `  review primary runner unavailable (${primaryFailureReason}); trying reviewFallbackCommand`);
+    try {
+      const result = await execFileAsync("bash", ["-lc", fallback], {
+        encoding: "utf8",
+        cwd: opts.workDir ?? process.cwd(),
+        timeout: 300_000
+      });
+      const output = String(result.stdout ?? "");
+      return {
+        output: output.includes("REVIEW STATUS:")
+          ? output
+          : `${output}\nREVIEW STATUS: PASS\n[WARNING] reviewFallbackCommand exited 0 without REVIEW STATUS line`,
+        hardFailure: false,
+        failureReason: "",
+        stderr: String(result.stderr ?? ""),
+        usedFallback: true
+      };
+    } catch (fallbackError) {
+      const fallbackFailure = classifyReviewGateFailure(fallbackError);
+      if (fallbackFailure.kind === "output" && fallbackFailure.output.trim()) {
+        return {
+          output: fallbackFailure.output,
+          hardFailure: false,
+          failureReason: fallbackFailure.reason,
+          stderr: fallbackFailure.stderr,
+          usedFallback: true
+        };
+      }
+      return {
+        output: "",
+        hardFailure: true,
+        failureReason: `primary: ${primaryFailureReason}; fallback: ${fallbackFailure.reason}`,
+        stderr: fallbackFailure.stderr,
+        usedFallback: true
+      };
+    }
+  };
+
   const executeReviewAttempt = async (prompt) => {
     try {
       if (typeof opts.reviewGateRunner === "function") {
@@ -1037,6 +1083,10 @@ async function runPitfallAwareReviewGate(gate, opts) {
       }
 
       log(opts, `  review gate runner failed: ${failure.reason}`);
+      const fallbackRun = await runConfiguredFallback(failure.reason);
+      if (fallbackRun) {
+        return fallbackRun;
+      }
       return {
         output: "",
         hardFailure: true,

@@ -521,7 +521,7 @@ Review findings policy:
 - style-only nits: optional, non-blocking
 
 This gate is **technology-agnostic** — codex can review any language.
-If the configured review runner times out, crashes, returns no output, or remains unstructured after retry, the review gate fails by default. Advisory review is opt-in only (`qualityGate.allowAdvisoryReview: true`, `qualityGate.reviewRequired: false`, or `qualityGate.review.required: false`) and must be treated as a conscious governance downgrade.
+If the configured review runner times out, crashes, returns no output, or remains unstructured after retry, the review gate fails by default. Optional `qualityGate.reviewFallbackCommand` runs only on hard primary failure (missing binary / crash / timeout) so generic agents can keep the loop moving with deterministic local checks — it is continuity, not multi-perspective proof. Advisory review is opt-in only (`qualityGate.allowAdvisoryReview: true`, `qualityGate.reviewRequired: false`, or `qualityGate.review.required: false`) and must be treated as a conscious governance downgrade. See `docs/operations/quality-gate-examples.md` → Review gate for generic CLI agents.
 
 #### Gate: Acceptance (optional)
 

@@ -4790,14 +4790,31 @@ test("gate trust: explains disabled smoke gate without downgrading trust", () =>
   ]);
 });
 
-test("gate maintenance: downgrades only resolved weak adaptive gates", () => {
+test("gate maintenance: removes resolved weak adaptive gates instead of leaving advisory noise", () => {
   const config = {
     qualityGate: {
+      buildCommand: "npm run check:all",
+      reviewCommand: "codex review --uncommitted",
+      acceptanceTestCommand: "npm run validate:distribution",
       smokeTest: { enabled: true, criticalPaths: ["test-flows/smoke.yaml"] },
       adaptiveGates: [
         { name: "resolved", command: "echo \"TODO: implement\"", required: true, triggeredBy: "PF-001" },
         { name: "unresolved", command: "echo \"TODO: implement\"", required: true, triggeredBy: "PF-002" },
-        { name: "real", command: "npm run check:units", required: true, triggeredBy: "PF-003" },
+        { name: "real-unique", command: "npm run check:cli-flows", required: true, triggeredBy: "PF-003" },
+        { name: "dup-units", command: "npm run check:units", required: true, triggeredBy: "PF-004" },
+        {
+          name: "already-advisory-weak",
+          command: "reason: falling back to agentTemplate spawn",
+          required: false,
+          status: "advisory",
+          triggeredBy: "PF-005",
+        },
+        {
+          name: "advisory-dup-review",
+          command: "codex review --uncommitted",
+          required: false,
+          triggeredBy: "PF-006",
+        },
       ],
     },
   };
@@ -4805,16 +4822,34 @@ test("gate maintenance: downgrades only resolved weak adaptive gates", () => {
     ["PF-001", true],
     ["PF-002", false],
     ["PF-003", true],
+    ["PF-004", true],
+    ["PF-005", true],
+    ["PF-006", true],
   ]));
 
   assert.equal(plan.changed, true);
-  assert.equal(plan.actions.length, 1);
-  assert.equal(plan.actions[0].name, "resolved");
-  assert.equal(plan.updatedConfig.qualityGate.adaptiveGates[0].required, false);
-  assert.equal(plan.updatedConfig.qualityGate.adaptiveGates[0].status, "advisory");
-  assert.equal(plan.updatedConfig.qualityGate.adaptiveGates[1].required, true);
-  assert.equal(plan.updatedConfig.qualityGate.adaptiveGates[2].required, true);
+  const actionTypes = plan.actions.map((action) => action.type);
+  assert.ok(actionTypes.includes("remove-resolved-weak-adaptive-gate"));
+  assert.ok(actionTypes.includes("remove-duplicate-adaptive-gate"));
+  const remaining = plan.updatedConfig.qualityGate.adaptiveGates;
+  assert.equal(remaining.length, 2);
+  assert.equal(remaining[0].name, "unresolved");
+  assert.equal(remaining[1].name, "real-unique");
   assert.equal(plan.updatedConfig.qualityGate.smokeTest.enabled, true);
+});
+
+test("gate maintenance: removes advisory weak placeholders even without triggeredBy", () => {
+  const config = {
+    qualityGate: {
+      adaptiveGates: [
+        { name: "orphan-advisory", command: "reason: 10 changed files", required: false, status: "advisory" },
+      ],
+    },
+  };
+  const plan = planGateMaintenance(config, new Map());
+  assert.equal(plan.changed, true);
+  assert.equal(plan.actions[0].type, "remove-resolved-weak-adaptive-gate");
+  assert.deepEqual(plan.updatedConfig.qualityGate.adaptiveGates, []);
 });
 
 test("gate maintenance: disables smoke gate when no critical paths exist", () => {
@@ -7205,7 +7240,7 @@ test("auto-pilot cockpit: sprint-derived objective follows execution priority", 
   assert.match(payload.cockpit.humanJudgment.goal.objective, /AP-002 - fix failing gate first/);
 });
 
-test("auto-pilot gates maintain: applies resolved weak gate downgrade", () => {
+test("auto-pilot gates maintain: removes resolved weak gates and disables empty smoke", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-gates-maintain-"));
   fs.mkdirSync(path.join(tmpDir, ".va-auto-pilot"), { recursive: true });
   const configFile = path.join(tmpDir, ".va-auto-pilot", "config.yaml");
@@ -7251,17 +7286,23 @@ test("auto-pilot gates maintain: applies resolved weak gate downgrade", () => {
   assert.equal(applyPayload.maintenance.applied, true);
   assert.equal(applyPayload.maintenance.actions.length, 2);
   assert.ok(applyPayload.maintenance.actions.some((action) =>
-    action.type === "downgrade-resolved-weak-adaptive-gate" && action.name === "old-placeholder"
+    action.type === "remove-resolved-weak-adaptive-gate" && action.name === "old-placeholder"
   ));
   assert.ok(applyPayload.maintenance.actions.some((action) =>
     action.type === "disable-empty-smoke-test" && action.name === "smoke"
   ));
 
   const updated = parseYaml(fs.readFileSync(configFile, "utf8"));
-  assert.equal(updated.qualityGate.adaptiveGates[0].required, false);
-  assert.equal(updated.qualityGate.adaptiveGates[0].status, "advisory");
-  assert.equal(updated.qualityGate.adaptiveGates[1].required, true);
+  // Resolved weak gate is deleted; unresolved weak gate remains (still required until fixed).
+  assert.equal(updated.qualityGate.adaptiveGates.length, 1);
+  assert.equal(updated.qualityGate.adaptiveGates[0].name, "active-placeholder");
+  assert.equal(updated.qualityGate.adaptiveGates[0].required, true);
   assert.equal(updated.qualityGate.smokeTest.enabled, false);
+  // Evidence trust no longer lists removed gate as advisory noise.
+  assert.equal(
+    (applyPayload.gateTrust.advisorySignals ?? []).some((signal) => /old-placeholder/.test(signal)),
+    false
+  );
 });
 
 // ---------------------------------------------------------------------------

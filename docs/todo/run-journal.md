@@ -2825,3 +2825,11 @@
   - cli-critical-path
   - gate-trust
 ---
+
+## 2026-07-09T16:41:35.885Z - GATES
+- Summary: Evidence-trust hygiene: gates maintain now removes resolved weak/duplicate adaptive gates (no advisory noise). Config adaptiveGates cleared. reviewFallbackCommand + scripts/review-fallback.mjs for generic agents. gateTrust evidenceRisks empty.
+- Signals:
+  - gate-trust-clean
+  - review-fallback
+  - adaptive-gate-prune
+---

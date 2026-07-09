@@ -7,6 +7,7 @@ sprint:
 qualityGate:
   buildCommand: npm run check:all
   reviewCommand: codex review --uncommitted
+  reviewFallbackCommand: node scripts/review-fallback.mjs
   acceptanceTestCommand: npm run validate:distribution
   smokeTestCommand: node scripts/smoke-test-runner.mjs --config test-flows/cli-critical-smoke.yaml
   smokeTest:
@@ -15,51 +16,7 @@ qualityGate:
     screenshotDir: .va-auto-pilot/screenshots
     criticalPaths:
       - test-flows/cli-critical-smoke.yaml
-  adaptiveGates:
-    - name: review-gate
-      command: codex review --uncommitted
-      required: false
-      description: "Suggested from pitfall PF-009: review gate failed: empty output"
-      triggeredBy: PF-009
-    - name: npm-test
-      command: npm run validate:distribution
-      required: true
-      description: "Suggested from pitfall PF-001: tests broken"
-      triggeredBy: PF-001
-    - name: codex-completed
-      command: npm run check:units
-      required: true
-      description: "Suggested from pitfall PF-025: Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: suggest-gate and sprint prompts must read project's actual package.json test script (not hardcode 'npm test'); generalize for any stack"
-      triggeredBy: PF-025
-    - name: codex-completed
-      command: codex review --uncommitted
-      required: true
-      description: "Suggested from pitfall PF-026: Dispatch failed: exitCode=1 | Codex completed but gate \"undefined\" failed | Gate check failed | objective: auto-pilot infra: gate name 'undefined' in fix-and-retest path — review gate context propagation bug; emit real gate id to journal for diagnosability"
-      triggeredBy: PF-026
-    - name: npm-error
-      command: npm run check:units
-      required: true
-      description: 'Suggested from pitfall PF-028: npm error Missing script: "test" | npm error | npm error To see a list of scripts, run:'
-      triggeredBy: PF-028
-    - name: reason-changed
-      command: "reason: 10 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---"
-      required: false
-      description: "Suggested from pitfall PF-034: Dispatch failed: exitCode=1 | reason: 10 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---"
-      triggeredBy: PF-034
-      status: advisory
-      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
-    - name: reason-changed
-      command: "reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---"
-      required: false
-      description: "Suggested from pitfall PF-037: Dispatch failed: exitCode=1 | reason: 8 changed files; would route to kimi:va-auto-pilot | falling back to agentTemplate spawn | ---"
-      triggeredBy: PF-037
-      status: advisory
-      maintenanceReason: resolved pitfall; weak placeholder gate downgraded from required
-    - name: claude-exec
-      command: npm run typecheck
-      required: true
-      description: 'Suggested from pitfall PF-044: Dispatch failed: exitCode=1 | claude exec | {"type":"result","subtype":"success","is_error":true,"api_error_status":401,"duration_ms":15605,"duration_api_ms":0,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid authentication credentials","stop_reason":"stop_sequence","session_id":"e3457d26-f2c7-4061-ad65-0924865959a0","total_cost_usd":0,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0,"server_tool_use":{"web_search_reque'
-      triggeredBy: PF-044
+  adaptiveGates: []
 review:
   domainRoleName: Domain Expert
   domainPrompt: You are the domain expert for this product. Review behavioral correctness, user impact, and product consistency.

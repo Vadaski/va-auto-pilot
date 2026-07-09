@@ -13,6 +13,7 @@ import {
   requireOption
 } from "./lib/sprint-utils.mjs";
 import { suggestGateFromPitfall, suggestGatesFromPitfalls } from "./lib/adaptive-gates.mjs";
+import { isWeakGateCommand } from "./lib/gate-trust.mjs";
 import {
   resolveHumanBoardPath,
   readHumanBoardInstructions
@@ -1069,13 +1070,14 @@ function releaseClaimsInState(state, runId, taskId = "") {
  * @returns {void}
  */
 function writeConfigDocument(filePath, config) {
-  writeTextFileAtomicSync(filePath, stringifyYaml(config));
+  // lineWidth: 0 — keep long gate commands on one line (yaml default folds).
+  writeTextFileAtomicSync(filePath, stringifyYaml(config, { lineWidth: 0 }));
 }
 
 /**
  * @param {string} configFile
  * @param {{ name: string, command: string, required: boolean, description: string, triggeredBy: string }} suggestion
- * @returns {{ added: boolean, gate: { name: string, command: string, required: boolean, description: string, triggeredBy: string } }}
+ * @returns {{ added: boolean, gate: { name: string, command: string, required: boolean, description: string, triggeredBy: string }, skipped?: string }}
  */
 function appendSuggestedGate(configFile, suggestion) {
   const config = readConfigDocument(configFile);
@@ -1085,6 +1087,22 @@ function appendSuggestedGate(configFile, suggestion) {
   const adaptiveGates = Array.isArray(qualityGate.adaptiveGates)
     ? /** @type {Array<{ name: string, command: string, required: boolean, description: string, triggeredBy: string }>} */ ([...qualityGate.adaptiveGates])
     : [];
+  const command = String(suggestion?.command ?? "").trim();
+  // Never persist weak placeholders into adaptiveGates — they become permanent
+  // evidence-risk noise and may re-pollute a cleaned project config.
+  if (isWeakGateCommand(command)) {
+    return {
+      added: false,
+      gate: {
+        name: suggestion.name,
+        command,
+        required: false,
+        description: suggestion.description,
+        triggeredBy: suggestion.triggeredBy,
+      },
+      skipped: "weak-placeholder",
+    };
+  }
   const duplicate = adaptiveGates.find((gate) =>
     String(gate?.triggeredBy ?? "") === suggestion.triggeredBy ||
     (

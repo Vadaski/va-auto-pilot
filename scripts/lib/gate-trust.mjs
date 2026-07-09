@@ -8,8 +8,12 @@ export function normalizeCommand(value) {
 
 export function isWeakGateCommand(command) {
   const normalized = normalizeCommand(command);
+  // Note: do NOT match bare "placeholder" — that false-positives on
+  // "--allow-placeholder-gates" and similar CLI flags embedded in gate text.
   return /\bTODO\b/i.test(normalized)
-    || /\bplaceholder\b/i.test(normalized)
+    || /\bTODO:\s*implement\b/i.test(normalized)
+    || /\bplaceholder gate\b/i.test(normalized)
+    || /\bunknown project stack\b/i.test(normalized)
     || /^echo\b/i.test(normalized)
     || /^reason:/i.test(normalized)
     || /\bfalling back to agentTemplate spawn\b/i.test(normalized);
@@ -151,7 +155,9 @@ export function writeConfigDocument(filePath, config) {
   const resolved = path.resolve(filePath);
   fs.mkdirSync(path.dirname(resolved), { recursive: true });
   const tmp = `${resolved}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, stringifyYaml(config), "utf8");
+  // lineWidth: 0 prevents folding long commands across lines (which breaks
+  // human readability and can confuse partial string matches in audits).
+  fs.writeFileSync(tmp, stringifyYaml(config, { lineWidth: 0 }), "utf8");
   fs.renameSync(tmp, resolved);
 }
 
@@ -174,6 +180,40 @@ export function readPitfallResolutionMap(filePath) {
   ]).filter(([id]) => id));
 }
 
+/**
+ * Primary gate commands already run by build/review/acceptance/smoke. Adaptive
+ * gates that only re-run these after the pitfall is resolved are pure noise and
+ * inflate evidence-risk when left as required:false advisories.
+ */
+function collectPrimaryGateCommands(qualityGate = {}) {
+  const commands = [
+    qualityGate.buildCommand,
+    qualityGate.reviewCommand,
+    qualityGate.reviewFallbackCommand,
+    qualityGate.acceptanceTestCommand,
+    qualityGate.smokeTestCommand,
+    qualityGate.evalCommand,
+  ];
+  if (Array.isArray(qualityGate.evalGates)) {
+    for (const gate of qualityGate.evalGates) {
+      commands.push(gate?.command);
+    }
+  }
+  // Common nested components of check:all-style builds — treated as covered.
+  commands.push(
+    "npm run check:units",
+    "npm run typecheck",
+    "npm run validate:distribution",
+    "npm run check:all",
+    "npm run check:smoke",
+  );
+  return new Set(
+    commands
+      .map((command) => normalizeCommand(command))
+      .filter(Boolean)
+  );
+}
+
 export function planGateMaintenance(config, pitfallResolutionMap) {
   const qualityGate = config.qualityGate && typeof config.qualityGate === "object"
     ? config.qualityGate
@@ -186,6 +226,7 @@ export function planGateMaintenance(config, pitfallResolutionMap) {
     ? qualityGate.smokeTest
     : null;
   let updatedSmokeTest = smokeTest;
+  const primaryCommands = collectPrimaryGateCommands(qualityGate);
 
   if (smokeTest?.enabled === true && (smokeTest.criticalPaths?.length ?? 0) === 0) {
     actions.push({
@@ -200,35 +241,78 @@ export function planGateMaintenance(config, pitfallResolutionMap) {
     };
   }
 
-  const updatedAdaptiveGates = adaptiveGates.map((gate, index) => {
+  const updatedAdaptiveGates = [];
+  for (let index = 0; index < adaptiveGates.length; index += 1) {
+    const gate = adaptiveGates[index];
     if (!gate || typeof gate !== "object") {
-      return gate;
+      continue;
     }
 
-    const required = gate.required !== false;
+    const name = String(gate.name ?? `adaptive-${index + 1}`);
     const command = normalizeCommand(gate.command);
     const triggeredBy = String(gate.triggeredBy ?? "").trim();
     const resolved = triggeredBy ? pitfallResolutionMap.get(triggeredBy) === true : false;
+    const required = gate.required !== false;
+    const advisory = required === false || gate.status === "advisory";
+    const weak = isWeakGateCommand(command);
+    const duplicatesPrimary = command && primaryCommands.has(command);
 
-    if (!required || !isWeakGateCommand(command) || !resolved) {
-      return gate;
+    // Weak placeholder gates (including already-downgraded advisories) that come
+    // from resolved pitfalls are deleted — leaving them as advisory recreates
+    // evidence-risk noise without adding executable proof.
+    if (weak && (resolved || advisory)) {
+      actions.push({
+        type: "remove-resolved-weak-adaptive-gate",
+        index,
+        name,
+        triggeredBy: triggeredBy || undefined,
+        reason: resolved
+          ? "resolved pitfall left a weak placeholder adaptive gate"
+          : "advisory weak placeholder adaptive gate is evidence risk without proof value",
+      });
+      continue;
     }
 
-    actions.push({
-      type: "downgrade-resolved-weak-adaptive-gate",
-      index,
-      name: String(gate.name ?? `adaptive-${index + 1}`),
-      triggeredBy,
-      reason: "resolved pitfall has only a weak placeholder gate",
-    });
+    // Resolved required weak gates used to be downgraded to advisory; prefer
+    // removal so cockpit evidence trust is not permanently poisoned.
+    if (required && weak && resolved) {
+      actions.push({
+        type: "remove-resolved-weak-adaptive-gate",
+        index,
+        name,
+        triggeredBy,
+        reason: "resolved pitfall has only a weak placeholder gate",
+      });
+      continue;
+    }
 
-    return {
-      ...gate,
-      required: false,
-      status: "advisory",
-      maintenanceReason: "resolved pitfall; weak placeholder gate downgraded from required",
-    };
-  });
+    // Resolved adaptive gates that only re-run a primary gate (review/build/
+    // units/typecheck/acceptance) are historical scaffolding — drop them.
+    if (resolved && duplicatesPrimary) {
+      actions.push({
+        type: "remove-duplicate-adaptive-gate",
+        index,
+        name,
+        triggeredBy,
+        reason: "adaptive gate duplicates a primary qualityGate command after pitfall resolution",
+      });
+      continue;
+    }
+
+    // Already-advisory duplicate of a primary gate: remove (same evidence noise).
+    if (advisory && duplicatesPrimary) {
+      actions.push({
+        type: "remove-duplicate-adaptive-gate",
+        index,
+        name,
+        triggeredBy: triggeredBy || undefined,
+        reason: "advisory adaptive gate duplicates a primary qualityGate command",
+      });
+      continue;
+    }
+
+    updatedAdaptiveGates.push(gate);
+  }
 
   const updatedConfig = {
     ...config,

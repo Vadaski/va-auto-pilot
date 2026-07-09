@@ -33,6 +33,7 @@
     "scripts/generate-observability-examples.mjs",
     "scripts/lib/",
     "scripts/smoke-test-runner.mjs",
+    "scripts/review-fallback.mjs",
     "scripts/sprint-board.mjs",
     "scripts/test-runner.ts",
     "scripts/validate-mcp-resources.mjs",

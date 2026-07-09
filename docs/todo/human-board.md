@@ -8,7 +8,8 @@
 
 ## Instructions (highest priority)
 
-- [ ] [objective] review 待提交的重构变更，然后将 va-auto-pilot 与其他 va-* 库解耦，使其纯净独立、可在任意目录布局运行 _(source: unknown, 2026-07-02T07:45:08.211Z)_
+- [x] [objective] 修复多 run dogfood 暴露的缺口: (1)isolated workspace 的 human-board 隔离 [P2] (2)init isolated workspace 预建 sprint-state [P3] (3)list-runs 扩展 workspace/heartbeat年龄/claimed tasks [P3] (4)协作模式 claim 公平性策略 [P3]。详 .va-auto-pilot/workspaces/dogfood/dogfood-findings.md _(source: unknown, 2026-07-09T02:27:14.334Z)_ _(handled: dogfood-verify-closed: gaps1-4 PASS (list-runs, human-board isolation, sprint-state seed, claim budget); commits 21547f0..ddea439 + residual heartbeat timeout, 2026-07-09T14:31:57.113Z)_
+- [x] [objective] review 待提交的重构变更，然后将 va-auto-pilot 与其他 va-* 库解耦，使其纯净独立、可在任意目录布局运行 _(source: unknown, 2026-07-02T07:45:08.211Z)_ _(handled: orchestrate plan, 2026-07-09T02:03:44.391Z)_
 - [x] [risk] 风险规则：任何设计如果不能被真实命令触发、不能产生可检查证据、或 CI/本地质量门不绿，都不能算完成；遇到问题先修复根因，若一轮无法修复，必须记录 pitfall、创建明确 backlog，并保留失败证据。 _(source: user, 2026-07-01T15:25:43.224Z)_
 - [x] [acceptance] 验收：CI 必须全绿，包括本地质量门 npm run typecheck、npm run check:all、npm run check:e2e 或等价关键端到端/烟测，以及 GitHub Actions 对应必过检查；每个被验证的设计都要留下可观测证据：命令、输出摘要、事件/快照/evidence bundle、失败记录与修复提交。 _(source: user, 2026-07-01T15:25:38.904Z)_
 - [x] [constraint] 约束：验证必须走真实可执行路径，优先使用 VA Auto-Pilot 自身 CLI、orchestrated loop、quality gates、smoke/e2e、MCP/read-only resources、observability evidence bundle、GitHub Actions CI 等已设计机制；不能只靠文档阅读、静态声明或人工想象来判定设计可用。 _(source: user, 2026-07-01T15:25:35.073Z)_

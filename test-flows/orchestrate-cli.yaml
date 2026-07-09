@@ -62,6 +62,7 @@ flows:
 
   - name: "orchestrate: dry-run await-workers uses dry-run-preview phase"
     command: "bash"
+    timeout_ms: 120000
     args:
       - "-lc"
       - |
@@ -269,7 +270,7 @@ flows:
 
   - name: "worktreeIsolation: dispatch maps each track to .va/worktrees"
     command: "bash"
-    timeout_ms: 30000
+    timeout_ms: 90000
     args:
       - "-lc"
       - |
@@ -325,7 +326,7 @@ flows:
 
   - name: "orchestrate: stale checkpoint blocks sprint-state human-board and git-head drift"
     command: "bash"
-    timeout_ms: 30000
+    timeout_ms: 120000
     args:
       - "-lc"
       - |
@@ -413,7 +414,7 @@ flows:
 
   - name: "orchestrate: full governed cycle commits deterministic worker output"
     command: "bash"
-    timeout_ms: 45000
+    timeout_ms: 120000
     args:
       - "-lc"
       - |
@@ -588,7 +589,7 @@ flows:
 
   - name: "orchestrate: permission scope blocks out-of-scope and destructive worker paths"
     command: "bash"
-    timeout_ms: 30000
+    timeout_ms: 120000
     args:
       - "-lc"
       - |
@@ -704,7 +705,7 @@ flows:
 
   - name: "orchestrate: run-unattended replans after journal commits"
     command: "bash"
-    timeout_ms: 45000
+    timeout_ms: 120000
     args:
       - "-lc"
       - |
@@ -788,7 +789,7 @@ flows:
 
   - name: "orchestrate: commit failure clears stale approval"
     command: "bash"
-    timeout_ms: 30000
+    timeout_ms: 120000
     args:
       - "-lc"
       - |

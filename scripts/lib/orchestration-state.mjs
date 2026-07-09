@@ -137,7 +137,7 @@ function ensureOrchestrationRootDir(workDir) {
   fs.mkdirSync(resolveOrchestrationDir(workDir), { recursive: true });
 }
 
-export async function writeActiveRun(workDir, value) {
+export async function writeActiveRun(workDir, value, lockOptions = {}) {
   ensureOrchestrationRootDir(workDir);
   const { active } = orchestrationPaths(workDir);
   const entry = {
@@ -153,7 +153,7 @@ export async function writeActiveRun(workDir, value) {
     const others = index.runs.filter((item) => item?.runId !== entry.runId);
     index.runs = [...others, entry];
     writeJsonFileAtomicSync(active, index);
-  });
+  }, lockOptions);
   return true;
 }
 

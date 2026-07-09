@@ -2775,3 +2775,27 @@
   - `/Users/vadaski/vadaski/Code/va-auto-pilot/.va-auto-pilot/parallel-runs/AP-1.log`
 - Note: exit-0 moves task to Review; manager agent must still run multi-perspective review and acceptance gates.
 ---
+## 2026-07-09T02:27:14.337Z - human-intent
+- Summary: objective: 修复多 run dogfood 暴露的缺口: (1)isolated workspace 的 human-board 隔离 [P2] (2)init isolated workspace 预建 sprint-state [P3] (3)list-runs 扩展 workspace/heartbeat年龄/claimed tasks [P3] (4)协作模式 claim 公平性策略 [P3]。详 .va-auto-pilot/workspaces/dogfood/dogfood-findings.md
+- Source: unknown
+- Signals:
+  - human-intent:objective
+---
+
+## 2026-07-09T14:30:17.106Z - recovery
+- Summary: orchestrate recover applied 1 mutation(s)
+- Signals:
+  - orchestrate:recovery
+---
+
+## 2026-07-09T14:31:57.436Z - DOGFOOD
+- Summary: Dogfood objective closed with real CLI evidence: Gap1 list-runs fields PASS (workspace/heartbeatAgeSec/claimedTasks); Gap2 isolated human-board isolation PASS; Gap3 isolated sprint-state seed PASS (projectPrefix inherited); Gap4 max-claim fairness PASS (2+2 disjoint). Unit tests dogfood-fix #1-4 PASS 14/14. Residual: best-effort writeActiveRun heartbeat timeout 2s + orchestrate-cli flow timeouts. Stale run recover --apply closed.
+---
+
+## 2026-07-09T15:32:10.280Z - DOGFOOD
+- Summary: Closeout: commit.lock moved under gitignored orchestration/ (fixes D commit.lock.lock dirty after commit); heartbeat writeActiveRun best-effort 2s lock; CLI flow timeouts raised for multi-run worktree cost. check:all PASS.
+- Signals:
+  - dogfood-closeout
+  - commit-lock-fix
+  - cli-timeout
+---

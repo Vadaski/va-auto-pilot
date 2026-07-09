@@ -76,9 +76,9 @@ export function resolveWorkspacePaths(workDir, options = {}) {
       boardFile: isolated ? path.join(wsDir, "sprint.md") : path.resolve(workDir, fallback.boardFile),
       journalFile: isolated ? path.join(wsDir, "run-journal.md") : path.resolve(workDir, fallback.journalFile),
       pitfallsFile: isolated ? path.join(wsDir, "pitfalls.json") : path.resolve(workDir, fallback.pitfallsFile),
-      // dir is where workspace-local artifacts (commit.lock, workspace.json) live.
-      // For default shared, that is the project root — NOT workspaces/default, otherwise
-      // the commit lock and human-board would be mislocated.
+      // dir anchors workspace-local metadata (workspace.json path parent for isolated).
+      // For default shared, that is the project root — NOT workspaces/default.
+      // Commit serialization lock is NOT here: see resolveCommitLockPath (orchestration/).
       dir: isolated ? wsDir : path.resolve(workDir),
       existed: false,
     };

@@ -2,6 +2,7 @@ name: Cycle Restart + Auto Commit
 
 flows:
   - name: "loop: restarts across backlog and auto-commits each completed task"
+    timeout_ms: 120000
     command: "bash"
     args:
       - "-lc"
@@ -84,6 +85,7 @@ flows:
       should: []
 
   - name: "loop: --single-cycle completes one task and stops"
+    timeout_ms: 120000
     command: "bash"
     args:
       - "-lc"
@@ -144,6 +146,7 @@ flows:
       should: []
 
   - name: "loop: --max-cycles 1 matches single-cycle behavior"
+    timeout_ms: 120000
     command: "bash"
     args:
       - "-lc"

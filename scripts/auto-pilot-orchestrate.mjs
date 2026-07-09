@@ -123,10 +123,13 @@ export function resolveDispatchWorktreeConfig(worktreeConfig, workspace, isGitRe
 }
 
 export function resolveCommitLockPath(opts) {
-  const workspaceDir = opts.workspace?.dir
-    ? path.resolve(opts.workspace.dir)
-    : path.resolve(opts.workDir, ".va-auto-pilot", "orchestration");
-  return path.join(workspaceDir, "commit.lock");
+  // Always under the gitignored orchestration tree — never workspace.dir / project root.
+  // Shared workspace.dir is the project root (dogfood #6). withPilotFileLock(path) creates
+  // `${path}.lock`; if that lands at repo root, finalizeDoneTaskCommit's `git add` stages
+  // it, releaseLock deletes it, and the worktree is left dirty (`D commit.lock.lock`).
+  // All runs in one project serialize through one lock (commits share one git index).
+  void opts.workspace;
+  return path.resolve(opts.workDir, ".va-auto-pilot", "orchestration", "commit.lock");
 }
 
 export async function withSerializedCommit(opts, work, lockOptions = {}) {
@@ -1434,11 +1437,19 @@ export async function runOrchestrateCommand(subcommand, argv) {
   if (opts.runId && !["init", "list-runs"].includes(subcommand)) {
     const run = readRun(opts.workDir, opts.runId);
     if (run?.runId) {
-      await writeActiveRun(opts.workDir, {
-        runId: run.runId,
-        startedAt: run.startedAt,
-        heartbeatAt: new Date().toISOString(),
-      });
+      // Heartbeat is best-effort: a short lock timeout (no long backoff) so command
+      // latency stays low. If the active-index lock is contended, skip this heartbeat
+      // — the lease TTL is宽松 (>= 60min), so a missed beat is harmless. This keeps
+      // per-command overhead from compounding in long flows (run-unattended, etc.).
+      try {
+        await writeActiveRun(opts.workDir, {
+          runId: run.runId,
+          startedAt: run.startedAt,
+          heartbeatAt: new Date().toISOString(),
+        }, { timeoutMs: 2000 });
+      } catch {
+        // lock contention — skip heartbeat, lease TTL covers it
+      }
     }
   }
 

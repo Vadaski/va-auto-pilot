@@ -7802,10 +7802,18 @@ test("auto-pilot orchestrate: commit serialization waits on shared workspace com
     workspace: {
       name: "default",
       type: "shared",
-      dir: path.join(tmpDir, ".va-auto-pilot", "workspaces", "default"),
+      // Shared workspace dir is project root (dogfood #6) — lock must NOT follow dir.
+      dir: tmpDir,
       executionTree: "isolated",
     },
   };
+  const lockPath = resolveCommitLockPath(opts);
+  assert.equal(
+    lockPath,
+    path.resolve(tmpDir, ".va-auto-pilot", "orchestration", "commit.lock"),
+    "commit lock must live under gitignored orchestration/, not project root"
+  );
+  assert.notEqual(path.dirname(lockPath), path.resolve(tmpDir));
   const events = [];
   /** @type {null | ((value?: void | PromiseLike<void>) => void)} */
   let releaseFirstLock = null;
@@ -7818,6 +7826,11 @@ test("auto-pilot orchestrate: commit serialization waits on shared workspace com
   const first = withSerializedCommit(opts, async () => {
     events.push("first-enter");
     assert.ok(fs.existsSync(`${resolveCommitLockPath(opts)}.lock`));
+    assert.equal(
+      fs.existsSync(path.join(tmpDir, "commit.lock.lock")),
+      false,
+      "must not create commit.lock.lock at project root"
+    );
     if (!firstEnteredResolve) {
       throw new Error("expected first commit lock entry resolver");
     }
@@ -7846,6 +7859,30 @@ test("auto-pilot orchestrate: commit serialization waits on shared workspace com
   releaseFirstLock();
   await Promise.all([first, second]);
   assert.deepEqual(events, ["first-enter", "first-exit", "second-enter"]);
+});
+
+test("resolveCommitLockPath: never places lock under project root (dogfood commit.lock pollution)", async () => {
+  const { resolveCommitLockPath } = await import("./auto-pilot-orchestrate.mjs");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-commit-lock-root-"));
+  const shared = resolveCommitLockPath({
+    workDir: tmpDir,
+    workspace: { name: "default", type: "shared", dir: tmpDir },
+  });
+  const isolated = resolveCommitLockPath({
+    workDir: tmpDir,
+    workspace: {
+      name: "featY",
+      type: "isolated",
+      dir: path.join(tmpDir, ".va-auto-pilot", "workspaces", "featY"),
+    },
+  });
+  for (const lockPath of [shared, isolated]) {
+    assert.ok(lockPath.includes(`${path.sep}.va-auto-pilot${path.sep}orchestration${path.sep}`));
+    assert.equal(path.basename(lockPath), "commit.lock");
+    assert.notEqual(path.dirname(lockPath), path.resolve(tmpDir));
+  }
+  // One lock per project: isolated and shared serialize on the same git index.
+  assert.equal(shared, isolated);
 });
 
 test("orchestrate CLI: init with no workspace flags keeps zero-config single-run behavior (backward compat)", () => {

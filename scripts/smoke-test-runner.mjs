@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 /**
- * Puppeteer-based smoke test executor.
+ * Smoke test executor for critical-path YAML definitions.
  *
- * Loads a YAML critical-path definition, launches the application,
- * opens Puppeteer, executes steps sequentially with screenshots,
- * and outputs a JSON GateResult to stdout.
+ * Modes:
+ *   - mode: cli  — CLI-first critical paths (no browser / no Puppeteer)
+ *   - default    — Puppeteer browser critical paths (optional dependency)
+ *
+ * Loads a YAML critical-path definition, executes steps, and outputs a JSON
+ * GateResult to stdout.
  *
  * Usage:
- *   node scripts/smoke-test-runner.mjs --config templates/test-flows/feature-smoke.yaml \
+ *   node scripts/smoke-test-runner.mjs --config test-flows/cli-critical-smoke.yaml \
  *     [--screenshot-dir .va-auto-pilot/screenshots] [--timeout 30000]
  *
  * Exit code 0 = all steps passed, 1 = any failure.
@@ -15,7 +18,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { DEFAULT_SMOKE_TEST_TIMEOUT_MS } from "./lib/constants.mjs";
 
@@ -175,6 +178,128 @@ function delay(ms) {
 }
 
 // ---------------------------------------------------------------------------
+// CLI critical-path mode (trusted proof without browser/Puppeteer)
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {object} step
+ * @returns {{ command: string, args: string[] }}
+ */
+function resolveCliStepCommand(step) {
+  if (Array.isArray(step.args) && typeof step.command === "string" && step.command.trim()) {
+    return {
+      command: step.command.trim(),
+      args: step.args.map((item) => String(item)),
+    };
+  }
+  if (typeof step.run === "string" && step.run.trim()) {
+    // Split on whitespace; CLI smoke configs must not rely on shell metacharacters.
+    const parts = step.run.trim().split(/\s+/);
+    return { command: parts[0], args: parts.slice(1) };
+  }
+  if (typeof step.command === "string" && step.command.trim()) {
+    const parts = step.command.trim().split(/\s+/);
+    return { command: parts[0], args: parts.slice(1) };
+  }
+  throw new Error("CLI step requires `command`+`args` or `run`");
+}
+
+/**
+ * @param {object} config
+ * @param {{ timeout: number }} opts
+ * @param {object} gateResult
+ */
+function runCliCriticalPath(config, opts, gateResult) {
+  const steps = Array.isArray(config.steps) ? config.steps : [];
+  if (steps.length === 0) {
+    gateResult.passed = false;
+    gateResult.output = "Fatal error: CLI smoke path has no steps";
+    return gateResult;
+  }
+
+  let allPassed = true;
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i] ?? {};
+    const stepName = step.name || `Step ${i + 1}`;
+    const stepStart = Date.now();
+    const stepTimeout = Number(step.timeout) > 0 ? Number(step.timeout) : opts.timeout;
+    const expectExit = Number.isInteger(step.expectExit) ? step.expectExit : 0;
+    const stdoutContains = Array.isArray(step.stdoutContains)
+      ? step.stdoutContains.map((item) => String(item))
+      : [];
+    const stderrContains = Array.isArray(step.stderrContains)
+      ? step.stderrContains.map((item) => String(item))
+      : [];
+    const stdoutNotContains = Array.isArray(step.stdoutNotContains)
+      ? step.stdoutNotContains.map((item) => String(item))
+      : [];
+
+    let stepPassed = false;
+    let stepError = null;
+    let captured = { stdout: "", stderr: "", status: null };
+
+    try {
+      const { command, args } = resolveCliStepCommand(step);
+      const result = spawnSync(command, args, {
+        cwd: projectRoot,
+        encoding: "utf8",
+        timeout: stepTimeout,
+        env: process.env,
+      });
+      captured = {
+        stdout: String(result.stdout ?? ""),
+        stderr: String(result.stderr ?? ""),
+        status: result.status,
+      };
+
+      if (result.error) {
+        throw new Error(result.error.message || String(result.error));
+      }
+      if (result.signal) {
+        throw new Error(`process killed by signal ${result.signal}`);
+      }
+      if (captured.status !== expectExit) {
+        throw new Error(`exit code ${captured.status} (expected ${expectExit})`);
+      }
+      for (const needle of stdoutContains) {
+        if (!captured.stdout.includes(needle)) {
+          throw new Error(`stdout missing: ${needle}`);
+        }
+      }
+      for (const needle of stderrContains) {
+        if (!captured.stderr.includes(needle)) {
+          throw new Error(`stderr missing: ${needle}`);
+        }
+      }
+      for (const needle of stdoutNotContains) {
+        if (captured.stdout.includes(needle)) {
+          throw new Error(`stdout must not contain: ${needle}`);
+        }
+      }
+      stepPassed = true;
+    } catch (err) {
+      stepError = err?.message ?? String(err);
+      allPassed = false;
+    }
+
+    gateResult.stepResults.push({
+      step: stepName,
+      passed: stepPassed,
+      durationMs: Date.now() - stepStart,
+      exitCode: captured.status,
+      ...(stepError ? { error: stepError } : {}),
+    });
+  }
+
+  const passedCount = gateResult.stepResults.filter((s) => s.passed).length;
+  const totalCount = gateResult.stepResults.length;
+  gateResult.passed = allPassed;
+  gateResult.output = `${passedCount}/${totalCount} CLI steps passed`;
+  gateResult.mode = "cli";
+  return gateResult;
+}
+
+// ---------------------------------------------------------------------------
 // Hang detection
 // ---------------------------------------------------------------------------
 
@@ -309,6 +434,19 @@ async function run() {
   }
   if (config.launch && typeof config.launch.command !== "string") {
     failBeforeBrowser("config.launch.command must be a string");
+  }
+
+  const mode = String(config.mode ?? config.type ?? "browser").toLowerCase();
+  if (mode === "cli" || mode === "command" || mode === "shell") {
+    try {
+      runCliCriticalPath(config, opts, gateResult);
+    } catch (err) {
+      gateResult.passed = false;
+      gateResult.output = `Fatal error: ${err?.message ?? String(err)}`;
+    }
+    gateResult.durationMs = Date.now() - startTime;
+    console.log(JSON.stringify(gateResult, null, 2));
+    process.exit(gateResult.passed ? 0 : 1);
   }
 
   // Set up screenshot directory

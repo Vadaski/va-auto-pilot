@@ -8,13 +8,13 @@ qualityGate:
   buildCommand: npm run check:all
   reviewCommand: codex review --uncommitted
   acceptanceTestCommand: npm run validate:distribution
-  smokeTestCommand: node scripts/smoke-test-runner.mjs --config
+  smokeTestCommand: node scripts/smoke-test-runner.mjs --config test-flows/cli-critical-smoke.yaml
   smokeTest:
-    enabled: false
-    timeout: 30000
+    enabled: true
+    timeout: 60000
     screenshotDir: .va-auto-pilot/screenshots
-    criticalPaths: []
-    maintenanceReason: disabled because no smoke critical paths are configured
+    criticalPaths:
+      - test-flows/cli-critical-smoke.yaml
   adaptiveGates:
     - name: review-gate
       command: codex review --uncommitted

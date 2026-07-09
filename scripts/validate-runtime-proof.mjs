@@ -80,9 +80,23 @@ async function validateSmokeRunnerPaths() {
   try {
     const currentConfigPath = path.join(root, ".va-auto-pilot", "config.yaml");
     const currentSmoke = await runSmokeTests({ configPath: currentConfigPath });
-    assert.equal(currentSmoke.skipped, true, "current smoke config should be skipped while disabled");
-    assert.match(currentSmoke.skipReason, /enabled is not true/);
-    assert.equal(currentSmoke.passed, true);
+    assert.equal(currentSmoke.skipped, false, "current smoke config must execute CLI critical paths");
+    assert.equal(currentSmoke.passed, true, "current CLI smoke critical path must pass");
+    assert.ok(currentSmoke.gateResults.length >= 1, "current smoke must produce gate results");
+    assert.ok(
+      currentSmoke.gateResults.every((result) => result.passed === true),
+      "every current smoke gate result must pass"
+    );
+
+    const disabledConfigPath = path.join(tempRoot, "smoke-disabled-config.yaml");
+    writeYamlConfig(disabledConfigPath, {
+      enabled: false,
+      criticalPaths: ["test-flows/cli-critical-smoke.yaml"],
+    });
+    const disabledSmoke = await runSmokeTests({ configPath: disabledConfigPath });
+    assert.equal(disabledSmoke.skipped, true, "disabled smoke config should skip");
+    assert.match(disabledSmoke.skipReason, /enabled is not true/);
+    assert.equal(disabledSmoke.passed, true);
 
     const criticalPath = path.join(tempRoot, "smoke-ok.yaml");
     writeFile(criticalPath, "name: Runtime proof smoke\nsteps: []\n");
@@ -151,6 +165,34 @@ async function validateSmokeRunnerPaths() {
     assert.equal(malformedResult.passed, false);
     assert.match(String(malformedResult.output ?? ""), /Flow sequence|YAML|unexpected/i);
 
+    const cliSmokePath = path.join(tempRoot, "cli-smoke.yaml");
+    writeFile(cliSmokePath, [
+      "name: Runtime CLI smoke",
+      "mode: cli",
+      "steps:",
+      "  - name: node-version",
+      "    command: node",
+      "    args: [\"-e\", \"process.stdout.write('cli-smoke-ok')\"]",
+      "    expectExit: 0",
+      "    stdoutContains:",
+      "      - cli-smoke-ok",
+      "",
+    ].join("\n"));
+    const cliRun = spawnSync(process.execPath, [
+      path.join(root, "scripts", "smoke-test-runner.mjs"),
+      "--config",
+      cliSmokePath,
+    ], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+    assert.equal(cliRun.status, 0, `CLI smoke mode must pass: ${cliRun.stderr || cliRun.stdout}`);
+    const cliResult = parseJsonStdout(cliRun, "cli smoke mode");
+    assert.equal(cliResult.passed, true);
+    assert.equal(cliResult.mode, "cli");
+    assert.ok(Array.isArray(cliResult.stepResults) && cliResult.stepResults.length === 1);
+
     process.stdout.write("✓ smoke runner enabled disabled invalid-config paths\n");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -199,9 +241,22 @@ function validateGateTrustCurrentConfig() {
   assert.equal(gateTrust.status, "configured", "current gateTrust must be configured");
   assert.deepEqual(gateTrust.missingRequired, [], "current config must not miss required gates");
   assert.deepEqual(gateTrust.weakSignals, [], "current config must not trust weak required gates");
+  assert.equal(
+    qualityGate.smokeTest?.enabled,
+    true,
+    "current smoke gate must be enabled for trusted proof"
+  );
   assert.ok(
-    gateTrust.maintenanceNotes.some((note) => /smoke: disabled because no smoke critical paths are configured/.test(note)),
-    "gateTrust must explain why smoke is disabled"
+    (qualityGate.smokeTest?.criticalPaths?.length ?? 0) > 0,
+    "current smoke gate must declare critical paths"
+  );
+  assert.ok(
+    !gateTrust.advisorySignals.some((signal) => /^smoke:/.test(signal)),
+    "gateTrust must not classify enabled smoke as advisory-only"
+  );
+  assert.ok(
+    !gateTrust.maintenanceNotes.some((note) => /smoke: disabled/i.test(note)),
+    "gateTrust must not claim smoke is disabled when enabled"
   );
 
   const weakRequired = collectRequiredGates(qualityGate)

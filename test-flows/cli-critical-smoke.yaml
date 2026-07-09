@@ -1,0 +1,44 @@
+# CLI critical-path smoke for va-auto-pilot (CLI-first product).
+# Executed by scripts/smoke-test-runner.mjs with mode: cli — no Puppeteer.
+name: CLI Critical Paths
+mode: cli
+timeout: 30000
+steps:
+  - name: bin-help
+    command: node
+    args: [bin/va-auto-pilot.mjs, --help]
+    expectExit: 0
+    stdoutContains:
+      - "va-auto-pilot"
+      - "orchestrate"
+
+  - name: cockpit-json
+    command: node
+    args: [scripts/auto-pilot.mjs, cockpit, --json]
+    expectExit: 0
+    stdoutContains:
+      - '"ok"'
+      - "humanJudgment"
+
+  - name: sprint-summary
+    command: node
+    args: [scripts/sprint-board.mjs, summary]
+    expectExit: 0
+    stdoutContains:
+      - "Sprint Summary"
+
+  - name: list-runs
+    command: node
+    args: [scripts/auto-pilot.mjs, orchestrate, list-runs, --json]
+    expectExit: 0
+    stdoutContains:
+      - "list-runs"
+      - '"ok"'
+
+  - name: gates-audit
+    command: node
+    args: [scripts/auto-pilot.mjs, gates, audit, --json]
+    expectExit: 0
+    stdoutContains:
+      - "gateTrust"
+      - '"ok"'

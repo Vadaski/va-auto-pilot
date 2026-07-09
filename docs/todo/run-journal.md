@@ -2799,3 +2799,29 @@
   - commit-lock-fix
   - cli-timeout
 ---
+## 2026-07-09T15:51:42.377Z - human-intent
+- Summary: objective: Enable smoke as trusted proof for this CLI-first project: add CLI critical-path smoke (no Puppeteer dependency), enable qualityGate.smokeTest with real criticalPaths, clear smoke advisory evidence-risk from gateTrust, prove via gates audit + runtime-proof + check:all.
+- Source: unknown
+- Signals:
+  - human-intent:objective
+---
+## 2026-07-09T15:51:43.730Z - human-intent
+- Summary: objective: Enable smoke as trusted proof: CLI critical-path smoke, enable smokeTest with criticalPaths, gateTrust no longer reports smoke as advisory-only.
+- Source: unknown
+- Signals:
+  - human-intent:objective
+---
+## 2026-07-09T15:51:44.783Z - human-intent
+- Summary: acceptance: MUST: smokeTest.enabled=true with non-empty criticalPaths; gates audit has no smoke advisorySignal; npm run check:runtime-proof PASS; npm run check:all PASS; smoke runner executes CLI critical path and returns GateResult JSON.
+- Source: unknown
+- Signals:
+  - human-intent:acceptance
+---
+
+## 2026-07-09T15:53:53.688Z - SMOKE
+- Summary: Enabled smoke as trusted proof: smoke-test-runner mode=cli, test-flows/cli-critical-smoke.yaml (help/cockpit/summary/list-runs/gates-audit), config smokeTest.enabled=true, npm run check:smoke in check:all, gateTrust no longer advisory for smoke.
+- Signals:
+  - smoke-trusted-proof
+  - cli-critical-path
+  - gate-trust
+---

@@ -5818,6 +5818,68 @@ test("runSmokeTests: successful smoke test returns passed", async () => {
   }
 });
 
+test("smoke-test-runner CLI mode: passes stdoutContains assertions without Puppeteer", () => {
+  // Config must stay inside project root (runner path-traversal guard).
+  const configPath = path.join(process.cwd(), ".va-auto-pilot", "test-cli-smoke-unit.yaml");
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, [
+    "name: Unit CLI smoke",
+    "mode: cli",
+    "steps:",
+    "  - name: echo-ok",
+    "    command: node",
+    "    args: [\"-e\", \"process.stdout.write('unit-cli-smoke')\"]",
+    "    expectExit: 0",
+    "    stdoutContains:",
+    "      - unit-cli-smoke",
+    "  - name: fail-missing-needle",
+    "    command: node",
+    "    args: [\"-e\", \"process.stdout.write('nope')\"]",
+    "    expectExit: 0",
+    "    stdoutContains:",
+    "      - must-not-match",
+    "",
+  ].join("\n"), "utf8");
+
+  const runner = path.join(process.cwd(), "scripts", "smoke-test-runner.mjs");
+  try {
+    const result = spawnSync(process.execPath, [runner, "--config", configPath], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+    assert.notEqual(result.status, 0, "second step should fail the path");
+    const parsed = JSON.parse(String(result.stdout ?? ""));
+    assert.equal(parsed.mode, "cli");
+    assert.equal(parsed.passed, false);
+    assert.equal(parsed.stepResults.length, 2);
+    assert.equal(parsed.stepResults[0].passed, true);
+    assert.equal(parsed.stepResults[1].passed, false);
+    assert.match(String(parsed.stepResults[1].error ?? ""), /stdout missing/);
+  } finally {
+    try { fs.unlinkSync(configPath); } catch { /* ignore */ }
+  }
+});
+
+test("buildGateTrustSummary: enabled smoke with critical paths is required, not advisory", async () => {
+  const { buildGateTrustSummary } = await import("./lib/gate-trust.mjs");
+  const trust = buildGateTrustSummary({
+    buildCommand: "npm run check:all",
+    reviewCommand: "codex review --uncommitted",
+    acceptanceTestCommand: "npm run validate:distribution",
+    smokeTestCommand: "node scripts/smoke-test-runner.mjs --config test-flows/cli-critical-smoke.yaml",
+    smokeTest: {
+      enabled: true,
+      criticalPaths: ["test-flows/cli-critical-smoke.yaml"],
+    },
+    adaptiveGates: [],
+  });
+  assert.equal(trust.status, "configured");
+  assert.ok(trust.requiredCount >= 4);
+  assert.equal(trust.advisorySignals.some((signal) => /^smoke:/.test(signal)), false);
+  assert.equal(trust.weakSignals.some((signal) => /smoke/i.test(signal)), false);
+});
+
 // ---------------------------------------------------------------------------
 // sprint-board review command — pure function tests
 // ---------------------------------------------------------------------------

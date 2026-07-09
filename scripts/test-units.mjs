@@ -8023,3 +8023,41 @@ test("batch5 recover: --apply releases claims of a dead run (lease expired, no l
   const after = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   assert.equal(after.tasks[0].claimedBy, "", "claimedBy must be cleared after recover release");
 });
+
+test("dogfood-fix #1: concurrent plan --claim-run-id selects disjoint task sets (atomic plan-and-claim)", async () => {
+  // Regression for the check-then-act race: two runs concurrently running
+  // `orchestrate plan` used to select the same primary because selection (lock-free)
+  // and claim were separate steps. With plan --claim-run-id, selection + claim happen
+  // under one lock, so the second run sees the first's claims and picks different tasks.
+  const { stateFile } = writeTmpState([
+    { id: "UT-040", title: "A", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-041", title: "B", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-042", title: "C", priority: "P2", state: "Backlog", dependsOn: [] },
+    { id: "UT-043", title: "D", priority: "P2", state: "Backlog", dependsOn: [] },
+  ]);
+
+  // Two concurrent plan --claim-run-id runs, each max-parallel 1 (primary + 1 track = 2 tasks).
+  const [a, b] = await Promise.all([
+    runBoardAsync(["plan", "--claim-run-id", "run-a", "--max-parallel", "1", "--json"], stateFile),
+    runBoardAsync(["plan", "--claim-run-id", "run-b", "--max-parallel", "1", "--json"], stateFile),
+  ]);
+  assert.equal(a.code, 0, a.stderr);
+  assert.equal(b.code, 0, b.stderr);
+
+  const planA = JSON.parse(a.stdout);
+  const planB = JSON.parse(b.stdout);
+  const setA = new Set([planA.primaryTaskId, ...(planA.parallelTracks ?? [])]);
+  const setB = new Set([planB.primaryTaskId, ...(planB.parallelTracks ?? [])]);
+  const overlap = [...setA].filter((id) => setB.has(id));
+  assert.equal(overlap.length, 0, `concurrent plans overlapped on: ${overlap.join(", ")}`);
+
+  // sprint-state claims must match: each claimed task owned by exactly one run.
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const claimed = state.tasks.filter((t) => t.claimedBy);
+  assert.ok(claimed.length >= setA.size + setB.size, "both runs' selected tasks must be claimed");
+  const owners = new Map();
+  for (const t of claimed) {
+    assert.ok(!owners.has(t.id), `task ${t.id} claimed by two runs`);
+    owners.set(t.id, t.claimedBy);
+  }
+});

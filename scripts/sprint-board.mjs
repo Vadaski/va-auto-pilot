@@ -2060,6 +2060,47 @@ async function main() {
       throw new Error("Invalid --max-parallel value. Expected a non-negative integer.");
     }
 
+    const claimRunId = String(parsed.options["claim-run-id"] ?? "");
+
+    // Atomic plan-and-claim: select tasks AND stamp ownership inside the same file
+    // lock, so two concurrent runs cannot both select the same Backlog task (the
+    // check-then-act window between a lock-free plan and a separate claim call was
+    // a real race — see dogfood finding #1). buildParallelPlan already skips tasks
+    // actively claimed by another run, so within the lock the selection is stable.
+    if (claimRunId) {
+      const ttlMs = resolveClaimTtlMs(path.resolve(DEFAULT_CONFIG_FILE));
+      /** @type {ParallelPlan | null} */
+      let plan = null;
+      await withPilotFileLock(stateFile, async () => {
+        const state = readState(stateFile);
+        plan = buildParallelPlan(state.tasks, maxParallel);
+        if (plan) {
+          const planTaskIds = [plan.primaryTaskId, ...(plan.parallelTracks ?? [])]
+            .map((id) => String(id ?? ""))
+            .filter(Boolean);
+          claimTasksInState(state, claimRunId, planTaskIds.length, ttlMs, Date.now(), planTaskIds);
+          writeState(stateFile, state);
+          writeBoard(boardFile, state);
+        }
+      });
+
+      if (!plan) {
+        if (parsed.flags.has("json")) {
+          console.log("null");
+        } else {
+          console.log("No actionable task found.");
+        }
+        return;
+      }
+      if (parsed.flags.has("json")) {
+        console.log(JSON.stringify(plan, null, 2));
+        return;
+      }
+      console.log(`Primary    : ${plan.primaryTaskId} (${plan.primaryAction}) [claimed by ${claimRunId}]`);
+      console.log(plan.parallelTracks.length === 0 ? "Parallel   : none" : `Parallel   : ${plan.parallelTracks.join(", ")}`);
+      return;
+    }
+
     const state = readState(stateFile);
     const plan = buildParallelPlan(state.tasks, maxParallel);
 

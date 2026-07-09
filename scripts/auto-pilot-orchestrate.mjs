@@ -592,15 +592,14 @@ async function orchestratePlan(opts) {
     }, 2);
   }
 
-  // Plan selection keeps the original priority semantics: sprint-board plan picks
-  // the primary by state priority (Failed > Testing > Review > In Progress > Backlog),
-  // so in-progress work is never skipped in favor of a fresh backlog item. We then
-  // claim the plan's task set atomically to stamp run ownership on it — claim is an
-  // ownership marker layered on top of plan, not a replacement for it. Replanning the
-  // same run reuses its own claims (claim allows re-claim by the same runId), so this
-  // is idempotent across replans.
+  // Atomic plan-and-claim: sprint-board plan --claim-run-id selects tasks AND stamps
+  // ownership inside the same file lock. This closes the check-then-act window where
+  // two concurrent runs both read a claim-free snapshot and selected the same Backlog
+  // task (dogfood finding #1). Priority semantics are preserved (Failed/Review/In
+  // Progress still outrank Backlog); only Backlog assignment is claim-gated. Replanning
+  // the same run is idempotent — claim allows re-claim by the same runId.
   const planResult = await sprintBoardExec(
-    ["plan", "--json", "--max-parallel", String(opts.maxParallel)],
+    ["plan", "--claim-run-id", run.runId, "--json", "--max-parallel", String(opts.maxParallel)],
     opts
   );
   if (planResult.exitCode !== 0) {
@@ -611,33 +610,6 @@ async function orchestratePlan(opts) {
     fail(opts, "PLAN_EMPTY", "no parallel plan available", { stdout: planResult.stdout }, 1);
   }
   const candidatePlan = planParsed.value;
-
-  // Stamp ownership on the plan's tasks. Claim is best-effort for non-Backlog tasks
-  // (they may already be owned by this run); the Backlog members must be claimed to
-  // prevent sibling runs from dispatching them.
-  const planTaskIds = [candidatePlan.primaryTaskId, ...(candidatePlan.parallelTracks ?? [])]
-    .map((id) => String(id ?? ""))
-    .filter(Boolean);
-  if (planTaskIds.length > 0) {
-    const claimResult = await sprintBoardExec(
-      [
-        "claim",
-        "--run-id", run.runId,
-        "--task", planTaskIds.join(","),
-        "--json",
-      ],
-      opts
-    );
-    // Non-zero claim is non-fatal: it can happen if a task is already claimed by this
-    // run (replan) or is non-Backlog. The plan is still valid; we log and proceed.
-    if (claimResult.exitCode !== 0) {
-      const payload = tryParseJson(claimResult.stdout.trim());
-      if (!payload.parsed || !Array.isArray(payload.value?.claimedTasks)) {
-        // Hard error only if the payload itself is malformed (not just "nothing new to claim").
-        fail(opts, "CLAIM_FAILED", claimResult.stderr || claimResult.stdout, {}, 1);
-      }
-    }
-  }
 
   run.candidatePlan = candidatePlan;
   run.candidateBacklog = goalBacklogResult.ok ? goalBacklogResult.candidateBacklog : (run.candidateBacklog ?? null);

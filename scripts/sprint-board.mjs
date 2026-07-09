@@ -2082,8 +2082,19 @@ async function main() {
           let planTaskIds = [plan.primaryTaskId, ...(plan.parallelTracks ?? [])]
             .map((id) => String(id ?? ""))
             .filter(Boolean);
-          if (Number.isFinite(maxClaim) && maxClaim > 0) {
+          if (Number.isFinite(maxClaim) && maxClaim > 0 && planTaskIds.length > maxClaim) {
             planTaskIds = planTaskIds.slice(0, maxClaim);
+            // The returned plan must match what was actually claimed — otherwise dispatch
+            // would queue tasks this run never claimed (and a sibling may have claimed).
+            // primary is always planTaskIds[0] (the first N); trim parallelTracks to the
+            // remainder within the budget.
+            plan = {
+              ...plan,
+              parallelTracks: planTaskIds.slice(1),
+              dependencyGraph: Object.fromEntries(
+                Object.entries(plan.dependencyGraph ?? {}).filter(([id]) => planTaskIds.includes(id))
+              ),
+            };
           }
           claimTasksInState(state, claimRunId, planTaskIds.length, ttlMs, Date.now(), planTaskIds);
           writeState(stateFile, state);

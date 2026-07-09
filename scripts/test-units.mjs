@@ -8154,3 +8154,42 @@ test("dogfood-fix: default shared workspace dir resolves to project root, not wo
   const iso = resolveWorkspacePaths(tmp, { name: "featX", isolated: true });
   assert.equal(iso.dir, path.resolve(tmp, ".va-auto-pilot", "workspaces", "featX"));
 });
+
+test("review-fix P1: --max-claim trims the returned plan so dispatch only sees claimed tasks", async () => {
+  const { stateFile } = writeTmpState([
+    { id: "UT-060", title: "A", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-061", title: "B", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-062", title: "C", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-063", title: "D", priority: "P1", state: "Backlog", dependsOn: [] },
+  ]);
+  // max-parallel 3 would plan 1 primary + 3 tracks = 4; max-claim 2 must trim to 2 total.
+  const r = runBoard(["plan", "--claim-run-id", "rx", "--max-parallel", "3", "--max-claim", "2", "--json"], stateFile);
+  assert.equal(r.status, 0, r.stderr);
+  const plan = JSON.parse(r.stdout);
+  const plannedIds = [plan.primaryTaskId, ...(plan.parallelTracks ?? [])];
+  assert.equal(plannedIds.length, 2, `plan must be trimmed to budget 2, got ${plannedIds.length}`);
+  // only the planned (claimed) ids must be claimed
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const claimed = state.tasks.filter((t) => t.claimedBy === "rx").map((t) => t.id);
+  assert.deepEqual(claimed.sort(), plannedIds.sort());
+});
+
+test("review-fix P3: list-runs does not double-count claims in a workspace-scoped call", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-rv-p3-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  spawnSync(process.execPath, [script, "orchestrate", "init", "--workspace", "wsDup", "--isolated", "--run-id", "rdup", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  const stateFile = path.join(tmp, ".va-auto-pilot", "workspaces", "wsDup", "sprint-state.json");
+  fs.writeFileSync(stateFile, JSON.stringify({
+    version: 1, projectPrefix: "T",
+    tasks: [{ id: "T-9", title: "t", priority: "P1", state: "Backlog", dependsOn: [], claimedBy: "rdup" }],
+  }), "utf8");
+  // list-runs scoped to the workspace state-file — claimed T-9 must appear once, not twice.
+  const list = spawnSync(process.execPath, [script, "orchestrate", "list-runs", "--workspace", "wsDup", "--state-file", stateFile, "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.equal(list.status, 0, list.stderr);
+  const run = JSON.parse(list.stdout).runs.find((r) => r.runId === "rdup");
+  assert.deepEqual(run.claimedTasks, ["T-9"], `expected no double-count, got ${JSON.stringify(run?.claimedTasks)}`);
+});

@@ -544,12 +544,26 @@ async function initRun(opts) {
       createdAt: now,
     });
     // Pre-seed the isolated workspace sprint-state so `sprint-board add` does not
-    // FILE_NOT_FOUND on a freshly initialized workspace (dogfood #3).
+    // FILE_NOT_FOUND on a freshly initialized workspace (dogfood #3). Inherit the
+    // project task prefix from the root sprint-state/config so generated IDs stay
+    // consistent with the project's canonical format (do NOT hardcode "AP").
     if (!fs.existsSync(opts.stateFile)) {
       fs.mkdirSync(path.dirname(opts.stateFile), { recursive: true });
+      const rootStateFile = path.resolve(opts.workDir, ".va-auto-pilot", "sprint-state.json");
+      let projectPrefix = "AP";
+      try {
+        if (fs.existsSync(rootStateFile)) {
+          const rootState = JSON.parse(fs.readFileSync(rootStateFile, "utf8"));
+          if (typeof rootState.projectPrefix === "string" && rootState.projectPrefix) {
+            projectPrefix = rootState.projectPrefix;
+          }
+        }
+      } catch {
+        // fall back to default prefix if root state is unreadable
+      }
       writeJsonFileAtomicSync(opts.stateFile, {
         version: 1,
-        projectPrefix: "AP",
+        projectPrefix,
         updatedAt: now,
         tasks: [],
       });
@@ -616,9 +630,17 @@ async function orchestratePlan(opts) {
     const activeRuns = readActiveRuns(opts.workDir);
     const activeCount = Math.max(1, activeRuns.length);
     const state = readSprintState(opts.stateFile);
-    const claimableBacklog = (state.tasks ?? []).filter(
-      (task) => task.state === "Backlog" && !task.claimedBy
-    ).length;
+    const nowMs = Date.now();
+    // claimable = unclaimed Backlog OR Backlog whose claim has expired (the planner
+    // and claimer treat expired claims as available, so the budget must too — otherwise
+    // a dead run's expired claims make claimableBacklog=0 and the budget is skipped).
+    const isClaimable = (task) => {
+      if (task.state !== "Backlog") return false;
+      if (!task.claimedBy) return true;
+      const exp = task.claimExpiresAt ? Date.parse(task.claimExpiresAt) : NaN;
+      return Number.isFinite(exp) && exp < nowMs;
+    };
+    const claimableBacklog = (state.tasks ?? []).filter(isClaimable).length;
     if (claimableBacklog > 0 && activeCount > 1) {
       const budget = Math.max(1, Math.ceil(claimableBacklog / activeCount));
       planArgs.push("--max-claim", String(budget));
@@ -1323,35 +1345,43 @@ async function orchestrateListRuns(opts) {
   const activeSet = new Set(activeRuns.map((entry) => entry.runId));
   const heartbeatByRun = new Map(activeRuns.map((entry) => [entry.runId, entry.heartbeatAt]));
 
-  // Scan all run-scoped state files once to attribute claimed tasks per run.
+  // Scan sprint-state files to attribute claimed tasks per run. Track which absolute
+  // paths we have already scanned so a workspace-scoped list-runs (opts.stateFile
+  // already pointing at a workspace) does not double-count the same file.
   const claimedByRun = new Map();
-  try {
-    const rootState = readSprintState(opts.stateFile);
-    for (const task of rootState.tasks ?? []) {
-      if (task.claimedBy) {
-        if (!claimedByRun.has(task.claimedBy)) claimedByRun.set(task.claimedBy, []);
-        claimedByRun.get(task.claimedBy).push(task.id);
-      }
+  const scanned = new Set();
+  const collectClaims = (stateFile) => {
+    // Normalize via realpath so the same file is not counted twice when reached via
+    // different path strings (e.g. opts.stateFile vs a workspaces/ scan, or /var vs
+    // /private/var on macOS). dogfood review #P3.
+    let abs;
+    try {
+      abs = fs.realpathSync(path.resolve(stateFile));
+    } catch {
+      return;
     }
-  } catch {
-    // root state may be absent; claims then come only from workspaces
-  }
+    if (scanned.has(abs)) return;
+    scanned.add(abs);
+    try {
+      const state = readSprintState(abs);
+      for (const task of state.tasks ?? []) {
+        if (task.claimedBy) {
+          if (!claimedByRun.has(task.claimedBy)) claimedByRun.set(task.claimedBy, []);
+          claimedByRun.get(task.claimedBy).push(task.id);
+        }
+      }
+    } catch {
+      // unreadable state file; skip
+    }
+  };
+  collectClaims(opts.stateFile);
   // Also scan workspace sprint-states (isolated sprints own their own claims).
   const wsRoot = path.resolve(opts.workDir, ".va-auto-pilot", "workspaces");
   if (fs.existsSync(wsRoot)) {
     for (const name of fs.readdirSync(wsRoot)) {
       const wsState = path.join(wsRoot, name, "sprint-state.json");
-      if (!fs.existsSync(wsState)) continue;
-      try {
-        const parsed = JSON.parse(fs.readFileSync(wsState, "utf8"));
-        for (const task of parsed.tasks ?? []) {
-          if (task.claimedBy) {
-            if (!claimedByRun.has(task.claimedBy)) claimedByRun.set(task.claimedBy, []);
-            claimedByRun.get(task.claimedBy).push(task.id);
-          }
-        }
-      } catch {
-        // skip unreadable workspace state
+      if (fs.existsSync(wsState)) {
+        collectClaims(wsState); // dedup via scanned-set
       }
     }
   }

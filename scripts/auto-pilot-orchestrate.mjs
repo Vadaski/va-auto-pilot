@@ -608,10 +608,23 @@ async function orchestratePlan(opts) {
   // task (dogfood finding #1). Priority semantics are preserved (Failed/Review/In
   // Progress still outrank Backlog); only Backlog assignment is claim-gated. Replanning
   // the same run is idempotent — claim allows re-claim by the same runId.
-  const planResult = await sprintBoardExec(
-    ["plan", "--claim-run-id", run.runId, "--json", "--max-parallel", String(opts.maxParallel)],
-    opts
-  );
+  // Claim budget (dogfood #4): in a SHARED workspace, cap how many Backlog tasks this
+  // run claims so sibling runs are not starved. Budget = ceil(claimableBacklog / activeRuns),
+  // floored at 1. Isolated workspaces have their own backlog, so no budget needed.
+  const planArgs = ["plan", "--claim-run-id", run.runId, "--json", "--max-parallel", String(opts.maxParallel)];
+  if (run.workspace?.type === "shared") {
+    const activeRuns = readActiveRuns(opts.workDir);
+    const activeCount = Math.max(1, activeRuns.length);
+    const state = readSprintState(opts.stateFile);
+    const claimableBacklog = (state.tasks ?? []).filter(
+      (task) => task.state === "Backlog" && !task.claimedBy
+    ).length;
+    if (claimableBacklog > 0 && activeCount > 1) {
+      const budget = Math.max(1, Math.ceil(claimableBacklog / activeCount));
+      planArgs.push("--max-claim", String(budget));
+    }
+  }
+  const planResult = await sprintBoardExec(planArgs, opts);
   if (planResult.exitCode !== 0) {
     fail(opts, "PLAN_FAILED", planResult.stderr || planResult.stdout, {}, 1);
   }

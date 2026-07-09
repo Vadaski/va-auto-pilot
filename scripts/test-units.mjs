@@ -8117,3 +8117,29 @@ test("dogfood-fix #1: list-runs includes workspace/executionTree/heartbeatAgeSec
   assert.ok(typeof run.heartbeatAgeSec === "number", "heartbeatAgeSec must be numeric");
   assert.deepEqual(run.claimedTasks, ["T-1"]);
 });
+
+test("dogfood-fix #4: shared workspace claim budget splits backlog across concurrent runs (no starvation)", async () => {
+  // With 4 claimable backlog tasks and 2 active runs, each run should claim at most
+  // ceil(4/2)=2 — the first run no longer grabs all four.
+  const { stateFile } = writeTmpState([
+    { id: "UT-050", title: "A", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-051", title: "B", priority: "P1", state: "Backlog", dependsOn: [] },
+    { id: "UT-052", title: "C", priority: "P2", state: "Backlog", dependsOn: [] },
+    { id: "UT-053", title: "D", priority: "P2", state: "Backlog", dependsOn: [] },
+  ]);
+  // Pre-register 2 active runs so the budget divisor is 2 (simulated via two concurrent
+  // plan --max-claim 2 calls; the budget logic lives in orchestrate, but the primitive
+  // honors --max-claim, which is what we verify here).
+  const [a, b] = await Promise.all([
+    runBoardAsync(["plan", "--claim-run-id", "ra", "--max-parallel", "3", "--max-claim", "2", "--json"], stateFile),
+    runBoardAsync(["plan", "--claim-run-id", "rb", "--max-parallel", "3", "--max-claim", "2", "--json"], stateFile),
+  ]);
+  assert.equal(a.code, 0, a.stderr);
+  assert.equal(b.code, 0, b.stderr);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const claimedA = state.tasks.filter((t) => t.claimedBy === "ra").length;
+  const claimedB = state.tasks.filter((t) => t.claimedBy === "rb").length;
+  assert.ok(claimedA <= 2, `run a claimed ${claimedA}, budget is 2`);
+  assert.ok(claimedB <= 2, `run b claimed ${claimedB}, budget is 2`);
+  assert.equal(claimedA + claimedB, 4, "all 4 tasks should be claimed between the two runs");
+});

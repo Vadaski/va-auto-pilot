@@ -2069,15 +2069,22 @@ async function main() {
     // actively claimed by another run, so within the lock the selection is stable.
     if (claimRunId) {
       const ttlMs = resolveClaimTtlMs(path.resolve(DEFAULT_CONFIG_FILE));
+      // Optional claim budget (dogfood #4): limits how many Backlog tasks one run
+      // claims in a single plan, so a shared workspace with multiple runs does not let
+      // the first run to arrive claim every task and starve the others. 0 = unlimited.
+      const maxClaim = Number.parseInt(String(parsed.options["max-claim"] ?? "0"), 10);
       /** @type {ParallelPlan | null} */
       let plan = null;
       await withPilotFileLock(stateFile, async () => {
         const state = readState(stateFile);
         plan = buildParallelPlan(state.tasks, maxParallel);
         if (plan) {
-          const planTaskIds = [plan.primaryTaskId, ...(plan.parallelTracks ?? [])]
+          let planTaskIds = [plan.primaryTaskId, ...(plan.parallelTracks ?? [])]
             .map((id) => String(id ?? ""))
             .filter(Boolean);
+          if (Number.isFinite(maxClaim) && maxClaim > 0) {
+            planTaskIds = planTaskIds.slice(0, maxClaim);
+          }
           claimTasksInState(state, claimRunId, planTaskIds.length, ttlMs, Date.now(), planTaskIds);
           writeState(stateFile, state);
           writeBoard(boardFile, state);

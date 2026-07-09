@@ -28,6 +28,18 @@ export function resolveHumanBoardPath(sprintStateFile) {
 function resolveProjectRootFromStateFile(sprintStateFile) {
   const resolvedStateFile = path.resolve(sprintStateFile);
   const initialDir = path.dirname(resolvedStateFile);
+
+  // Isolated-workspace state files live under
+  //   <projectRoot>/.va-auto-pilot/workspaces/<name>/sprint-state.json
+  // The human-board must be isolated per workspace too — otherwise an isolated
+  // sprint would read the project-root goal and generate wrong tasks (dogfood #2).
+  // So when we detect the `workspaces` segment, the workspace dir IS the root for
+  // human-board purposes; we do not continue upward to the project root.
+  if (path.basename(path.dirname(initialDir)) === "workspaces"
+      && path.basename(path.dirname(path.dirname(initialDir))) === ".va-auto-pilot") {
+    return initialDir;
+  }
+
   let current = initialDir;
 
   while (true) {

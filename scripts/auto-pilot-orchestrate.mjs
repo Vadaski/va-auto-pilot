@@ -26,7 +26,6 @@ import {
   isCheckpointStale,
   isTerminalRunPhase,
   orchestrationPaths,
-  readActiveRun,
   readActiveRuns,
   isProcessAlive,
   readCheckpoint,
@@ -72,7 +71,7 @@ import {
 import { DEFAULT_TASK_CLAIM_TTL_MS } from "./lib/constants.mjs";
 import { writeWorkspace } from "./lib/workspace.mjs";
 import { planTaskIds } from "./lib/plan-helpers.mjs";
-import { withPilotFileLock } from "./lib/pilot-state.mjs";
+import { withPilotFileLock, writeJsonFileAtomicSync } from "./lib/pilot-state.mjs";
 
 const execFileAsync = promisify(execFile);
 const MAX_SQUASH_MERGE_ATTEMPTS = 3;
@@ -544,6 +543,17 @@ async function initRun(opts) {
       baseRef: "",
       createdAt: now,
     });
+    // Pre-seed the isolated workspace sprint-state so `sprint-board add` does not
+    // FILE_NOT_FOUND on a freshly initialized workspace (dogfood #3).
+    if (!fs.existsSync(opts.stateFile)) {
+      fs.mkdirSync(path.dirname(opts.stateFile), { recursive: true });
+      writeJsonFileAtomicSync(opts.stateFile, {
+        version: 1,
+        projectPrefix: "AP",
+        updatedAt: now,
+        tasks: [],
+      });
+    }
   }
   const run = {
     schemaVersion: 1,
@@ -1291,11 +1301,49 @@ async function orchestrateRunUnattended(opts) {
 
 async function orchestrateListRuns(opts) {
   const paths = orchestrationPaths(opts.workDir);
-  const active = readActiveRun(opts.workDir);
   if (!fs.existsSync(paths.runsDir)) {
     return emitResult(opts, { ok: true, action: "list-runs", runs: [] });
   }
 
+  // Active runs come from the index table (may contain more than one entry).
+  const activeRuns = readActiveRuns(opts.workDir);
+  const activeSet = new Set(activeRuns.map((entry) => entry.runId));
+  const heartbeatByRun = new Map(activeRuns.map((entry) => [entry.runId, entry.heartbeatAt]));
+
+  // Scan all run-scoped state files once to attribute claimed tasks per run.
+  const claimedByRun = new Map();
+  try {
+    const rootState = readSprintState(opts.stateFile);
+    for (const task of rootState.tasks ?? []) {
+      if (task.claimedBy) {
+        if (!claimedByRun.has(task.claimedBy)) claimedByRun.set(task.claimedBy, []);
+        claimedByRun.get(task.claimedBy).push(task.id);
+      }
+    }
+  } catch {
+    // root state may be absent; claims then come only from workspaces
+  }
+  // Also scan workspace sprint-states (isolated sprints own their own claims).
+  const wsRoot = path.resolve(opts.workDir, ".va-auto-pilot", "workspaces");
+  if (fs.existsSync(wsRoot)) {
+    for (const name of fs.readdirSync(wsRoot)) {
+      const wsState = path.join(wsRoot, name, "sprint-state.json");
+      if (!fs.existsSync(wsState)) continue;
+      try {
+        const parsed = JSON.parse(fs.readFileSync(wsState, "utf8"));
+        for (const task of parsed.tasks ?? []) {
+          if (task.claimedBy) {
+            if (!claimedByRun.has(task.claimedBy)) claimedByRun.set(task.claimedBy, []);
+            claimedByRun.get(task.claimedBy).push(task.id);
+          }
+        }
+      } catch {
+        // skip unreadable workspace state
+      }
+    }
+  }
+
+  const now = Date.now();
   const runs = fs.readdirSync(paths.runsDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
@@ -1303,12 +1351,19 @@ async function orchestrateListRuns(opts) {
       if (!run?.runId) {
         return null;
       }
+      const heartbeat = heartbeatByRun.get(run.runId) ?? run.updatedAt ?? null;
+      const heartbeatMs = heartbeat ? Date.parse(heartbeat) : NaN;
       return {
         runId: run.runId,
         phase: run.phase ?? null,
+        workspace: run.workspace?.name ?? null,
+        workspaceType: run.workspace?.type ?? null,
+        executionTree: run.workspace?.executionTree ?? null,
         startedAt: run.startedAt ?? null,
-        updatedAt: run.updatedAt ?? null,
-        active: active?.runId === run.runId,
+        heartbeatAt: heartbeat,
+        heartbeatAgeSec: Number.isFinite(heartbeatMs) ? Math.round((now - heartbeatMs) / 1000) : null,
+        active: activeSet.has(run.runId),
+        claimedTasks: claimedByRun.get(run.runId) ?? [],
       };
     })
     .filter(Boolean)

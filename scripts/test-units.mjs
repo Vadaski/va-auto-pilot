@@ -8061,3 +8061,59 @@ test("dogfood-fix #1: concurrent plan --claim-run-id selects disjoint task sets 
     owners.set(t.id, t.claimedBy);
   }
 });
+
+test("dogfood-fix #2: isolated workspace human-board resolves inside workspace, not project root", async () => {
+  const { resolveHumanBoardPath } = await import("./lib/human-board.mjs");
+  const wsState = path.join(".va-auto-pilot", "workspaces", "sprintX", "sprint-state.json");
+  const board = resolveHumanBoardPath(wsState);
+  // human-board must live under the workspace dir, not the project root docs/todo
+  assert.ok(board.includes(path.join("workspaces", "sprintX")), `expected workspace-scoped board, got ${board}`);
+});
+
+test("dogfood-fix #2: default (shared) workspace human-board still resolves to project root", async () => {
+  const { resolveHumanBoardPath } = await import("./lib/human-board.mjs");
+  const defaultState = path.join(".va-auto-pilot", "sprint-state.json");
+  const board = resolveHumanBoardPath(defaultState);
+  assert.ok(board.includes(path.join("docs", "todo", "human-board.md")), `expected project-root board, got ${board}`);
+});
+
+test("dogfood-fix #3: init isolated workspace pre-seeds sprint-state", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-dog3-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  const init = spawnSync(process.execPath, [script, "orchestrate", "init", "--workspace", "fresh", "--isolated", "--run-id", "r1", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.equal(init.status, 0, init.stderr);
+  const stateFile = path.join(tmp, ".va-auto-pilot", "workspaces", "fresh", "sprint-state.json");
+  assert.ok(fs.existsSync(stateFile), "isolated workspace sprint-state must be pre-seeded");
+  // And sprint-board add must now work without FILE_NOT_FOUND
+  const add = spawnSync(process.execPath, [path.join(process.cwd(), "scripts", "sprint-board.mjs"), "add", "--id", "T1", "--title", "t", "--priority", "P1", "--state-file", stateFile], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.equal(add.status, 0, add.stderr);
+});
+
+test("dogfood-fix #1: list-runs includes workspace/executionTree/heartbeatAgeSec/claimedTasks", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-dog1-list-"));
+  const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
+  // init a run and pre-seed a claim so list-runs has something to attribute
+  spawnSync(process.execPath, [script, "orchestrate", "init", "--workspace", "w1", "--isolated", "--run-id", "rl-1", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  const stateFile = path.join(tmp, ".va-auto-pilot", "workspaces", "w1", "sprint-state.json");
+  fs.writeFileSync(stateFile, JSON.stringify({
+    version: 1, projectPrefix: "T",
+    tasks: [{ id: "T-1", title: "t", priority: "P1", state: "Backlog", dependsOn: [], claimedBy: "rl-1" }],
+  }), "utf8");
+  const list = spawnSync(process.execPath, [script, "orchestrate", "list-runs", "--json"], {
+    cwd: tmp, encoding: "utf8",
+  });
+  assert.equal(list.status, 0, list.stderr);
+  const run = JSON.parse(list.stdout).runs.find((r) => r.runId === "rl-1");
+  assert.ok(run, "run rl-1 must appear");
+  assert.equal(run.workspace, "w1");
+  assert.equal(run.workspaceType, "isolated");
+  assert.equal(run.executionTree, "isolated");
+  assert.ok(typeof run.heartbeatAgeSec === "number", "heartbeatAgeSec must be numeric");
+  assert.deepEqual(run.claimedTasks, ["T-1"]);
+});

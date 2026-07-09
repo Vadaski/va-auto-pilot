@@ -9,6 +9,7 @@ import {
   nowIso,
 } from "./sprint-utils.mjs";
 import { countPendingTasks } from "./sprint-board/core.mjs";
+import { buildGateTrustSummary } from "./gate-trust.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -108,27 +109,40 @@ export function extractQualityGates({ packageJson, vaConfig }) {
   const checkScripts = Object.keys(scripts)
     .filter((k) => k.startsWith("check") || k.startsWith("validate") || k === "build" || k === "lint" || k === "typecheck")
     .sort();
-  const buildCommand = vaConfig?.qualityGate?.buildCommand || "npm run check:all";
-  const reviewCommand = vaConfig?.qualityGate?.reviewCommand || "codex review --uncommitted";
-  const acceptance = vaConfig?.qualityGate?.acceptanceTestCommand || "npm run validate:distribution";
-  const smoke = vaConfig?.qualityGate?.smokeTest || {};
-  const adaptive = (vaConfig?.qualityGate?.adaptiveGates || []).map((g) => ({
+  const qualityGate = vaConfig?.qualityGate && typeof vaConfig.qualityGate === "object"
+    ? vaConfig.qualityGate
+    : {};
+  const buildCommand = qualityGate.buildCommand || "npm run check:all";
+  const reviewCommand = qualityGate.reviewCommand || "review-agent review --uncommitted";
+  const reviewFallbackCommand = qualityGate.reviewFallbackCommand || "";
+  const acceptance = qualityGate.acceptanceTestCommand || "npm run validate:distribution";
+  const smoke = qualityGate.smokeTest || {};
+  const adaptive = (qualityGate.adaptiveGates || []).map((g) => ({
     name: g.name,
     command: g.command,
     required: g.required !== false,
     status: g.status || "active",
   }));
+  const gateTrust = buildGateTrustSummary(qualityGate);
   return {
     buildCommand,
     reviewCommand,
+    reviewFallbackCommand,
     acceptanceTestCommand: acceptance,
-    smokeTestCommand: vaConfig?.qualityGate?.smokeTestCommand || "node scripts/smoke-test-runner.mjs --config",
+    smokeTestCommand: qualityGate.smokeTestCommand || "node scripts/smoke-test-runner.mjs --config",
     smokeEnabled: Boolean(smoke.enabled),
     adaptiveGates: adaptive,
     allCheckScripts: checkScripts,
+    gateTrust,
     gateTrustSignals: {
-      advisoryCount: adaptive.filter((a) => a.status === "advisory").length,
-      requiredCount: adaptive.filter((a) => a.required).length,
+      status: gateTrust.status,
+      evidenceRiskCount: (gateTrust.evidenceRisks || []).length,
+      advisoryCount: (gateTrust.advisorySignals || []).length
+        + adaptive.filter((a) => a.status === "advisory" || a.required === false).length,
+      requiredCount: gateTrust.requiredCount,
+      trustedProof: (gateTrust.evidenceRisks || []).length === 0
+        && gateTrust.status === "configured"
+        && (gateTrust.missingRequired || []).length === 0,
     },
   };
 }
@@ -151,11 +165,14 @@ export function synthesizeRisks(input = {}) {
     risks.push("agent auth / rate limit signals in recent journal");
   }
   const gts = gc.gateTrustSignals || {};
-  if ((gts.advisoryCount || 0) > 0) {
-    risks.push("advisory gates reduce evidence trust (review-gate, reason-changed, smoke)");
+  if ((gts.evidenceRiskCount || 0) > 0 || (gts.advisoryCount || 0) > 0) {
+    risks.push("gateTrust has evidence-risk / advisory signals; clean adaptive placeholders or enable required proof gates");
   }
   if (cockpitSignals && /evidence-risk/i.test(String(cockpitSignals))) {
     risks.push("cockpit reports evidence-risk; treat advisory as non-proof");
+  }
+  if (gc.reviewCommand && !gc.reviewFallbackCommand && /codex|claude|external/i.test(String(gc.reviewCommand))) {
+    risks.push("review gate depends on external CLI without reviewFallbackCommand");
   }
   if (risks.length === 0) {
     risks.push("no high-severity open signals; focus on highest-value forward gap");
@@ -179,11 +196,18 @@ export function detectDocImplDiffs(input = {}) {
     diffs.push("distribution validate drift suspected");
   }
   // General signals
-  if (gates.reviewCommand && /codex|external/i.test(gates.reviewCommand)) {
-    diffs.push("review gate depends on external CLI (availability/auth risk for generic agents)");
+  if (
+    gates.reviewCommand
+    && /codex|claude|external/i.test(String(gates.reviewCommand))
+    && !String(gates.reviewFallbackCommand || "").trim()
+  ) {
+    diffs.push("review gate depends on external CLI without reviewFallbackCommand (availability/auth risk for generic agents)");
   }
   if (gates.smokeEnabled === false) {
     diffs.push("smoke gate disabled or placeholder (no critical paths exercised)");
+  }
+  if (gates.gateTrustSignals?.trustedProof === false && (gates.gateTrustSignals?.evidenceRiskCount || 0) > 0) {
+    diffs.push("gateTrust evidence risks still active (advisory/weak adaptive gates or missing required gates)");
   }
   if (diffs.length === 0) {
     diffs.push("no major doc-impl drift detected in targeted scans");
@@ -203,7 +227,18 @@ export function pickHighestValueGoal(assessment = {}) {
       priority: "P1",
     };
   }
-  if (diffs && diffs.some((d) => /review gate|external.*CLI|auth/i.test(String(d)))) {
+  if (g.gateTrustSignals?.trustedProof === false && (g.gateTrustSignals?.evidenceRiskCount || 0) > 0) {
+    return {
+      title: `Clear gateTrust evidence-risk signals on ${rt} (prune advisory adaptive gates / restore required proof)`,
+      rationale: "Cockpit/gateTrust still reports evidence risks; until trust is clean, acceptance evidence is not trustworthy.",
+      priority: "P1",
+    };
+  }
+  if (
+    diffs
+    && diffs.some((d) => /review gate|external.*CLI|auth/i.test(String(d)))
+    && !String(g.reviewFallbackCommand || "").trim()
+  ) {
     return {
       title: `Make review gate resilient for generic agents on ${rt} and document fallbacks`,
       rationale: "External review dependency is operational risk; iteration should surface mitigation usable by any CLI agent.",
@@ -217,11 +252,11 @@ export function pickHighestValueGoal(assessment = {}) {
       priority: "P1",
     };
   }
-  // General forward highest value
+  // Steady-state: gates trusted, smoke on, no blocking doc-impl gaps.
   return {
-    title: `Run progress-iteration assessment on ${rt}, emit objective/constraint/risk/acceptance artifacts, and consume via goal + plan-from-goal to populate highest-value backlog task`,
-    rationale: "Assessment discovered real type/gates/risks/diffs for this repo; feeding the produced objective demonstrates the find-consume loop and highest-value selection.",
-    priority: "P1",
+    title: `No blocking infra gap on ${rt}; capture an explicit product/feature objective to resume delivery`,
+    rationale: "Assessment found trusted gates and no high-severity open signals. Next value is a human/product goal, not another infra hygiene sprint.",
+    priority: "P2",
   };
 }
 
@@ -363,11 +398,15 @@ export async function buildProgressIterationAssessment(opts = {}) {
     manifests,
   });
   const gates = extractQualityGates({ packageJson: pkg, vaConfig });
+  const cockpitSignals = gates.gateTrustSignals?.trustedProof === false
+    || (gates.gateTrustSignals?.evidenceRiskCount || 0) > 0
+    ? "evidence-risk"
+    : "trusted";
   const risks = synthesizeRisks({
     journalTail,
     unresolvedPitfalls: unresolved,
     gateConfig: gates,
-    cockpitSignals: "evidence-risk", // from known current state
+    cockpitSignals,
   });
   const diffs = detectDocImplDiffs({
     publicNarrativeResult: pub,

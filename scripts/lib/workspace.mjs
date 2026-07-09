@@ -76,7 +76,10 @@ export function resolveWorkspacePaths(workDir, options = {}) {
       boardFile: isolated ? path.join(wsDir, "sprint.md") : path.resolve(workDir, fallback.boardFile),
       journalFile: isolated ? path.join(wsDir, "run-journal.md") : path.resolve(workDir, fallback.journalFile),
       pitfallsFile: isolated ? path.join(wsDir, "pitfalls.json") : path.resolve(workDir, fallback.pitfallsFile),
-      dir: wsDir,
+      // dir is where workspace-local artifacts (commit.lock, workspace.json) live.
+      // For default shared, that is the project root — NOT workspaces/default, otherwise
+      // the commit lock and human-board would be mislocated.
+      dir: isolated ? wsDir : path.resolve(workDir),
       existed: false,
     };
   }
@@ -91,7 +94,7 @@ export function resolveWorkspacePaths(workDir, options = {}) {
       boardFile: parsed?.boardFile || path.resolve(workDir, fallback.boardFile),
       journalFile: parsed?.journalFile || path.resolve(workDir, fallback.journalFile),
       pitfallsFile: parsed?.pitfallsFile || path.resolve(workDir, fallback.pitfallsFile),
-      dir: wsDir,
+      dir: type === "isolated" ? wsDir : path.resolve(workDir),
       existed: true,
     };
   } catch {

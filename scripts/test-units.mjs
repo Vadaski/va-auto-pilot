@@ -8143,3 +8143,14 @@ test("dogfood-fix #4: shared workspace claim budget splits backlog across concur
   assert.ok(claimedB <= 2, `run b claimed ${claimedB}, budget is 2`);
   assert.equal(claimedA + claimedB, 4, "all 4 tasks should be claimed between the two runs");
 });
+
+test("dogfood-fix: default shared workspace dir resolves to project root, not workspaces/default", async () => {
+  const { resolveWorkspacePaths } = await import("./lib/workspace.mjs");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-ws-dir-"));
+  const ws = resolveWorkspacePaths(tmp, { name: "default" });
+  assert.equal(ws.type, "shared");
+  assert.equal(ws.dir, path.resolve(tmp), "default shared dir must be project root, not workspaces/default");
+  // isolated still points at the workspace dir
+  const iso = resolveWorkspacePaths(tmp, { name: "featX", isolated: true });
+  assert.equal(iso.dir, path.resolve(tmp, ".va-auto-pilot", "workspaces", "featX"));
+});

@@ -10,6 +10,8 @@ import {
   requireOption
 } from "./lib/sprint-utils.mjs";
 import { ColonyBridge } from "./lib/colony-bridge.mjs";
+import { assertSafeTaskId } from "./lib/identifiers.mjs";
+import { withPilotFileLock, writeJsonFileAtomicSync } from "./lib/pilot-state.mjs";
 import { splitShellCommand } from "./lib/shell-split.mjs";
 import { DEFAULT_TRACK_TIMEOUT_MS } from "./lib/constants.mjs";
 
@@ -222,8 +224,7 @@ function readState(stateFile) {
 }
 
 function writeJsonFile(filePath, value) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  writeJsonFileAtomicSync(filePath, value);
 }
 
 function renderBoard(stateFile, boardFile) {
@@ -363,6 +364,7 @@ async function spawnTracks(parsed) {
   const logDir = path.resolve(parsed.options["log-dir"] ?? DEFAULT_LOG_DIR);
   const tracks = plan.parallelTracks.map((track) => ({
     ...track,
+    taskId: assertSafeTaskId(track.taskId),
     command: buildTrackCommand(track, agentTemplate)
   }));
 
@@ -404,10 +406,12 @@ async function spawnTracks(parsed) {
   const journalFile = path.resolve(parsed.options["journal-file"] ?? DEFAULTS.journalFile);
 
   if (shouldUpdateState && !parsed.flags.has("dry-run")) {
-    const state = readState(stateFile);
-    const resultMap = new Map(results.map((result) => [result.taskId, result]));
-    applyStateTransitions(state, tracks, resultMap);
-    writeJsonFile(stateFile, state);
+    await withPilotFileLock(stateFile, async () => {
+      const state = readState(stateFile);
+      const resultMap = new Map(results.map((result) => [result.taskId, result]));
+      applyStateTransitions(state, tracks, resultMap);
+      writeJsonFile(stateFile, state);
+    });
     await renderBoard(stateFile, boardFile);
   }
 

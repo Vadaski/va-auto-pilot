@@ -28,6 +28,9 @@ export const DEFAULT_SMOKE_TEST_TIMEOUT_MS = 30_000;
 /** Default timeout for distribution validation in milliseconds (30 seconds). */
 export const DEFAULT_VALIDATE_DISTRIBUTION_TIMEOUT_MS = 30_000;
 
+/** Maximum time to wait for Git's real index lock before aborting a commit. */
+export const DEFAULT_COMMIT_INDEX_LOCK_TIMEOUT_MS = 5_000;
+
 // ---------------------------------------------------------------------------
 // Concurrency
 // ---------------------------------------------------------------------------

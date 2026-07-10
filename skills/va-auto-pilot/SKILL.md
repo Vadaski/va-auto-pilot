@@ -154,6 +154,12 @@ Unattended only: `node scripts/auto-pilot-loop.mjs --max-cycles 50` or `orchestr
   `researchClaimChange`: `human-required`.
 - Without `approvalPolicy`, interactive runs remain human-required for
   `approve-plan` and `approve-commit`.
+- Plan-review output must end with exactly one unambiguous `PLAN REVIEW STATUS:
+  PASS|FAIL` marker; empty or conflicting output is a failure, and review waivers require
+  `--waive-review-with-reason`.
+- Commit approval is context-bound. If approved files, isolated-worktree
+  commits, evidence references, or integration `HEAD` change, rerun
+  `approve-commit` before committing.
 
 ### Error Recovery
 - Failures are classified: build/lint/test/review/dispatch/commit

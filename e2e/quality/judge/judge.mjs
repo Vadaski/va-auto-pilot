@@ -16,6 +16,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { TextDecoder } from "node:util";
 import { parse as parseYaml } from "yaml";
 
 const API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -110,7 +111,7 @@ async function callJudge(judgePrompt) {
     try {
       const data = await response.json();
       return data.content?.filter(b => b.type === "text").map(b => b.text).join("\n") || "";
-    } catch {}
+    } catch { /* fall through to SSE parsing */ }
   }
 
   // Parse SSE stream
@@ -134,7 +135,7 @@ async function callJudge(judgePrompt) {
         if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
           text += event.delta.text;
         }
-      } catch {}
+      } catch { /* ignore malformed SSE event */ }
     }
   }
   return text;
@@ -146,7 +147,7 @@ async function callJudge(judgePrompt) {
 
 function parseJudgeOutput(raw) {
   // Strip markdown code fences if present
-  let cleaned = raw.replace(/^```(?:json)?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
+  const cleaned = raw.replace(/^```(?:json)?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
   // Try to extract JSON from the cleaned response
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {

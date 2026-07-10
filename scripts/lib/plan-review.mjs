@@ -5,6 +5,8 @@ import { promisify } from "node:util";
 
 import { hashString, orchestrationPaths } from "./orchestration-state.mjs";
 import { DEFAULT_TRACK_TIMEOUT_MS } from "./constants.mjs";
+import { needsShellExecution } from "./colony-bridge.mjs";
+import { splitShellCommand } from "./shell-split.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -67,6 +69,22 @@ export function parseReviewFindings(text) {
   return findings;
 }
 
+export function parsePlanReviewStatus(text) {
+  const lines = String(text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const exactPattern = /^PLAN REVIEW STATUS:\s*(PASS|FAIL)$/i;
+  const statuses = lines
+    .map((line) => line.match(exactPattern)?.[1]?.toUpperCase() ?? null)
+    .filter(Boolean);
+  const finalStatus = lines.at(-1)?.match(exactPattern)?.[1]?.toUpperCase() ?? null;
+  if (!finalStatus || new Set(statuses).size !== 1) {
+    return null;
+  }
+  return finalStatus;
+}
+
 export function validatePlanReviewForApprove({ review, candidatePlan, runId }) {
   if (!review) {
     return { ok: false, code: "PLAN_REVIEW_REQUIRED", message: "run orchestrate review-plan before approve-plan" };
@@ -83,12 +101,14 @@ export function validatePlanReviewForApprove({ review, candidatePlan, runId }) {
   if (runId && review.runId && review.runId !== runId) {
     return { ok: false, code: "PLAN_REVIEW_RUN_MISMATCH", message: "plan-review.json is for a different run" };
   }
-  if (review.passed === false || (Array.isArray(review.findings?.critical) && review.findings.critical.length > 0)) {
+  if (review.passed !== true
+      || (!review.dryRun && review.status !== "PASS")
+      || (Array.isArray(review.findings?.critical) && review.findings.critical.length > 0)) {
     return {
       ok: false,
       code: "PLAN_REVIEW_CRITICAL",
-      message: "plan review reported CRITICAL findings; adjust plan or backlog before approve-plan",
-      context: { critical: review.findings?.critical ?? [] },
+      message: "plan review is not an explicit structured PASS; adjust plan or rerun review-plan before approve-plan",
+      context: { status: review.status ?? null, critical: review.findings?.critical ?? [] },
     };
   }
   return { ok: true, planHash };
@@ -118,30 +138,41 @@ export async function runPlanReviewCommand({ workDir, candidatePlan, runId, revi
     `候选计划 JSON 在 ${planFile}`,
     "用中文回复，每条必须带前缀 CRITICAL: / WARNING: / SUGGESTION:（可编号）。",
     "聚焦：任务拆分、顺序、与 orchestrated checkpoint 的冲突、遗漏风险。",
+    "最后一个非空行必须严格等于以下二者之一，不要重复提示词：",
+    "PLAN REVIEW STATUS: PASS",
+    "PLAN REVIEW STATUS: FAIL",
   ].join("\n");
 
-  const command = reviewCommand
-    || `codex exec --sandbox read-only -C ${workDir} ${JSON.stringify(prompt)}`;
+  const command = reviewCommand || "codex exec --sandbox read-only";
 
   let stdout;
   let stderr;
   let exitCode = 0;
   try {
-    if (command.includes("codex exec")) {
+    if (!reviewCommand) {
       const { stdout: out, stderr: err } = await execFileAsync(
-        "/bin/bash",
-        ["-lc", `</dev/null ${command}`],
+        "codex",
+        ["exec", "--sandbox", "read-only", "-C", workDir, prompt],
         { cwd: workDir, encoding: "utf8", timeout: DEFAULT_TRACK_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 }
       );
       stdout = out;
       stderr = err;
     } else {
-      const parts = command.split(/\s+/);
-      const { stdout: out, stderr: err } = await execFileAsync(parts[0], parts.slice(1), {
+      const parts = splitShellCommand(command);
+      const target = needsShellExecution(command)
+        ? { file: "/bin/bash", args: ["-lc", command] }
+        : { file: parts[0], args: parts.slice(1) };
+      const { stdout: out, stderr: err } = await execFileAsync(target.file, target.args, {
         cwd: workDir,
         encoding: "utf8",
         timeout: DEFAULT_TRACK_TIMEOUT_MS,
         maxBuffer: 10 * 1024 * 1024,
+        env: {
+          ...process.env,
+          VA_CANDIDATE_PLAN_FILE: planFile,
+          VA_CANDIDATE_PLAN_HASH: planHash,
+          VA_PLAN_REVIEW_PROMPT: prompt,
+        },
       });
       stdout = out;
       stderr = err;
@@ -152,8 +183,13 @@ export async function runPlanReviewCommand({ workDir, candidatePlan, runId, revi
     stderr = err.stderr ?? err.message ?? "";
   }
 
-  const findings = parseReviewFindings(`${stdout}\n${stderr}`);
-  const passed = findings.critical.length === 0 && exitCode === 0;
+  const combinedOutput = `${stdout}\n${stderr}`;
+  const findings = parseReviewFindings(combinedOutput);
+  const status = parsePlanReviewStatus(combinedOutput);
+  const hasStructuredOutput = status !== null;
+  const passed = exitCode === 0
+    && status === "PASS"
+    && findings.critical.length === 0;
 
   return {
     schemaVersion: 1,
@@ -164,6 +200,8 @@ export async function runPlanReviewCommand({ workDir, candidatePlan, runId, revi
     command,
     findings,
     exitCode,
+    status,
+    hasStructuredOutput,
     passed,
     stdoutPreview: stdout.slice(0, 4000),
   };

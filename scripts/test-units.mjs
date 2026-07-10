@@ -1105,7 +1105,7 @@ test("orchestration recovery plan identifies stale checkpoints and dead running 
   assert.ok(plan.issues.some((issue) => issue.code === "STALE_RUNNING_TRACK"));
   assert.ok(plan.mutations.some((mutation) => mutation.type === "return-to-plan-approval"));
   assert.ok(plan.mutations.some((mutation) => mutation.type === "clear-executor-lock"));
-  assert.ok(plan.mutations.some((mutation) => mutation.type === "settle-track"));
+  assert.ok(plan.mutations.some((mutation) => mutation.type === "requeue-track"));
 });
 
 test("mcp-readonly-resources: lists read-only resource descriptors", () => {
@@ -6240,7 +6240,7 @@ test("orchestration-state: isolated-tree checkpoint detects git HEAD drift (appr
     workspace: { name: "default", type: "shared", executionTree: "isolated" },
   });
 
-  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board", "git-head"]);
+  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board", "runtime-config", "git-head"]);
 
   fs.writeFileSync(path.join(repoDir, "README.md"), "sibling commit\n", "utf8");
   runGit(["add", "README.md"], repoDir);
@@ -6269,7 +6269,7 @@ test("orchestration-state: shared-tree checkpoint ignores git HEAD drift", () =>
     workspace: { name: "default", type: "shared", executionTree: "shared" },
   });
 
-  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board"]);
+  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board", "runtime-config"]);
 
   fs.writeFileSync(path.join(repoDir, "README.md"), "sibling commit\n", "utf8");
   runGit(["add", "README.md"], repoDir);
@@ -6329,7 +6329,7 @@ test("orchestration-state: isolated workspace checkpoint still detects git HEAD 
     workspace: { name: "feat-x", type: "isolated", executionTree: "isolated" },
   });
 
-  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board", "git-head"]);
+  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board", "runtime-config", "git-head"]);
   assert.equal(checkpoint.governance.workspace.type, "isolated");
 
   fs.writeFileSync(path.join(repoDir, "README.md"), "isolated change\n", "utf8");
@@ -6400,7 +6400,7 @@ test("plan-review: parseReviewFindings extracts CRITICAL lines", async () => {
   assert.equal(validatePlanReviewForApprove({ review: null, candidatePlan: plan, runId: undefined }).ok, false);
   assert.equal(
     validatePlanReviewForApprove({
-      review: { planHash: hash, passed: true, findings: { critical: [] } },
+      review: { planHash: hash, passed: true, status: "PASS", findings: { critical: [] } },
       candidatePlan: plan,
       runId: undefined,
     }).ok,
@@ -6537,7 +6537,7 @@ test("auto-pilot orchestrate: approve-plan requires plan-review", () => {
   assert.ok((approve.stderr + approve.stdout).includes("PLAN_REVIEW_REQUIRED"));
 });
 
-test("auto-pilot orchestrate: dispatch requires approve-plan", () => {
+test("auto-pilot orchestrate: dispatch rejects the unapproved plan phase", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-orch-cli-"));
   const stateFile = path.join(tmpDir, ".va-auto-pilot", "sprint-state.json");
   const boardFile = path.join(tmpDir, "docs", "todo", "sprint.md");
@@ -6571,7 +6571,7 @@ test("auto-pilot orchestrate: dispatch requires approve-plan", () => {
     encoding: "utf8",
   });
   assert.notEqual(dispatch.status, 0);
-  assert.ok(dispatch.stderr.includes("APPROVAL_REQUIRED") || dispatch.stdout.includes("APPROVAL_REQUIRED"));
+  assert.equal(JSON.parse(dispatch.stderr || dispatch.stdout).error.code, "INVALID_PHASE");
 });
 
 test("auto-pilot orchestrate: governance events record approval, dispatch, and stale checkpoint", async () => {
@@ -6607,6 +6607,7 @@ test("auto-pilot orchestrate: governance events record approval, dispatch, and s
     runId: planPayload.runId,
     planHash: computeCandidatePlanHash(candidatePlan),
     passed: true,
+    status: "PASS",
     findings: { critical: [], warning: [], suggestion: [] },
   }), "utf8");
 
@@ -6619,16 +6620,10 @@ test("auto-pilot orchestrate: governance events record approval, dispatch, and s
   assert.equal(checkpoint.governance.decisionPoint, "plan.approved");
   // Default workspace is shared backlog + isolated execution tree, so git-head drift
   // invalidates the checkpoint (worktrees build from repo HEAD; drift = unreviewed code).
-  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board", "git-head"]);
+  assert.deepEqual(checkpoint.governance.invalidatesOn, ["sprint-state", "human-board", "runtime-config", "git-head"]);
   assert.equal(checkpoint.governance.workspace.type, "shared");
 
-  const dispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--dry-run", "--json", "--state-file", stateFile], {
-    cwd: tmpDir,
-    encoding: "utf8",
-  });
-  assert.equal(dispatch.status, 0, dispatch.stderr);
-
-  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n- [ ] Pause before re-dispatch\n", "utf8");
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n- [ ] Pause before dispatch\n", "utf8");
   const staleDispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--dry-run", "--json", "--state-file", stateFile], {
     cwd: tmpDir,
     encoding: "utf8",
@@ -6636,10 +6631,19 @@ test("auto-pilot orchestrate: governance events record approval, dispatch, and s
   assert.equal(staleDispatch.status, 2);
   assert.ok((staleDispatch.stderr + staleDispatch.stdout).includes("STALE_CONTEXT"));
 
+  // Restore the exact approval-time intent and prove the same approved plan can
+  // then queue work; this keeps phase validation strict while covering both events.
+  fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
+  const dispatch = spawnSync(process.execPath, [script, "orchestrate", "dispatch", "--dry-run", "--json", "--state-file", stateFile], {
+    cwd: tmpDir,
+    encoding: "utf8",
+  });
+  assert.equal(dispatch.status, 0, dispatch.stderr);
+
   const events = readEventLog(path.join(tmpDir, ".va-auto-pilot", "evidence", "events.jsonl"));
-  assert.deepEqual(events.map((event) => event.eventType), ["plan.approved", "dispatch.queued", "checkpoint.stale"]);
+  assert.deepEqual(events.map((event) => event.eventType), ["plan.approved", "checkpoint.stale", "dispatch.queued"]);
   assert.equal(events[0].payload.checkpointId, checkpoint.governance.checkpointId);
-  assert.equal(events[2].payload.reason, "human intent changed since approve-plan");
+  assert.equal(events[1].payload.reason, "human intent changed since approve-plan");
 });
 
 test("resolveWorkerAgentTemplate maps codex worker to codex exec template", async () => {
@@ -6783,6 +6787,10 @@ test("auto-pilot orchestrate: journal writes run-scoped snapshot for explicit ru
     cwd: tmpDir,
     encoding: "utf8",
   }).status, 0);
+  const runPath = orchestrationPaths(tmpDir, "run-a").run;
+  const committedRun = JSON.parse(fs.readFileSync(runPath, "utf8"));
+  committedRun.phase = "committed";
+  fs.writeFileSync(runPath, `${JSON.stringify(committedRun, null, 2)}\n`, "utf8");
   const journal = spawnSync(process.execPath, [
     script,
     "orchestrate",
@@ -7844,7 +7852,8 @@ test("auto-pilot orchestrate: shared workspace isolated tree forces worktree pre
     "approve-plan",
     "--run-id",
     "run-shared",
-    "--waive-review",
+    "--waive-review-with-reason",
+    "shared-tree isolation regression fixture",
     "--json",
     "--state-file",
     stateFile,
@@ -8135,7 +8144,7 @@ test("batch5 B4: explicit --workspace bypasses the ambiguity guard", () => {
 });
 
 test("batch5 recover: --apply releases claims of a dead run (lease expired, no live track)", async () => {
-  const { writeActiveRun } = await import("./lib/orchestration-state.mjs");
+  const { writeActiveRun, writeRun } = await import("./lib/orchestration-state.mjs");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "va-b5-recover-"));
   const stateFile = path.join(tmp, ".va-auto-pilot", "sprint-state.json");
   fs.mkdirSync(path.dirname(stateFile), { recursive: true });
@@ -8149,6 +8158,19 @@ test("batch5 recover: --apply releases claims of a dead run (lease expired, no l
     projectPrefix: "UT",
     tasks: [{ id: "UT-030", title: "t", priority: "P1", state: "Backlog", dependsOn: [], claimedBy: "run-dead", claimExpiresAt: deadHeartbeat }],
   }), "utf8");
+  await writeRun(tmp, {
+    schemaVersion: 1,
+    runId: "run-dead",
+    phase: "running",
+    locks: { executorPid: null },
+    workspace: {
+      name: "default",
+      type: "shared",
+      dir: tmp,
+      executionTree: "isolated",
+      stateFile,
+    },
+  }, "run-dead");
 
   const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
   const recover = spawnSync(process.execPath, [script, "orchestrate", "recover", "--apply", "--json", "--state-file", stateFile], {

@@ -314,6 +314,24 @@ const ADAPTER_CONFIGS = [
   { Adapter: () => KimiAdapter, bin: "kimi", optKey: "kimiPath" },
 ];
 
+export function signalProcessTree(child, signal = "SIGTERM") {
+  if (!child?.pid) {
+    return false;
+  }
+  try {
+    if (process.platform === "win32") {
+      return child.kill(signal);
+    }
+    process.kill(-child.pid, signal);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ESRCH") {
+      return false;
+    }
+    throw error;
+  }
+}
+
 export class ColonyBridge {
   constructor(options = {}) {
     this.workDir = options.workDir || process.cwd();
@@ -330,7 +348,7 @@ export class ColonyBridge {
     const child = this._spawnChildren.get(taskId);
     if (child && child.pid) {
       try {
-        child.kill("SIGTERM");
+        signalProcessTree(child, "SIGTERM");
         return { cancelled: true, method: "spawn", pid: child.pid };
       } catch {
         return { cancelled: false, method: "spawn", pid: child.pid };
@@ -475,6 +493,7 @@ export class ColonyBridge {
       if (timeoutMs > 0) {
         timeoutHandle = setTimeout(() => {
           if (this._pending.has(track.taskId)) {
+            this.cancelTrack(track.taskId);
             this._pending.delete(track.taskId);
             settle({
               state: "failed",
@@ -530,6 +549,7 @@ export class ColonyBridge {
       const child = spawn(spawnTarget.file, spawnTarget.args, {
         cwd: this.workDir,
         shell: false,
+        detached: process.platform !== "win32",
         env: {
           ...process.env,
           VA_TASK_ID: track.taskId,
@@ -539,13 +559,16 @@ export class ColonyBridge {
       this._spawnChildren.set(track.taskId, child);
       let timedOut = false;
       let killTimer = null;
+      let forceKillTimer = null;
 
       if (timeoutMs > 0) {
         killTimer = setTimeout(() => {
           timedOut = true;
           appendLog(logFile, `\n[${nowIso()}] timeout after ${timeoutMs}ms — sending SIGTERM\n`);
-          child.kill("SIGTERM");
-          setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* exited */ } }, 5_000);
+          try { signalProcessTree(child, "SIGTERM"); } catch { /* best-effort */ }
+          forceKillTimer = setTimeout(() => {
+            try { signalProcessTree(child, "SIGKILL"); } catch { /* exited */ }
+          }, 5_000);
         }, timeoutMs);
       }
 
@@ -558,6 +581,7 @@ export class ColonyBridge {
       // exit-127 path when a CLI binary is unavailable).
       child.on("error", (err) => {
         if (killTimer) clearTimeout(killTimer);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
         this._spawnChildren.delete(track.taskId);
         const durationMs = Date.now() - startedAt;
         appendLog(logFile, `\n[${nowIso()}] spawn error: ${err.message}\n`);
@@ -576,6 +600,7 @@ export class ColonyBridge {
 
       child.on("close", (code, signal) => {
         if (killTimer) clearTimeout(killTimer);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
         this._spawnChildren.delete(track.taskId);
         const durationMs = Date.now() - startedAt;
         appendLog(logFile,
@@ -592,6 +617,10 @@ export class ColonyBridge {
   }
 
   async shutdown() {
+    for (const child of this._spawnChildren.values()) {
+      try { signalProcessTree(child, "SIGTERM"); } catch { /* best-effort */ }
+    }
+    this._spawnChildren.clear();
     if (this.colony) {
       try {
         for (const [taskId, entry] of this._pending) {

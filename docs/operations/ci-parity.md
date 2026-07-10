@@ -8,6 +8,7 @@ GitHub Actions or explicitly classified as release/manual checks.
 | Gate | Local command | GitHub Actions coverage | Status |
 | --- | --- | --- | --- |
 | Install reproducibility | `npm ci` | `.github/workflows/ci.yml` check job | CI required |
+| Static lint | `npm run lint` | explicit check job step and included in `npm run check:all` | CI required |
 | TypeScript type safety | `npm run typecheck` | explicit check job step and included in `npm run check:all` | CI required |
 | Deterministic project checks | `npm run check:all` | `.github/workflows/ci.yml` check job | CI required |
 | Behavioral end-to-end checks | `npm run check:e2e` | `.github/workflows/ci.yml` check job | CI required |
@@ -37,5 +38,5 @@ npm run check:e2e
 ```
 
 The CI workflow must keep `npm ci`, `npm run typecheck`, `npm run check:all`,
-`npm run check:e2e`, and the PR-only DocStore job visible as separate workflow
+`npm run lint`, `npm run check:e2e`, and the PR-only DocStore job visible as separate workflow
 evidence, even when some commands are also nested inside `check:all`.

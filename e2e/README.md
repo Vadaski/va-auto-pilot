@@ -49,7 +49,7 @@ Each scenario:
 - **Free**: no API costs
 - **CI-friendly**: no flaky tests from LLM variability
 
-The stubs exercise the **exact same code path** as real agents — `ColonyBridge.dispatchViaSpawn()`, gate execution, state transitions — because the loop dispatches via `--agent-template` which goes through the same `spawn("bash", ["-lc", command])` call.
+The stubs exercise the **exact same code path** as real agents — `ColonyBridge.dispatchViaSpawn()`, gate execution, and state transitions. Plain templates are parsed into argv and spawned directly; templates that require shell syntax use the controlled shell fallback.
 
 ### Switching to Real LLMs
 
@@ -84,6 +84,9 @@ setup:
     - [ ] Do something
   pitfalls:
     entries: []
+  config: |                       # optional complete config.yaml override
+    qualityGate:
+      buildCommand: "false"
 
 run:
   args: ["scripts/auto-pilot-loop.mjs"]
@@ -133,10 +136,12 @@ Steps share the same temp directory, so state accumulates naturally.
 | `pitfall_for_task` | pitfalls.json | Unresolved pitfall exists for task |
 | `gate_passed` | stdout | Named gate passed |
 | `gate_failed` | stdout | Named gate failed |
+| `gate_not_run` | stdout | Named gate never emitted a result |
 | `all_gates_passed` | stdout | All gates passed |
 | `stdout_contains` | stdout | Text in output |
 | `stdout_not_contains` | stdout | Text not in output |
 | `file_exists` | filesystem | File exists check |
+| `file_not_exists` | filesystem | File does not exist |
 | `file_contains` | filesystem | File content check |
 
 **Semantics**: All `must` assertions must pass. At least 80% of `should` assertions must pass.

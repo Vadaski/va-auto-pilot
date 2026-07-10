@@ -13,6 +13,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { TextDecoder } from "node:util";
 import { execSync } from "node:child_process";
 
 const PROBE_DIR = process.env.PROBE_DIR || "/tmp/va-quality-probes";
@@ -202,7 +203,7 @@ async function callLLM(prompt) {
       const data = await response.json();
       const text = data.content?.filter(b => b.type === "text").map(b => b.text).join("\n") || "";
       return { text, model: data.model, usage: data.usage };
-    } catch {}
+    } catch { /* fall through to SSE parsing */ }
   }
 
   // SSE parse
@@ -224,7 +225,7 @@ async function callLLM(prompt) {
         if (e.type === "content_block_delta" && e.delta?.type === "text_delta") text += e.delta.text;
         if (e.type === "message_start" && e.message) { model = e.message.model || model; usage = e.message.usage || usage; }
         if (e.type === "message_delta" && e.usage) usage = { ...usage, ...e.usage };
-      } catch {}
+      } catch { /* ignore malformed SSE event */ }
     }
   }
   return { text, model, usage };

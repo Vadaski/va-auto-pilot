@@ -7,9 +7,12 @@ import { readHumanBoardInstructions, resolveHumanBoardPath } from "./human-board
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./pilot-state.mjs";
 import { observabilityPaths, OBSERVABILITY_SCHEMA_VERSION } from "./observability.mjs";
 import { DEFAULT_TRACK_TIMEOUT_MS } from "./constants.mjs";
+import { assertSafeRunId } from "./identifiers.mjs";
 
 export const ORCHESTRATION_SCHEMA_VERSION = 1;
 export const GOVERNANCE_SCHEMA_VERSION = 1;
+
+export { assertSafeRunId } from "./identifiers.mjs";
 
 /** Phases where plan/dispatch/await must not run without a fresh init. */
 export const TERMINAL_RUN_PHASES = new Set(["done", "error", "halted"]);
@@ -19,7 +22,7 @@ export function resolveOrchestrationDir(workDir = process.cwd(), runId = "") {
   if (!runId) {
     return rootDir;
   }
-  return path.join(rootDir, "runs", String(runId));
+  return path.join(rootDir, "runs", assertSafeRunId(runId));
 }
 
 export function orchestrationPaths(workDir = process.cwd(), runId = "") {
@@ -251,12 +254,34 @@ export function hashString(value) {
 export function computeSprintStateHash(stateFile) {
   const state = readSprintStateFile(stateFile);
   const normalized = {
+    version: state.version ?? null,
+    projectPrefix: state.projectPrefix ?? "",
     updatedAt: state.updatedAt ?? "",
     tasks: (state.tasks ?? []).map((task) => ({
       id: task.id,
+      title: task.title ?? "",
+      priority: task.priority ?? "",
       state: task.state,
+      owner: task.owner ?? "",
+      source: task.source ?? "",
+      createdAt: task.createdAt ?? "",
+      startedAt: task.startedAt ?? "",
+      completedAt: task.completedAt ?? "",
+      lastFailedAt: task.lastFailedAt ?? "",
       failCount: task.failCount ?? 0,
+      reason: task.reason ?? "",
+      verification: task.verification ?? "",
+      notes: task.notes ?? "",
+      claimedBy: task.claimedBy ?? "",
+      claimedAt: task.claimedAt ?? "",
+      claimExpiresAt: task.claimExpiresAt ?? "",
+      previousClaimedBy: task.previousClaimedBy ?? "",
+      reclaimedAt: task.reclaimedAt ?? "",
+      permissionPolicy: task.permissionPolicy ?? null,
+      review: task.review ?? null,
+      testing: task.testing ?? null,
       dependsOn: task.dependsOn ?? [],
+      failureDetail: task.failureDetail ?? null,
     })),
   };
   return hashString(JSON.stringify(normalized));
@@ -270,7 +295,11 @@ export function computeHumanBoardHash(stateFile) {
 
 export function computeGitHead(workDir) {
   try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { cwd: workDir, encoding: "utf8" }).trim();
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: workDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
   } catch {
     return "";
   }
@@ -296,17 +325,27 @@ function normalizeCheckpointWorkspace(workspace) {
  */
 function checkpointInvalidatesOn(workspace) {
   return workspace?.executionTree === "shared"
-    ? ["sprint-state", "human-board"]
-    : ["sprint-state", "human-board", "git-head"];
+    ? ["sprint-state", "human-board", "runtime-config"]
+    : ["sprint-state", "human-board", "runtime-config", "git-head"];
 }
 
-export function buildCheckpoint({ stateFile, workDir, approvedPlanId, candidatePlan, workspace = undefined }) {
+function computeRuntimeConfigHash(workDir) {
+  const configFile = path.resolve(workDir, ".va-auto-pilot", "config.yaml");
+  return fs.existsSync(configFile)
+    ? crypto.createHash("sha256").update(fs.readFileSync(configFile)).digest("hex")
+    : hashString("<missing-runtime-config>");
+}
+
+export function buildCheckpoint({ stateFile, workDir, approvedPlanId, candidatePlan, workspace = undefined, runId = "" }) {
   const obsPaths = observabilityPaths(workDir);
   const checkpointWorkspace = normalizeCheckpointWorkspace(workspace);
   return {
     schemaVersion: ORCHESTRATION_SCHEMA_VERSION,
     approvedPlanId,
     candidatePlan,
+    candidatePlanHash: hashString(JSON.stringify(candidatePlan ?? null)),
+    workerSelectionHash: hashString(JSON.stringify([...readWorkerOverrides(workDir, runId).entries()].sort())),
+    runtimeConfigHash: computeRuntimeConfigHash(workDir),
     sprintStateHash: computeSprintStateHash(stateFile),
     humanBoardHash: computeHumanBoardHash(stateFile),
     gitHead: computeGitHead(workDir),
@@ -360,7 +399,14 @@ function shouldEnforceGitHead(checkpoint) {
 // HEAD enforcement reads only the approval-time execution tree recorded in the
 // checkpoint (see shouldEnforceGitHead), so the current command's flags cannot
 // override the approval contract.
-export function isCheckpointStale(checkpoint, { stateFile, workDir, workspace: _workspace = undefined }) {
+export function isCheckpointStale(checkpoint, {
+  stateFile,
+  workDir,
+  workspace: _workspace = undefined,
+  runId = "",
+  candidatePlan = undefined,
+  approvedPlanId = undefined,
+}) {
   if (!checkpoint) {
     return { stale: true, reason: "no checkpoint" };
   }
@@ -369,6 +415,27 @@ export function isCheckpointStale(checkpoint, { stateFile, workDir, workspace: _
   }
   if (checkpoint.humanBoardHash !== computeHumanBoardHash(stateFile)) {
     return { stale: true, reason: "human intent changed since approve-plan" };
+  }
+  if (approvedPlanId !== undefined && checkpoint.approvedPlanId !== approvedPlanId) {
+    return { stale: true, reason: "approved plan identity changed since approve-plan" };
+  }
+  if (candidatePlan !== undefined) {
+    const currentPlanHash = hashString(JSON.stringify(candidatePlan ?? null));
+    const approvedPlanHash = checkpoint.candidatePlanHash
+      ?? hashString(JSON.stringify(checkpoint.candidatePlan ?? null));
+    if (currentPlanHash !== approvedPlanHash) {
+      return { stale: true, reason: "candidate plan changed since approve-plan" };
+    }
+  }
+  if (!checkpoint.workerSelectionHash) {
+    return { stale: true, reason: "checkpoint is missing worker selection binding" };
+  }
+  const currentWorkerHash = hashString(JSON.stringify([...readWorkerOverrides(workDir, runId).entries()].sort()));
+  if (currentWorkerHash !== checkpoint.workerSelectionHash) {
+    return { stale: true, reason: "worker selection changed since approve-plan" };
+  }
+  if (!checkpoint.runtimeConfigHash || checkpoint.runtimeConfigHash !== computeRuntimeConfigHash(workDir)) {
+    return { stale: true, reason: "runtime config changed since approve-plan" };
   }
   if (shouldEnforceGitHead(checkpoint)) {
     const head = computeGitHead(workDir);
@@ -512,11 +579,18 @@ export function buildRecoveryPlan(input = {}) {
           ? `worker heartbeat expired after ${heartbeatAgeMs}ms`
           : `sprint task is already ${sprintTask?.state}`;
       issues.push({ code: "STALE_RUNNING_TRACK", severity: "warning", taskId: track.taskId, message: reason });
-      mutations.push({ type: "settle-track", taskId: track.taskId, resultAction: "recovered-stale-track", reason });
+      mutations.push(
+        !["Done", "Failed"].includes(sprintTask?.state) && (pidDead || heartbeatExpired)
+          ? { type: "requeue-track", taskId: track.taskId, resultAction: "recovered-stale-track", reason }
+          : { type: "settle-track", taskId: track.taskId, resultAction: "recovered-stale-track", reason }
+      );
     }
   }
 
-  if (pendingTasks === 0 && run.phase !== "done") {
+  // A task reaches Done before its approved changes are committed and before the
+  // cycle journal is closed. Only cycle-closed proves those two boundaries have
+  // completed; commit approval/commit phases must remain resumable in place.
+  if (pendingTasks === 0 && run.phase === "cycle-closed") {
     issues.push({ code: "STALE_RUN_NO_PENDING_TASKS", severity: "warning", message: `Run phase is ${run.phase}, but sprint has no pending tasks.` });
     mutations.push({ type: "close-run" });
     nextCommands.push(command("Close run", ["node", "scripts/auto-pilot.mjs", "orchestrate", "recover", "--apply"], "Close stale run state."));

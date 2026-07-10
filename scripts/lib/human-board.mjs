@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { withPilotFileLock, writeTextFileAtomicSync } from "./pilot-state.mjs";
 import { resolveDefaults } from "./sprint-utils.mjs";
 
 /**
@@ -71,8 +72,20 @@ export function readHumanBoardInstructions(boardPath) {
   }
 
   const raw = fs.readFileSync(resolved, "utf8");
+  return parseHumanBoardInstructions(raw);
+}
+
+function parseHumanBoardInstructions(raw) {
+  return parseHumanBoardInstructionItems(raw, false);
+}
+
+function parseHandledHumanBoardInstructions(raw) {
+  return parseHumanBoardInstructionItems(raw, true);
+}
+
+function parseHumanBoardInstructionItems(raw, checked) {
   const lines = raw.split(/\r?\n/);
-  const unchecked = [];
+  const items = [];
 
   let inInstructions = false;
   let instructionsHeadingLevel = 0;
@@ -106,17 +119,24 @@ export function readHumanBoardInstructions(boardPath) {
     }
 
     const itemText = itemMatch[1].trim();
-    if (/^\[(x|X)\]\s+/.test(itemText)) {
+    const itemIsChecked = /^\[[xX]\]\s+/.test(itemText);
+    if (itemIsChecked !== checked) {
       continue;
     }
 
-    unchecked.push({
+    const normalizedText = itemIsChecked
+      ? itemText
+        .replace(/^\[[xX]\]/, "[ ]")
+        .replace(/\s+_\(handled:.*?\)_\s*$/, "")
+        .trim()
+      : itemText;
+    items.push({
       lineNumber: index + 1,
-      text: itemText
+      text: normalizedText
     });
   }
 
-  return unchecked;
+  return items;
 }
 
 function ensureHumanBoard(boardPath) {
@@ -124,8 +144,7 @@ function ensureHumanBoard(boardPath) {
   if (fs.existsSync(resolved)) {
     return;
   }
-  fs.mkdirSync(path.dirname(resolved), { recursive: true });
-  fs.writeFileSync(
+  writeTextFileAtomicSync(
     resolved,
     [
       "# Human Board",
@@ -142,8 +161,7 @@ function ensureHumanBoard(boardPath) {
       "",
       "## Direction (long-term)",
       "",
-    ].join("\n"),
-    "utf8"
+    ].join("\n")
   );
 }
 
@@ -170,9 +188,9 @@ function insertUnderInstructions(raw, line) {
  *
  * @param {string} boardPath
  * @param {{type: string, text: string, source?: string}} intent
- * @returns {{boardPath: string, line: string}}
+ * @returns {Promise<{boardPath: string, line: string}>}
  */
-export function appendHumanIntent(boardPath, intent) {
+export async function appendHumanIntent(boardPath, intent) {
   const resolved = path.resolve(boardPath);
   const type = String(intent.type ?? "objective").trim().toLowerCase();
   const text = String(intent.text ?? "").trim();
@@ -184,12 +202,15 @@ export function appendHumanIntent(boardPath, intent) {
     throw new Error(`Invalid human intent type: ${type}`);
   }
 
-  ensureHumanBoard(resolved);
-  const raw = fs.readFileSync(resolved, "utf8");
-  const stamp = new Date().toISOString();
-  const line = `- [ ] [${type}] ${text} _(source: ${source}, ${stamp})_`;
-  fs.writeFileSync(resolved, insertUnderInstructions(raw, line), "utf8");
-  return { boardPath: resolved, line };
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  return withPilotFileLock(resolved, async () => {
+    ensureHumanBoard(resolved);
+    const raw = fs.readFileSync(resolved, "utf8");
+    const stamp = new Date().toISOString();
+    const line = `- [ ] [${type}] ${text} _(source: ${source}, ${stamp})_`;
+    writeTextFileAtomicSync(resolved, insertUnderInstructions(raw, line));
+    return { boardPath: resolved, line };
+  });
 }
 
 /**
@@ -197,47 +218,126 @@ export function appendHumanIntent(boardPath, intent) {
  * instruction record.
  *
  * @param {string} boardPath
- * @param {number[]} lineNumbers 1-based line numbers from readHumanBoardInstructions
+ * @param {Array<number | {lineNumber: number, text: string}>} instructions
+ * Instructions returned by readHumanBoardInstructions. Numeric entries are
+ * retained for compatibility but are reported as conflicts because they do
+ * not carry enough identity to mark safely after concurrent edits.
  * @param {string} reason
- * @returns {{boardPath: string, handledCount: number, lineNumbers: number[]}}
+ * @returns {Promise<{
+ *   boardPath: string,
+ *   handledCount: number,
+ *   lineNumbers: number[],
+ *   conflicts?: Array<{lineNumber: number, code: string, message: string}>
+ * }>}
  */
-export function markHumanBoardInstructionsHandled(boardPath, lineNumbers, reason = "processed") {
+export async function markHumanBoardInstructionsHandled(boardPath, instructions, reason = "processed") {
   const resolved = path.resolve(boardPath);
-  if (!fs.existsSync(resolved)) {
+  const selected = [];
+  const selectedLineNumbers = new Set();
+  for (const instruction of Array.isArray(instructions) ? instructions : []) {
+    const lineNumber = Number.parseInt(String(
+      instruction && typeof instruction === "object" ? instruction.lineNumber : instruction
+    ), 10);
+    if (!Number.isFinite(lineNumber) || lineNumber <= 0 || selectedLineNumbers.has(lineNumber)) {
+      continue;
+    }
+    selectedLineNumbers.add(lineNumber);
+    selected.push({
+      lineNumber,
+      text: instruction && typeof instruction === "object"
+        ? String(instruction.text ?? "").trim()
+        : "",
+    });
+  }
+  if (selected.length === 0) {
     return { boardPath: resolved, handledCount: 0, lineNumbers: [] };
   }
 
-  const selected = new Set(
-    (Array.isArray(lineNumbers) ? lineNumbers : [])
-      .map((lineNumber) => Number.parseInt(String(lineNumber), 10))
-      .filter((lineNumber) => Number.isFinite(lineNumber) && lineNumber > 0)
-  );
-  if (selected.size === 0) {
-    return { boardPath: resolved, handledCount: 0, lineNumbers: [] };
-  }
-
-  const stamp = new Date().toISOString();
-  const raw = fs.readFileSync(resolved, "utf8");
-  const lines = raw.split(/\r?\n/);
-  const handled = [];
-
-  for (const lineNumber of selected) {
-    const index = lineNumber - 1;
-    const line = lines[index];
-    if (typeof line !== "string") {
-      continue;
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  return withPilotFileLock(resolved, async () => {
+    if (!fs.existsSync(resolved)) {
+      return { boardPath: resolved, handledCount: 0, lineNumbers: [] };
     }
-    const match = line.match(/^(\s*[-*+]\s+)\[\s\](\s+.*)$/);
-    if (!match) {
-      continue;
+
+    const stamp = new Date().toISOString();
+    const raw = fs.readFileSync(resolved, "utf8");
+    const lines = raw.split(/\r?\n/);
+    const handled = [];
+    const alreadyHandled = [];
+    const conflicts = [];
+    const claimedLineNumbers = new Set();
+    const currentInstructions = parseHumanBoardInstructions(raw);
+    const handledInstructions = parseHandledHumanBoardInstructions(raw);
+
+    for (const instruction of selected) {
+      if (!instruction.text) {
+        conflicts.push({
+          lineNumber: instruction.lineNumber,
+          code: "EXPECTED_TEXT_REQUIRED",
+          message: "Refused to mark an instruction without its expected text identity.",
+        });
+        continue;
+      }
+
+      // Appends are intentionally newest-first, so the original line number
+      // may be stale. Treat it as a fast path only; relocation is safe only
+      // when the full projected text has one unchecked match.
+      const instructionAtOriginalLine = currentInstructions.find((item) => (
+        item.lineNumber === instruction.lineNumber
+        && item.text === instruction.text
+        && !claimedLineNumbers.has(item.lineNumber)
+      ));
+      const matchingInstructions = currentInstructions.filter((item) => (
+        item.text === instruction.text && !claimedLineNumbers.has(item.lineNumber)
+      ));
+      const currentInstruction = instructionAtOriginalLine
+        ?? (matchingInstructions.length === 1 ? matchingInstructions[0] : null);
+
+      if (!currentInstruction) {
+        const ambiguous = matchingInstructions.length > 1;
+        const matchingHandled = handledInstructions.filter((item) => (
+          item.text === instruction.text && !claimedLineNumbers.has(item.lineNumber)
+        ));
+        if (!ambiguous && matchingHandled.length === 1) {
+          alreadyHandled.push(matchingHandled[0].lineNumber);
+          claimedLineNumbers.add(matchingHandled[0].lineNumber);
+          continue;
+        }
+        conflicts.push({
+          lineNumber: instruction.lineNumber,
+          code: ambiguous ? "AMBIGUOUS_INSTRUCTION_IDENTITY" : "INSTRUCTION_CHANGED_OR_MISSING",
+          message: ambiguous
+            ? "Refused to mark an instruction because its expected text is no longer unique."
+            : "Refused to mark an instruction because its expected text changed or disappeared.",
+        });
+        continue;
+      }
+
+      const lineNumber = currentInstruction.lineNumber;
+      const index = lineNumber - 1;
+      const line = lines[index];
+      if (typeof line !== "string") {
+        continue;
+      }
+      const match = line.match(/^(\s*[-*+]\s+)\[\s\](\s+.*)$/);
+      if (!match) {
+        continue;
+      }
+      lines[index] = `${match[1]}[x]${match[2]} _(handled: ${reason}, ${stamp})_`;
+      handled.push(lineNumber);
+      claimedLineNumbers.add(lineNumber);
     }
-    lines[index] = `${match[1]}[x]${match[2]} _(handled: ${reason}, ${stamp})_`;
-    handled.push(lineNumber);
-  }
 
-  if (handled.length > 0) {
-    fs.writeFileSync(resolved, `${lines.join("\n").replace(/\n*$/, "")}\n`, "utf8");
-  }
+    if (handled.length > 0) {
+      writeTextFileAtomicSync(resolved, `${lines.join("\n").replace(/\n*$/, "")}\n`);
+    }
 
-  return { boardPath: resolved, handledCount: handled.length, lineNumbers: handled };
+    return {
+      boardPath: resolved,
+      handledCount: handled.length + alreadyHandled.length,
+      lineNumbers: [...handled, ...alreadyHandled],
+      ...(alreadyHandled.length > 0 ? { alreadyHandledCount: alreadyHandled.length } : {}),
+      ...(conflicts.length > 0 ? { conflicts } : {}),
+    };
+  });
 }

@@ -13,8 +13,9 @@ Real-LLM quality measurement for auto-pilot's agent interactions. Measures promp
 ## Quick Start
 
 ```bash
-# Run all quality scenarios (~10 LLM calls, ~$1-3)
-node e2e/quality/run-quality.mjs --all
+# Run all judged quality scenarios (~10 LLM calls, ~$1-3).
+# Exits non-zero if collection/judging fails or the average score is below 7.
+node e2e/quality/run-quality.mjs --all --min-score 7
 
 # Run single scenario
 node e2e/quality/run-quality.mjs --scenario e2e/quality/scenarios/q01-dispatch-prompt-quality.yaml
@@ -22,7 +23,7 @@ node e2e/quality/run-quality.mjs --scenario e2e/quality/scenarios/q01-dispatch-p
 # View trend history
 node e2e/quality/run-quality.mjs --trend
 
-# Run without judge (just probe collection, cheaper)
+# Collection-only mode: verifies valid probe artifacts, but assigns no score.
 node e2e/quality/run-quality.mjs --all --no-judge
 ```
 
@@ -74,7 +75,9 @@ Uses a second LLM call to evaluate probe quality against a rubric. Each rubric d
 
 ## Trend Analysis
 
-Results are saved to `e2e/quality/results/YYYY-MM-DD/`. The `--trend` flag shows:
+Judged results are saved as `*-result.json`; collection-only results are saved
+separately as `*-collection-result.json` and are excluded from score trends.
+The `--trend` flag shows:
 
 ```
 Quality Trend (3 runs)
@@ -106,9 +109,21 @@ date       | q01  | q02  | q03  | q04  | q05
 node e2e/quality/run-quality.mjs --all --min-score 6
 ```
 
+The command fails closed: any non-zero probe process, missing, duplicate,
+malformed, or empty probe artifact, failed judge, score outside 0–10, missing
+score, or score below `--min-score` produces a non-zero exit status.
+`--min-score` accepts values from 0 through 10 and cannot
+be combined with `--no-judge`, because collection-only mode has no score.
+
 ## Environment
 
-Requires `ANTHROPIC_API_KEY` (or `ANTHROPIC_BASE_URL` pointing to va-token). Falls back gracefully when not set.
+Requires `ANTHROPIC_API_KEY` (or `ANTHROPIC_BASE_URL` pointing to va-token) to
+produce probe artifacts. Without a key the probe collector's local stub may
+still let an enclosing workflow continue, but the quality runner deliberately
+exits non-zero because no real probe was collected.
+
+Set `QUALITY_RESULTS_DIR` to redirect generated probe/result artifacts, for
+example when running fail-path checks in a temporary directory.
 
 ## Directory Structure
 

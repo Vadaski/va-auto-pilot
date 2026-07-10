@@ -20,8 +20,9 @@ function isObject(value) {
 function sanitizeRefPart(value) {
   return String(value ?? "")
     .trim()
-    .replace(/[^A-Za-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "track";
+    .replace(/[^A-Za-z0-9._+-]+/g, "-")
+    .replace(/\.{2,}/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "") || "track";
 }
 
 export function resolveTrackWorktreePath(root, config, runId, taskId) {
@@ -99,6 +100,29 @@ export async function prepareTrackWorktree({ workDir, runId, taskId, config }) {
 
   if (fs.existsSync(targetPath)) {
     if (await isGitWorktree(targetPath)) {
+      const [status, currentBranch, worktreeHead, approvedHead, worktreeCommonDir, rootCommonDir] = await Promise.all([
+        git(["status", "--porcelain", "--untracked-files=all"], targetPath, 10_000),
+        git(["rev-parse", "--abbrev-ref", "HEAD"], targetPath, 10_000),
+        git(["rev-parse", "HEAD"], targetPath, 10_000),
+        git(["rev-parse", "HEAD"], root, 10_000),
+        git(["rev-parse", "--git-common-dir"], targetPath, 10_000),
+        git(["rev-parse", "--git-common-dir"], root, 10_000),
+      ]);
+      const dirty = splitLines(status.stdout);
+      if (dirty.length > 0) {
+        throw new Error(`refusing to reuse dirty task worktree ${targetPath}: ${dirty.join(", ")}`);
+      }
+      if (currentBranch.stdout.trim() !== branch) {
+        throw new Error(`refusing to reuse task worktree on unexpected branch ${currentBranch.stdout.trim()}: expected ${branch}`);
+      }
+      const resolvedWorktreeCommonDir = path.resolve(targetPath, worktreeCommonDir.stdout.trim());
+      const resolvedRootCommonDir = path.resolve(root, rootCommonDir.stdout.trim());
+      if (resolvedWorktreeCommonDir !== resolvedRootCommonDir) {
+        throw new Error(`refusing to reuse task worktree from a different repository: ${targetPath}`);
+      }
+      if (worktreeHead.stdout.trim() !== approvedHead.stdout.trim()) {
+        throw new Error(`refusing to reuse stale task worktree ${targetPath}: HEAD ${worktreeHead.stdout.trim()} does not match approved base ${approvedHead.stdout.trim()}`);
+      }
       return {
         enabled: true,
         status: "ready",

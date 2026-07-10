@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Regression coverage for multi-run workspace routing, cross-process human-board writes, commit approval manifests, stale locks, process-tree timeouts, DocStore path containment, scaffold symlink safety, and fail-closed quality/E2E gates
+- `--min-score` support for judged quality runs; `--no-judge` is now an explicit collection-only mode
+
+### Changed
+
+- Commit approval now binds task IDs, approved files, file hashes or isolated-worktree commits, evidence references, and the integration `HEAD`; changed context requires fresh approval
+- Git commits now serialize across parallel tracks and processes, run hooks against an isolated approved index, atomically publish the real index, and advance `HEAD` with compare-and-swap while preserving unrelated staged changes
+- Run-scoped commands reuse the workspace persisted at initialization, while active claims and executor locks prevent cross-run or duplicate dispatch
+- Plan review, permission checks, and quality probes fail closed on empty, malformed, destructive, or incomplete evidence
+- Judged quality runs require a one-to-one probe binding and derive aggregate scores from rubric dimensions instead of trusting a reported total
+- Primary evidence is secret-redacted before persistence; shareable bundles add path redaction and all managed evidence paths reject symlinked parents
+- Human intent updates and parallel state transitions now use locked atomic read-modify-write operations
+- `check:all` and CI now enforce lint across source, E2E, tests, and website JavaScript; package publication also runs deterministic checks and E2E
+- Coverage now includes focused and legacy unit suites, fails below the recorded 80/80/80/65 line/statement/function/branch floor, and runs in CI plus prepublish validation
+
+### Fixed
+
+- Prevented run/task identifiers and DocStore artifact paths from escaping managed roots
+- Prevented `init` and `upgrade` from following destination or parent-directory symlinks outside the target project
+- Prevented stale or dirty task worktrees, unrelated working-tree changes, and squash recovery from silently entering approved commits
+- On POSIX, terminate spawned worker process groups on timeout instead of leaving descendants alive (Windows currently terminates the direct child)
+- Preserved sibling active runs during shared/isolated workspace initialization and recovery
+- Preserved completed worker results through commit approval, commit, and journal recovery phases; missing or stale execution approval now returns the run to plan approval instead of dispatching
+- Prevented interrupted re-reviews from reusing an earlier PASS result and prevented checked items outside the Human Board Instructions section from satisfying intent reconciliation
+
 ## [0.2.1] - 2026-07-01
 
 ### Added

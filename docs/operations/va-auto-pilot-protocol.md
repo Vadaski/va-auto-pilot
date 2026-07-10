@@ -68,7 +68,7 @@ commands belong in `nextCommands[].argv` for the session agent.
 |------|---------|
 | `docs/todo/human-board.md` | Internal projection of strategic intent written by `auto-pilot intent` or the manager |
 | `.va-auto-pilot/orchestration/directives.json` | **Tactical** directives for the active run only (halt, replan, supersede-plan) — **not** merged into human-board |
-| `.va-auto-pilot/orchestration/run.json` | Active run phase, approved plan id, approved commit tasks |
+| `.va-auto-pilot/orchestration/run.json` | Active run phase, approved plan id, approved commit tasks and commit-manifest hash |
 | `.va-auto-pilot/orchestration/tracks.json` | Per-track execution status |
 | `.va-auto-pilot/orchestration/candidate-backlog.json` | Explicit goal-to-backlog proposal generated from unprocessed intent |
 | `.va-auto-pilot/orchestration/checkpoint.json` | Snapshot at last `approve-plan` (invalidates dispatch if stale) |
@@ -80,9 +80,9 @@ commands belong in `nextCommands[].argv` for the session agent.
 
 ### Approval gates
 
-1. **`review-plan`** — required after `plan`, before `dispatch`. Manager runs a **read-only** configured reviewer agent on `candidatePlan` + human-board context. Writes `.va-auto-pilot/orchestration/plan-review.json` bound to `planHash`. **Do not dispatch or implement until review passes** (no CRITICAL findings). Record summary in run-journal.
-2. **`approve-plan`** — required after `review-plan`, before `dispatch` unless `approvalPolicy` auto-approves the reviewed plan. Records checkpoint (sprint-state hash, human-board hash, git HEAD). Blocks if `plan-review.json` is missing, stale, or reports CRITICAL. Emergency: `--waive-review-with-reason "..."` (journaled).
-3. **`approve-commit --tasks AP-001,...`** — required after workers settle and gates pass, before `commit` unless `approvalPolicy` auto-approves the completed work.
+1. **`review-plan`** — required after `plan`, before `dispatch`. Manager runs a **read-only** configured reviewer agent on `candidatePlan` + human-board context. Writes `.va-auto-pilot/orchestration/plan-review.json` bound to `planHash`. The last non-empty output line must be exactly `PLAN REVIEW STATUS: PASS` or `PLAN REVIEW STATUS: FAIL`; structured `CRITICAL` / `WARNING` / `SUGGESTION` findings precede it. Missing or conflicting status markers fail closed. **Do not dispatch or implement until review passes** (no CRITICAL findings). Record summary in run-journal.
+2. **`approve-plan`** — required after `review-plan`, before `dispatch` unless `approvalPolicy` auto-approves the reviewed plan. Records checkpoint (sprint-state, human-board, runtime-config, candidate-plan, worker-selection hashes, plus git HEAD for isolated execution trees). Blocks if `plan-review.json` is missing, stale, or reports CRITICAL. Emergency: `--waive-review-with-reason "..."` (journaled).
+3. **`approve-commit --tasks AP-001,...`** — required after workers settle and gates pass, before `commit` unless `approvalPolicy` auto-approves the completed work. Approval binds the exact tasks, settled tracks, approved file hashes or isolated-worktree commits, evidence references, and integration `HEAD`; any drift requires approval again.
 
 `approvalPolicy` is risk based. Safe examples: `docsOnly: auto-if-gates-trusted`, `testsOnly: auto-if-gates-trusted`, `smallRefactor: auto-if-no-risk-signals`. High-risk categories such as `apiChange`, `securityChange`, and `researchClaimChange` should remain `human-required`.
 

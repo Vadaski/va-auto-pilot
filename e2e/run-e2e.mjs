@@ -12,24 +12,25 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
 
 import { createIsolatedDir } from "./fixtures/fixture-helper.mjs";
-import { readState, taskState, taskField, taskStates } from "./observers/state-observer.mjs";
+import { readState, taskState, taskField } from "./observers/state-observer.mjs";
 import { journalContains, journalHasSignal, journalEntryCount } from "./observers/journal-observer.mjs";
-import { unresolvedCount, hasUnresolvedForTask, pitfallCount } from "./observers/pitfall-observer.mjs";
+import { hasUnresolvedForTask, pitfallCount } from "./observers/pitfall-observer.mjs";
 import { parseGates, gatePassed, gateFailed, allGatesPassed } from "./observers/gate-observer.mjs";
 import { fileExists, fileContains } from "./observers/file-observer.mjs";
 
-const E2E_ROOT = import.meta.dirname;
+const E2E_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(E2E_ROOT, "..");
 
 // ---------------------------------------------------------------------------
 // Assertion evaluator
 // ---------------------------------------------------------------------------
 
-function evaluateAssertion(assertion, context) {
-  const { exitCode, stdout, stderr, stateFile, journalFile, pitfallsFile, dir } = context;
+export function evaluateAssertion(assertion, context) {
+  const { exitCode, stdout, stateFile, journalFile, pitfallsFile, dir } = context;
 
   switch (assertion.type) {
     case "exit_code":
@@ -114,6 +115,14 @@ function evaluateAssertion(assertion, context) {
         details: `gate_failed "${assertion.gate}": ${gateFailed(stdout, assertion.gate)}`,
       };
 
+    case "gate_not_run": {
+      const ran = parseGates(stdout).some((gate) => gate.name === assertion.gate);
+      return {
+        passed: !ran,
+        details: `gate_not_run "${assertion.gate}": ${!ran}`,
+      };
+    }
+
     case "all_gates_passed":
       return {
         passed: allGatesPassed(stdout),
@@ -142,6 +151,12 @@ function evaluateAssertion(assertion, context) {
         details: `file_exists "${assertion.path}": ${fileExists(dir, assertion.path)}`,
       };
 
+    case "file_not_exists":
+      return {
+        passed: !fileExists(dir, assertion.path),
+        details: `file_not_exists "${assertion.path}": ${!fileExists(dir, assertion.path)}`,
+      };
+
     case "file_contains":
       return {
         passed: fileContains(dir, assertion.path, assertion.pattern),
@@ -153,6 +168,16 @@ function evaluateAssertion(assertion, context) {
   }
 }
 
+export function buildFixtureOptions(setup, scenarioPath) {
+  return {
+    sprintState: setup.sprint_state,
+    humanBoard: setup.human_board,
+    pitfalls: setup.pitfalls,
+    config: setup.config,
+    prefix: path.basename(scenarioPath, ".yaml"),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Scenario runner
 // ---------------------------------------------------------------------------
@@ -161,8 +186,8 @@ function evaluateAssertion(assertion, context) {
  * Run a single E2E scenario (possibly multi-step).
  * @param {string} scenarioPath - Absolute path to the YAML file
  * @param {object} opts
- * @param {boolean} opts.keepTmpdir - If true, don't clean up temp dirs
- * @param {boolean} opts.demo - If true, print narrative
+ * @param {boolean} [opts.keepTmpdir] - If true, don't clean up temp dirs
+ * @param {boolean} [opts.demo] - If true, print narrative
  * @returns {{ name: string, passed: boolean, steps: object[], duration: number }}
  */
 export function runScenario(scenarioPath, opts = {}) {
@@ -196,12 +221,7 @@ export function runScenario(scenarioPath, opts = {}) {
     // Create or reuse isolated directory
     if (!sharedDir) {
       const fixture = setup.fixture || "minimal-node";
-      const fixtureOpts = {
-        sprintState: setup.sprint_state,
-        humanBoard: setup.human_board,
-        pitfalls: setup.pitfalls,
-        prefix: path.basename(scenarioPath, ".yaml"),
-      };
+      const fixtureOpts = buildFixtureOptions(setup, scenarioPath);
       const isolated = createIsolatedDir(fixture, fixtureOpts);
       sharedDir = isolated.dir;
       sharedCtx = isolated;
@@ -348,7 +368,7 @@ export function runScenario(scenarioPath, opts = {}) {
 // CLI entry point
 // ---------------------------------------------------------------------------
 
-function main() {
+export function main() {
   const args = process.argv.slice(2);
   const opts = { keepTmpdir: false, demo: false };
 
@@ -413,4 +433,8 @@ function main() {
   process.exit(totalFailed > 0 ? 1 : 0);
 }
 
-main();
+const isDirectRun = process.argv[1]
+  && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+if (isDirectRun) {
+  main();
+}

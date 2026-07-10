@@ -406,7 +406,9 @@ test("validate reports duplicate INDEX paths", async () => {
   const decision = await store.createDecision({ title: "Different" });
   const index = await store.getIndex();
 
-  index.entries[decision.id].path = index.entries[design.id].path;
+  // Duplicate the canonical record under a second INDEX key. Mutating only
+  // `path` would now be rejected earlier by canonical record validation.
+  index.entries[decision.id] = { ...index.entries[design.id] };
   await writeIndexAtomic(path.join(root, "INDEX.json"), index);
 
   const report = await store.validate();

@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 
-import { readQualityGateConfig } from "./lib/sprint-utils.mjs";
+import { readQualityGateConfig, resolveDefaults } from "./lib/sprint-utils.mjs";
 import { ColonyBridge } from "./lib/colony-bridge.mjs";
 import {
   buildOrchestrationOpts,
@@ -15,6 +16,7 @@ import {
 } from "./lib/orchestration-cli.mjs";
 import {
   assertActiveRun,
+  assertSafeRunId,
   buildRecoveryPlan,
   buildCheckpoint,
   clearActiveRun,
@@ -41,6 +43,7 @@ import {
 } from "./lib/orchestration-state.mjs";
 import { planFromGoal } from "./lib/goal-backlog.mjs";
 import {
+  commitPaths,
   detectStopCondition,
   executeSingleTask,
   finalizeDoneTaskCommit,
@@ -55,7 +58,12 @@ import {
   validatePlanReviewForApprove,
   writePlanReview,
 } from "./lib/plan-review.mjs";
-import { appendEventLog, buildEvent, observabilityPaths } from "./lib/observability.mjs";
+import {
+  appendEventLog,
+  buildEvent,
+  ensureSafeManagedPath,
+  observabilityPaths,
+} from "./lib/observability.mjs";
 import {
   collectApprovalChangeContext,
   evaluateApprovalPolicy,
@@ -69,17 +77,319 @@ import {
   squashMergeTrackCommit,
 } from "./lib/worktree-isolation.mjs";
 import { DEFAULT_TASK_CLAIM_TTL_MS } from "./lib/constants.mjs";
-import { writeWorkspace } from "./lib/workspace.mjs";
+import { resolveWorkspacePaths, writeWorkspace } from "./lib/workspace.mjs";
 import { planTaskIds } from "./lib/plan-helpers.mjs";
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./lib/pilot-state.mjs";
+import { resolveHumanBoardPath } from "./lib/human-board.mjs";
 
 const execFileAsync = promisify(execFile);
 const MAX_SQUASH_MERGE_ATTEMPTS = 3;
+
+const ACTION_PHASES = Object.freeze({
+  plan: Object.freeze([
+    "initialized",
+    "awaiting-plan-approval",
+    "plan-reviewed",
+    "plan-approved",
+    "dry-run-preview",
+    "cycle-closed",
+  ]),
+  "review-plan": Object.freeze([
+    "awaiting-plan-approval",
+    "plan-reviewed",
+    "plan-approved",
+  ]),
+  "approve-plan": Object.freeze([
+    "awaiting-plan-approval",
+    "plan-reviewed",
+    "plan-approved",
+  ]),
+});
+
+/**
+ * Pure phase validation for plan-governance actions. These actions may be retried
+ * before dispatch, and a new cycle may plan again after its journal is closed, but
+ * they must never rewrite approval state while workers or commits are in flight.
+ */
+export function validateOrchestrationActionPhase(action, phase) {
+  const allowedPhases = ACTION_PHASES[action] ?? [];
+  return {
+    ok: allowedPhases.includes(phase),
+    action,
+    phase,
+    allowedPhases: [...allowedPhases],
+  };
+}
+
+function sortedUniqueStrings(values) {
+  return [...new Set(Array.isArray(values) ? values.map(String) : [])].sort();
+}
+
+/**
+ * A Done sprint task is commit-eligible only when its worker track settled
+ * successfully. Isolated tracks additionally bind the exact result commit and its
+ * file list, so a commit failure or manifest mismatch cannot be mistaken for a
+ * successful worker result.
+ */
+export function validateCommitReadyTrack(track) {
+  if (!track) {
+    return { ok: false, reason: "missing worker track" };
+  }
+  if (track.state !== "settled") {
+    return { ok: false, reason: `worker track state is ${track.state ?? "missing"}, not settled` };
+  }
+  if (track.resultStatus !== "succeeded") {
+    return { ok: false, reason: `worker track result is ${track.resultStatus ?? "unverified"}, not succeeded` };
+  }
+  if (track.error) {
+    return { ok: false, reason: `worker track recorded an error: ${track.error}` };
+  }
+  if (track.sprintState !== "Done") {
+    return { ok: false, reason: `worker track sprint state is ${track.sprintState ?? "missing"}, not Done` };
+  }
+  if (track.worktree?.enabled === true) {
+    const resultCommit = String(track.worktree.resultCommit ?? "").trim();
+    if (!resultCommit) {
+      return { ok: false, reason: "isolated worker track has no result commit" };
+    }
+    const approvedFiles = sortedUniqueStrings(track.approvalFiles);
+    const committedFiles = sortedUniqueStrings(track.worktree.commitResult?.files);
+    if (JSON.stringify(approvedFiles) !== JSON.stringify(committedFiles)) {
+      return {
+        ok: false,
+        reason: `isolated worker file manifest mismatch: approved ${approvedFiles.join(", ") || "<none>"}; committed ${committedFiles.join(", ") || "<none>"}`,
+      };
+    }
+  }
+  return { ok: true, reason: "" };
+}
+
+export function selectCommitReadyTasks(state, candidatePlan, tracksDoc) {
+  const plannedTaskIds = new Set(planTaskIds(candidatePlan));
+  const tracksByTaskId = new Map((tracksDoc?.tracks ?? []).map((track) => [track.taskId, track]));
+  return (state?.tasks ?? []).filter((task) => {
+    if (!plannedTaskIds.has(task.id) || task.state !== "Done") {
+      return false;
+    }
+    return validateCommitReadyTrack(tracksByTaskId.get(task.id)).ok;
+  });
+}
+
+/**
+ * Persist one Promise.allSettled worker outcome onto its track. Rejections and
+ * non-committable Done results become explicit failed tracks; they are never
+ * represented by the same `settled` state used by successful results.
+ */
+export function settleWorkerTrackOutcome(track, outcome, sprintTask, settledAt) {
+  track.lastHeartbeat = settledAt;
+  if (sprintTask) {
+    track.sprintState = sprintTask.state;
+  }
+
+  if (outcome.status === "rejected") {
+    const message = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+    track.state = "failed";
+    track.resultStatus = "failed";
+    track.resultAction = "track-error";
+    track.error = message;
+    track.approvalFiles = [];
+    if (track.worktree) {
+      delete track.worktree.resultCommit;
+      delete track.worktree.commitResult;
+    }
+    return { taskId: track.taskId, action: "track-error", details: message };
+  }
+
+  const result = outcome.value;
+  const sprintTerminal = sprintTask && ["Done", "Failed"].includes(sprintTask.state);
+  track.state = result.terminal || result.skipped || sprintTerminal ? "settled" : "running";
+  track.resultAction = result.action;
+  delete track.error;
+  if (result.pid) {
+    track.pid = result.pid;
+  }
+
+  if (track.state === "settled" && sprintTask?.state === "Done") {
+    track.resultStatus = "succeeded";
+    const readiness = validateCommitReadyTrack(track);
+    if (!readiness.ok) {
+      track.state = "failed";
+      track.resultStatus = "failed";
+      track.resultAction = "track-error";
+      track.error = readiness.reason;
+      track.approvalFiles = [];
+      if (track.worktree) {
+        delete track.worktree.resultCommit;
+        delete track.worktree.commitResult;
+      }
+      return { taskId: track.taskId, action: "track-error", details: readiness.reason };
+    }
+  } else if (sprintTask?.state === "Failed") {
+    track.state = "failed";
+    track.resultStatus = "failed";
+  } else if (track.state === "settled") {
+    track.resultStatus = "skipped";
+  } else {
+    track.resultStatus = "pending";
+  }
+
+  return result;
+}
 
 function tasksForPlan(state, plan) {
   const taskIds = new Set(planTaskIds(plan));
   return (Array.isArray(state?.tasks) ? state.tasks : [])
     .filter((task) => taskIds.has(task.id));
+}
+
+function hashApprovalValue(value) {
+  return crypto.createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+}
+
+function hashFileIdentity(mode, content) {
+  return crypto.createHash("sha256")
+    .update(`${mode}\0`, "utf8")
+    .update(content)
+    .digest("hex");
+}
+
+function hashApprovedFile(workDir, file) {
+  const root = path.resolve(workDir);
+  const target = path.resolve(root, file);
+  const relative = path.relative(root, target);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`approved commit file escapes worktree: ${file}`);
+  }
+  if (!fs.existsSync(target)) {
+    return null;
+  }
+  const stat = fs.lstatSync(target);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(`approved commit file must be a regular file: ${file}`);
+  }
+  const mode = (stat.mode & 0o111) !== 0 ? "100755" : "100644";
+  return hashFileIdentity(mode, fs.readFileSync(target));
+}
+
+function hashApprovedCommitFile(workDir, commit, file) {
+  const root = path.resolve(workDir);
+  const target = path.resolve(root, file);
+  const relative = path.relative(root, target);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`approved commit file escapes worktree: ${file}`);
+  }
+  const treeEntry = execFileSync("git", ["ls-tree", "-z", commit, "--", file], {
+    cwd: root,
+    encoding: "buffer",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (treeEntry.length === 0) {
+    return null;
+  }
+  const mode = treeEntry.toString("utf8").split(" ", 1)[0];
+  const content = execFileSync("git", ["show", `${commit}:${file}`], {
+    cwd: root,
+    encoding: "buffer",
+    stdio: ["ignore", "pipe", "ignore"],
+    maxBuffer: 50 * 1024 * 1024,
+  });
+  return hashFileIdentity(mode, content);
+}
+
+export function collectEvidenceBundleFiles(workDir, relativeManifest) {
+  if (!relativeManifest) {
+    return [];
+  }
+  const root = path.resolve(workDir);
+  const evidenceRoot = path.resolve(root, ".va-auto-pilot", "evidence");
+  const manifest = path.resolve(root, relativeManifest);
+  const manifestRelative = path.relative(evidenceRoot, manifest);
+  if (!manifestRelative
+      || manifestRelative.startsWith("..")
+      || path.isAbsolute(manifestRelative)
+      || path.basename(manifest) !== "manifest.json") {
+    throw new Error(`evidence manifest escapes the managed evidence root: ${relativeManifest}`);
+  }
+  const bundleDir = path.dirname(manifest);
+  ensureSafeManagedPath(root, bundleDir, { directory: true, create: false });
+  ensureSafeManagedPath(root, manifest);
+  const files = [];
+  const visit = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      const absolute = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw new Error(`evidence bundle must not contain symbolic links: ${toRepoPath(absolute, root)}`);
+      }
+      if (entry.isDirectory()) {
+        visit(absolute);
+      } else if (entry.isFile()) {
+        files.push(toRepoPath(absolute, root));
+      }
+    }
+  };
+  if (!fs.existsSync(manifest) || !fs.lstatSync(manifest).isFile()) {
+    throw new Error(`evidence manifest does not exist: ${relativeManifest}`);
+  }
+  visit(bundleDir);
+  return sortedUniqueStrings(files.filter(Boolean));
+}
+
+function collectManagerApprovalFiles(opts) {
+  return sortedUniqueStrings([
+    opts.stateFile,
+    opts.boardFile,
+    opts.journalFile,
+    opts.pitfallsFile,
+    opts.stateFile ? resolveHumanBoardPath(opts.stateFile) : "",
+    path.resolve(opts.workDir, ".va-auto-pilot", "evidence", "eval-history.jsonl"),
+  ].map((file) => file ? toRepoPath(file, opts.workDir) : "").filter((file) => (
+    file && fs.existsSync(path.resolve(opts.workDir, file))
+  )));
+}
+
+export function buildCommitApprovalManifest(tasks, tracksDoc, opts) {
+  const tracksByTaskId = new Map((tracksDoc?.tracks ?? []).map((track) => [track.taskId, track]));
+  const entries = tasks.map((task) => {
+    const track = tracksByTaskId.get(task.id);
+    const readiness = validateCommitReadyTrack(track);
+    if (!readiness.ok) {
+      throw new Error(`cannot build commit approval manifest for ${task.id}: ${readiness.reason}`);
+    }
+    const files = sortedUniqueStrings(track.approvalFiles);
+    const evidenceFiles = sortedUniqueStrings(track.evidenceFiles);
+    const resultCommit = String(track.worktree?.resultCommit ?? "");
+    const evidenceBundle = String(track.evidenceBundle ?? "");
+    if (evidenceBundle && !evidenceFiles.includes(evidenceBundle)) {
+      throw new Error(`cannot build commit approval manifest for ${task.id}: evidence manifest is not in the approved evidence files`);
+    }
+    return {
+      taskId: task.id,
+      files,
+      resultCommit,
+      evidenceBundle,
+      evidenceFiles,
+      fileHashes: Object.fromEntries(files.map((file) => [
+        file,
+        resultCommit
+          ? hashApprovedCommitFile(opts.workDir, resultCommit, file)
+          : hashApprovedFile(opts.workDir, file),
+      ])),
+      evidenceFileHashes: Object.fromEntries(
+        evidenceFiles.map((file) => [file, hashApprovedFile(opts.workDir, file)])
+      ),
+    };
+  }).sort((left, right) => left.taskId.localeCompare(right.taskId));
+  const managerFiles = collectManagerApprovalFiles(opts);
+  const manifest = {
+    schemaVersion: 1,
+    baseHead: computeGitHead(opts.workDir),
+    managerFiles,
+    managerFileHashes: Object.fromEntries(
+      managerFiles.map((file) => [file, hashApprovedFile(opts.workDir, file)])
+    ),
+    tasks: entries,
+  };
+  return { manifest, hash: hashApprovalValue(manifest) };
 }
 
 function buildTrackOpts(base, overrides = {}) {
@@ -177,6 +487,64 @@ async function resetSquashMergeState(opts) {
   await git(["reset", "--merge"], opts);
 }
 
+async function rollbackSquashMergedFiles(track, opts) {
+  const files = sortedUniqueStrings([
+    ...(track?.approvalFiles ?? []),
+    ...(track?.worktree?.commitResult?.files ?? []),
+  ]);
+  if (files.length === 0) {
+    await resetSquashMergeState(opts);
+    return;
+  }
+  await git(["reset", "-q", "HEAD", "--", ...files], opts);
+  for (const file of files) {
+    const repoFile = toRepoPath(path.resolve(opts.workDir, file), opts.workDir);
+    if (!repoFile) {
+      throw new Error(`cannot roll back squash path outside integration tree: ${file}`);
+    }
+    const trackedAtHead = await git(["cat-file", "-e", `HEAD:${repoFile}`], opts)
+      .then(() => true)
+      .catch(() => false);
+    if (trackedAtHead) {
+      await git(["restore", "--worktree", "--source=HEAD", "--", repoFile], opts);
+    } else {
+      fs.rmSync(path.resolve(opts.workDir, repoFile), { recursive: true, force: true });
+    }
+  }
+}
+
+export async function assertCleanIntegrationTree(opts, { runtimeWorktreePaths = [] } = {}) {
+  const status = await git(["status", "--porcelain", "--untracked-files=all"], opts);
+  const allowedControlFiles = new Set([
+    opts.stateFile,
+    opts.boardFile,
+    opts.journalFile,
+    opts.pitfallsFile,
+    opts.stateFile ? resolveHumanBoardPath(opts.stateFile) : "",
+  ].map((file) => file ? toRepoPath(file, opts.workDir) : "").filter(Boolean));
+  const allowedWorktreePrefixes = runtimeWorktreePaths
+    .map((file) => file ? toRepoPath(file, opts.workDir) : "")
+    .filter(Boolean)
+    .map((file) => `${file.replace(/\/+$/, "")}/`);
+  const dirty = status.stdout.split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => ({ line, file: line.slice(3).replace(/^"|"$/g, "") }))
+    .filter(({ file }) => !allowedControlFiles.has(file)
+      && !file.startsWith(".va-auto-pilot/orchestration/")
+      && !file.startsWith(".va-auto-pilot/evidence/")
+      && !file.startsWith(".va-auto-pilot/parallel-runs/")
+      && !allowedWorktreePrefixes.some((prefix) => file.startsWith(prefix)))
+    .map(({ line }) => line.trim());
+  if (dirty.length > 0) {
+    const error = /** @type {Error & { code: string, dirtyFiles: string[] }} */ (new Error(
+      `refusing to squash-merge into a dirty integration tree; preserve or commit these files first: ${dirty.join(", ")}`
+    ));
+    error.code = "DIRTY_INTEGRATION_TREE";
+    error.dirtyFiles = dirty;
+    throw error;
+  }
+}
+
 async function squashMergeTrackCommitWithRetry({ opts, track, taskId, observedHead = "", maxAttempts = MAX_SQUASH_MERGE_ATTEMPTS }) {
   let lastError = null;
   let lastHead = computeGitHead(opts.workDir);
@@ -243,30 +611,20 @@ async function commitControlFiles(files, header, opts) {
     return { committed: false, skipped: true, reason: "no repo-local files", files: [], hash: "", header };
   }
 
-  await git(["add", "--all", "--force", "--", ...repoFiles], opts, repoRoot);
-  const staged = await git(["diff", "--cached", "--name-only", "--relative", "--", ...repoFiles], opts, repoRoot);
-  const stagedFiles = staged.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  if (stagedFiles.length === 0) {
-    return { committed: false, skipped: true, reason: "no staged changes", files: [], hash: "", header };
+  const tracked = await git(["ls-files", "--cached", "-z", "--", ...repoFiles], opts, repoRoot);
+  const trackedFiles = new Set(tracked.stdout.split("\0").filter(Boolean));
+  const stageableFiles = repoFiles.filter((file) => (
+    trackedFiles.has(file) || fs.existsSync(path.join(repoRoot, file))
+  ));
+  if (stageableFiles.length === 0) {
+    return { committed: false, skipped: true, reason: "no existing or tracked control files", files: [], hash: "", header };
   }
 
-  await git([
-    "commit",
-    "-m", header,
-    "-m", "Co-Authored-By: Claude <noreply@anthropic.com>",
-    "--only",
-    "--",
-    ...stagedFiles,
-  ], opts, repoRoot);
-  const head = await git(["rev-parse", "HEAD"], opts, repoRoot);
-  return {
-    committed: true,
-    skipped: false,
-    reason: "",
-    files: stagedFiles,
-    hash: head.stdout.trim(),
-    header,
-  };
+  return withSerializedCommit(opts, () => commitPaths(header, stageableFiles, {
+    ...opts,
+    workDir: repoRoot,
+    commitLockHeld: true,
+  }));
 }
 
 async function appendGovernanceEvent(opts, run, eventType, payload) {
@@ -281,7 +639,8 @@ async function appendGovernanceEvent(opts, run, eventType, payload) {
       phase: run.phase,
       payload,
       provenance: { source: "auto-pilot-orchestrate" },
-    })
+    }),
+    { safeRoot: opts.workDir }
   );
 }
 
@@ -298,7 +657,23 @@ function assertRunnablePhase(run, opts) {
   }
 }
 
+function assertActionPhase(run, action, opts) {
+  const validation = validateOrchestrationActionPhase(action, run.phase);
+  if (!validation.ok) {
+    fail(
+      opts,
+      "INVALID_PHASE",
+      `${action} requires phase ${validation.allowedPhases.join(" or ")} (current: ${run.phase})`,
+      { action, phase: run.phase, allowedPhases: validation.allowedPhases },
+      2
+    );
+  }
+}
+
 async function validatePreDispatch(run, opts) {
+  if (!["plan-approved", "dry-run-preview"].includes(run.phase)) {
+    fail(opts, "INVALID_PHASE", `dispatch requires phase plan-approved (current: ${run.phase})`, { phase: run.phase }, 2);
+  }
   const directives = readDirectives(opts.workDir, opts.runId);
   if (hasHaltDirective(directives)) {
     fail(opts, "HALTED", "directives.json contains halt-run", { directives }, 2);
@@ -309,7 +684,14 @@ async function validatePreDispatch(run, opts) {
   }
 
   const checkpoint = readCheckpoint(opts.workDir, opts.runId);
-  const stale = isCheckpointStale(checkpoint, { stateFile: opts.stateFile, workDir: opts.workDir, workspace: opts.workspace });
+  const stale = isCheckpointStale(checkpoint, {
+    stateFile: opts.stateFile,
+    workDir: opts.workDir,
+    workspace: opts.workspace,
+    runId: run.runId,
+    candidatePlan: run.candidatePlan,
+    approvedPlanId: run.approvedPlanId,
+  });
   if (stale.stale) {
     await appendGovernanceEvent(opts, run, "checkpoint.stale", {
       checkpointId: checkpoint?.governance?.checkpointId ?? checkpoint?.approvedPlanId ?? null,
@@ -319,6 +701,24 @@ async function validatePreDispatch(run, opts) {
       resumePhase: "awaiting-plan-approval",
     });
     fail(opts, "STALE_CONTEXT", stale.reason, { checkpoint }, 2);
+  }
+
+  const state = readSprintState(opts.stateFile);
+  const taskById = new Map((state.tasks ?? []).map((task) => [task.id, task]));
+  for (const taskId of planTaskIds(run.candidatePlan)) {
+    const task = taskById.get(taskId);
+    if (!task) {
+      fail(opts, "PLAN_TASK_MISSING", `planned task ${taskId} no longer exists`, { taskId }, 2);
+    }
+    const expiresAt = task.claimExpiresAt ? Date.parse(task.claimExpiresAt) : NaN;
+    const claimExpired = Number.isFinite(expiresAt) && expiresAt < Date.now();
+    if (task.claimedBy !== run.runId || claimExpired) {
+      fail(opts, "CLAIM_REQUIRED", `planned task ${taskId} is not actively claimed by ${run.runId}`, {
+        taskId,
+        claimedBy: task.claimedBy ?? "",
+        claimExpiresAt: task.claimExpiresAt ?? "",
+      }, 2);
+    }
   }
 
 }
@@ -341,12 +741,18 @@ async function orchestrateClose(opts) {
   run.candidateBacklog = null;
   run.approvedPlanId = null;
   run.approvedCommitTasks = [];
+  run.commitApprovalManifest = null;
+  run.commitApprovalManifestHash = null;
+  run.approvedCommitManifest = null;
+  run.approvedCommitManifestHash = null;
   run.updatedAt = new Date().toISOString();
   await writeRun(opts.workDir, run, opts.runId);
   await writeTracks(opts.workDir, { runId: run.runId, tracks: [] }, opts.runId);
   clearCheckpoint(opts.workDir, opts.runId);
   clearPlanReview(opts.workDir, opts.runId);
-  await clearActiveRun(opts.workDir, opts.runId ? run.runId : "");
+  if (opts.runId) {
+    await clearActiveRun(opts.workDir, run.runId);
+  }
   await refreshSnapshot(opts);
   return emitResult(opts, { ok: true, action: "close", runId: run.runId });
 }
@@ -359,6 +765,7 @@ async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
   const applied = [];
   let runChanged = false;
   let tracksChanged = false;
+  let closeRunRequested = false;
   const now = new Date().toISOString();
 
   for (const mutation of plan.mutations) {
@@ -372,6 +779,7 @@ async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
       run.approvedPlanId = null;
       run.phase = "awaiting-plan-approval";
       clearCheckpoint(opts.workDir, opts.runId);
+      clearPlanReview(opts.workDir, opts.runId);
       runChanged = true;
       applied.push(mutation);
     }
@@ -388,14 +796,54 @@ async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
       applied.push(mutation);
     }
 
+    if (mutation.type === "requeue-track") {
+      for (const track of tracksDoc.tracks ?? []) {
+        if (track.taskId !== mutation.taskId) continue;
+        track.state = "queued";
+        track.pid = null;
+        track.startedAt = null;
+        track.resultStatus = null;
+        track.resultAction = mutation.resultAction;
+        track.error = "";
+        track.lastHeartbeat = now;
+        tracksChanged = true;
+      }
+      if (run.phase === "running") {
+        run.phase = "dispatch-queued";
+      }
+      run.locks = { ...(run.locks ?? {}), executorPid: null };
+      runChanged = true;
+      applied.push(mutation);
+    }
+
     if (mutation.type === "close-run") {
       run.phase = "done";
       run.locks = { ...(run.locks ?? {}), executorPid: null };
       run.approvedPlanId = null;
       run.approvedCommitTasks = [];
+      run.candidatePlan = null;
+      run.candidateBacklog = null;
+      run.commitApprovalManifest = null;
+      run.commitApprovalManifestHash = null;
+      run.approvedCommitManifest = null;
+      run.approvedCommitManifestHash = null;
       clearCheckpoint(opts.workDir, opts.runId);
+      clearPlanReview(opts.workDir, opts.runId);
       runChanged = true;
+      closeRunRequested = true;
       applied.push(mutation);
+    }
+  }
+
+  if (closeRunRequested) {
+    const releaseResult = await sprintBoardExec(["release", "--run-id", run.runId, "--json"], opts);
+    if (releaseResult.exitCode !== 0) {
+      throw new Error(`recovery could not release claims for ${run.runId}: ${releaseResult.stderr || releaseResult.stdout}`);
+    }
+    tracksDoc.tracks = [];
+    tracksChanged = true;
+    if (opts.runId) {
+      await clearActiveRun(opts.workDir, run.runId);
     }
   }
 
@@ -420,9 +868,14 @@ async function orchestrateRecover(opts) {
   const tracksDoc = readTracks(opts.workDir, opts.runId);
   const state = readSprintState(opts.stateFile);
   const checkpoint = readCheckpoint(opts.workDir, opts.runId);
-  const checkpointStatus = checkpoint
-    ? isCheckpointStale(checkpoint, { stateFile: opts.stateFile, workDir: opts.workDir, workspace: opts.workspace })
-    : { stale: false, reason: "" };
+  const checkpointStatus = isCheckpointStale(checkpoint, {
+    stateFile: opts.stateFile,
+    workDir: opts.workDir,
+    workspace: opts.workspace,
+    runId: run?.runId ?? opts.runId,
+    candidatePlan: run?.candidatePlan,
+    approvedPlanId: run?.approvedPlanId,
+  });
   const directives = readDirectives(opts.workDir, opts.runId);
   const plan = buildRecoveryPlan({
     run,
@@ -452,6 +905,38 @@ async function orchestrateRecover(opts) {
   }, ok ? 0 : 1);
 }
 
+/** Rebuild the state/board routing captured by a persisted run. */
+export function buildPersistedRunOpts(opts, run) {
+  const defaults = resolveDefaults(opts.workDir);
+  const persisted = run?.workspace && typeof run.workspace === "object" ? run.workspace : {};
+  const workspacePaths = resolveWorkspacePaths(opts.workDir, {
+    name: persisted.name ?? "default",
+    isolated: persisted.type === "isolated",
+    fallback: {
+      stateFile: defaults.stateFile,
+      boardFile: defaults.boardFile,
+      journalFile: defaults.journalFile,
+      pitfallsFile: ".va-auto-pilot/pitfalls.json",
+    },
+  });
+  const selectPath = (key) => path.resolve(persisted[key] || workspacePaths[key]);
+  return {
+    ...opts,
+    runId: run.runId,
+    stateFile: selectPath("stateFile"),
+    boardFile: selectPath("boardFile"),
+    journalFile: selectPath("journalFile"),
+    pitfallsFile: selectPath("pitfallsFile"),
+    workspace: {
+      name: persisted.name ?? workspacePaths.name,
+      type: persisted.type === "isolated" ? "isolated" : "shared",
+      dir: persisted.dir ?? workspacePaths.dir,
+      executionTree: persisted.executionTree ?? "isolated",
+    },
+    sprintBoardLock: Promise.resolve(),
+  };
+}
+
 /**
  * Scan all active runs and release claims held by runs whose lease has expired
  * (heartbeat older than the claim TTL) AND that have no live track. A run with a
@@ -460,7 +945,7 @@ async function orchestrateRecover(opts) {
  *
  * @returns {Promise<{ released: Array<{ runId: string, taskIds: string[] }>, skipped: boolean }>}
  */
-async function recoverDeadRunClaims(opts) {
+export async function recoverDeadRunClaims(opts) {
   const activeRuns = readActiveRuns(opts.workDir);
   if (activeRuns.length === 0) {
     return { released: [], skipped: true };
@@ -489,7 +974,15 @@ async function recoverDeadRunClaims(opts) {
     }
 
     // Find tasks this dead run still claims and release them.
-    const state = readSprintState(opts.stateFile);
+    const persistedRun = readRun(opts.workDir, entry.runId);
+    if (!persistedRun) {
+      continue;
+    }
+    const runOpts = buildPersistedRunOpts(opts, persistedRun);
+    if (!fs.existsSync(runOpts.stateFile)) {
+      continue;
+    }
+    const state = readSprintState(runOpts.stateFile);
     const claimedByDead = (state.tasks ?? [])
       .filter((task) => task.claimedBy === entry.runId && task.state !== "Done" && task.state !== "Failed")
       .map((task) => task.id);
@@ -499,7 +992,7 @@ async function recoverDeadRunClaims(opts) {
 
     const releaseResult = await sprintBoardExec(
       ["release", "--run-id", entry.runId, "--json"],
-      opts
+      runOpts
     );
     if (releaseResult.exitCode === 0) {
       released.push({ runId: entry.runId, taskIds: claimedByDead });
@@ -507,6 +1000,51 @@ async function recoverDeadRunClaims(opts) {
   }
 
   return { released, skipped: false };
+}
+
+async function promoteLegacyRootRun(opts) {
+  const rootPaths = orchestrationPaths(opts.workDir);
+  fs.mkdirSync(rootPaths.rootDir, { recursive: true });
+  const promotionLock = path.join(rootPaths.rootDir, "legacy-root-promotion");
+  return withPilotFileLock(promotionLock, async () => {
+    const legacyRun = readRun(opts.workDir, "");
+    if (!legacyRun?.runId) {
+      return null;
+    }
+    const runId = assertSafeRunId(legacyRun.runId);
+    const scopedPaths = orchestrationPaths(opts.workDir, runId);
+    if (!fs.existsSync(scopedPaths.run)) {
+      fs.mkdirSync(scopedPaths.dir, { recursive: true });
+      for (const key of [
+        "run",
+        "tracks",
+        "checkpoint",
+        "snapshot",
+        "directives",
+        "candidateBacklog",
+        "candidatePlan",
+        "planReview",
+      ]) {
+        const source = rootPaths[key];
+        const destination = scopedPaths[key];
+        if (!source || !destination || !fs.existsSync(source)) continue;
+        const stat = fs.lstatSync(source);
+        if (stat.isSymbolicLink() || !stat.isFile()) {
+          throw new Error(`legacy orchestration control file is not a regular file: ${source}`);
+        }
+        const value = JSON.parse(fs.readFileSync(source, "utf8"));
+        writeJsonFileAtomicSync(destination, value);
+      }
+    }
+    if (!isTerminalRunPhase(legacyRun.phase)) {
+      await writeActiveRun(opts.workDir, {
+        runId,
+        startedAt: legacyRun.startedAt,
+        heartbeatAt: legacyRun.updatedAt ?? legacyRun.startedAt,
+      });
+    }
+    return legacyRun;
+  });
 }
 
 async function initRun(opts) {
@@ -522,13 +1060,31 @@ async function initRun(opts) {
     || opts.parsed?.flags?.has("shared-tree");
   if (!hasExplicitRunId && !hasExplicitWorkspace) {
     const active = readActiveRuns(opts.workDir);
+    const legacyRoot = readRun(opts.workDir, "");
+    if (legacyRoot?.runId
+        && !isTerminalRunPhase(legacyRoot.phase)
+        && !active.some((entry) => entry.runId === legacyRoot.runId)) {
+      active.push({
+        runId: legacyRoot.runId,
+        startedAt: legacyRoot.startedAt ?? "",
+        heartbeatAt: legacyRoot.updatedAt ?? legacyRoot.startedAt ?? "",
+      });
+    }
     if (active.length > 0) {
       const lines = active.map((entry) => `  - ${entry.runId} (heartbeat ${entry.heartbeatAt || "unknown"})`).join("\n");
       fail(opts, "INIT_AMBIGUOUS", `an active run already exists:\n${lines}\n\nChoose explicitly:\n  join shared:    orchestrate init --workspace default\n  isolated sprint: orchestrate init --workspace <name> --isolated\n  specific run:   orchestrate init --run-id <id>`, { activeRuns: active }, 2);
     }
   }
 
-  const scopedRunId = opts.parsed?.options?.["run-id"] ? (opts.runId || createRunId()) : "";
+  // Any explicit multi-run choice gets a scoped identity, even when the caller
+  // omits --run-id. Keeping such runs at the legacy root would overwrite the
+  // zero-config run and clear sibling entries from active.json.
+  const explicitMultiRunChoice = Boolean(opts.parsed?.options?.["run-id"])
+    || hasExplicitWorkspace;
+  if (explicitMultiRunChoice) {
+    await promoteLegacyRootRun(opts);
+  }
+  const scopedRunId = explicitMultiRunChoice ? (opts.runId || createRunId()) : "";
   const runId = scopedRunId || createRunId();
   opts.runId = scopedRunId;
   const now = new Date().toISOString();
@@ -583,7 +1139,17 @@ async function initRun(opts) {
     candidatePlan: null,
     candidateBacklog: null,
     approvedCommitTasks: [],
-    workspace: opts.workspace ?? { name: "default", type: "shared", executionTree: "isolated" },
+    commitApprovalManifest: null,
+    commitApprovalManifestHash: null,
+    approvedCommitManifest: null,
+    approvedCommitManifestHash: null,
+    workspace: {
+      ...(opts.workspace ?? { name: "default", type: "shared", executionTree: "isolated" }),
+      stateFile: opts.stateFile,
+      boardFile: opts.boardFile,
+      journalFile: opts.journalFile,
+      pitfallsFile: opts.pitfallsFile,
+    },
     locks: { executorPid: null },
     startedAt: now,
     updatedAt: now,
@@ -598,15 +1164,16 @@ async function initRun(opts) {
       startedAt: run.startedAt,
       heartbeatAt: now,
     });
-  } else {
-    await clearActiveRun(opts.workDir);
   }
+  // A legacy root run is intentionally not indexed. Do not clear active.json:
+  // another process may have registered a scoped run after the startup guard.
   return run;
 }
 
 async function orchestratePlan(opts) {
   const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
+  assertActionPhase(run, "plan", opts);
 
   const goalBacklogResult = await planFromGoal(opts, {
     apply: true,
@@ -663,6 +1230,10 @@ async function orchestratePlan(opts) {
   run.candidateBacklog = goalBacklogResult.ok ? goalBacklogResult.candidateBacklog : (run.candidateBacklog ?? null);
   run.approvedPlanId = null;
   run.approvedCommitTasks = [];
+  run.commitApprovalManifest = null;
+  run.commitApprovalManifestHash = null;
+  run.approvedCommitManifest = null;
+  run.approvedCommitManifestHash = null;
   run.phase = "awaiting-plan-approval";
   run.updatedAt = new Date().toISOString();
   await writeRun(opts.workDir, run, opts.runId);
@@ -689,9 +1260,30 @@ async function orchestratePlan(opts) {
 async function orchestrateReviewPlan(opts) {
   const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
+  assertActionPhase(run, "review-plan", opts);
 
   if (!run.candidatePlan?.primaryTaskId) {
     fail(opts, "NO_CANDIDATE_PLAN", "run orchestrate plan first", {}, 2);
+  }
+
+  // The previous review ceases to be authoritative as soon as a re-review
+  // starts. Clear it before invoking the external reviewer so an interrupted
+  // command cannot leave an old PASS available for approve-plan.
+  clearPlanReview(opts.workDir, opts.runId);
+
+  // A requested re-review supersedes the old decision immediately. If the new
+  // reviewer fails or crashes, the prior checkpoint must not remain dispatchable.
+  if (run.phase === "plan-approved") {
+    run.approvedPlanId = null;
+    run.approvedCommitTasks = [];
+    run.commitApprovalManifest = null;
+    run.commitApprovalManifestHash = null;
+    run.approvedCommitManifest = null;
+    run.approvedCommitManifestHash = null;
+    run.phase = "awaiting-plan-approval";
+    run.updatedAt = new Date().toISOString();
+    clearCheckpoint(opts.workDir, opts.runId);
+    await writeRun(opts.workDir, run, opts.runId);
   }
 
   const gateConfig = readQualityGateConfig();
@@ -793,6 +1385,7 @@ async function approveCandidatePlan(run, opts, { approvalMode = "human", policyD
     approvedPlanId: planId,
     candidatePlan: run.candidatePlan,
     workspace: opts.workspace,
+    runId: run.runId,
   });
   checkpoint.governance = {
     ...checkpoint.governance,
@@ -817,12 +1410,16 @@ async function approveCandidatePlan(run, opts, { approvalMode = "human", policyD
 async function orchestrateApprovePlan(opts) {
   const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
+  assertActionPhase(run, "approve-plan", opts);
 
   if (!run.candidatePlan?.primaryTaskId) {
     fail(opts, "NO_CANDIDATE_PLAN", "run orchestrate plan first", {}, 2);
   }
 
   const waiveReason = opts.parsed?.options?.["waive-review-with-reason"] ?? "";
+  if (opts.parsed?.flags?.has("waive-review") && !waiveReason) {
+    fail(opts, "WAIVE_REASON_REQUIRED", "--waive-review is not accepted without --waive-review-with-reason", {}, 2);
+  }
   if (!waiveReason && !opts.parsed?.flags?.has("waive-review")) {
     const validation = validatePlanReviewForApprove({
       review: readPlanReview(opts.workDir, opts.runId),
@@ -922,9 +1519,28 @@ async function createBridge(opts) {
   return bridge;
 }
 
-async function orchestrateAwaitWorkers(opts) {
+async function orchestrateAwaitWorkersUnlocked(opts) {
   const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
+  if (run.phase !== "dispatch-queued") {
+    fail(opts, "INVALID_PHASE", `await-workers requires phase dispatch-queued (current: ${run.phase})`, { phase: run.phase }, 2);
+  }
+
+  if (!run.approvedPlanId) {
+    fail(opts, "APPROVAL_REQUIRED", "approve-plan required before awaiting workers", {}, 2);
+  }
+  const checkpoint = readCheckpoint(opts.workDir, opts.runId);
+  const stale = isCheckpointStale(checkpoint, {
+    stateFile: opts.stateFile,
+    workDir: opts.workDir,
+    workspace: opts.workspace,
+    runId: run.runId,
+    candidatePlan: run.candidatePlan,
+    approvedPlanId: run.approvedPlanId,
+  });
+  if (stale.stale) {
+    fail(opts, "STALE_CONTEXT", stale.reason, { checkpoint }, 2);
+  }
 
   const tracksDoc = readTracks(opts.workDir, opts.runId);
   const queued = (tracksDoc.tracks ?? []).filter((track) => track.state === "queued");
@@ -993,13 +1609,28 @@ async function orchestrateAwaitWorkers(opts) {
       : (sharedBridge ?? await createBridge(trackOpts));
     try {
       const result = await executeSingleTask(track.taskId, bridge, pitfalls, gateConfig, trackOpts);
+      track.approvalFiles = [...new Set(result?.commitFiles ?? [])].sort();
+      track.evidenceBundle = result?.evidenceBundle ?? "";
+      track.evidenceFiles = collectEvidenceBundleFiles(opts.workDir, track.evidenceBundle);
       if (track.worktree?.enabled === true && result?.task?.state === "Done") {
         const commitResult = await commitTrackWorktreeResult({
           task: result.task,
           worktree: track.worktree,
         });
+        const committedFiles = [...new Set(commitResult.files ?? [])].sort();
+        if (!commitResult.committed || !String(commitResult.hash ?? "").trim()) {
+          throw new Error(
+            `isolated worktree produced no result commit for ${track.taskId}: ${commitResult.reason || "missing commit hash"}`
+          );
+        }
+        if (JSON.stringify(committedFiles) !== JSON.stringify(track.approvalFiles)) {
+          throw new Error(
+            `worktree commit manifest mismatch for ${track.taskId}: approved ${track.approvalFiles.join(", ") || "<none>"}; committed ${committedFiles.join(", ") || "<none>"}`
+          );
+        }
         track.worktree.resultCommit = commitResult.hash;
         track.worktree.commitResult = commitResult;
+        track.approvalFiles = committedFiles;
       }
       return { taskId: track.taskId, ...result };
     } finally {
@@ -1016,26 +1647,8 @@ async function orchestrateAwaitWorkers(opts) {
   for (let index = 0; index < settled.length; index += 1) {
     const outcome = settled[index];
     const track = queued[index];
-    if (outcome.status === "rejected") {
-      track.state = "settled";
-      track.resultAction = "track-error";
-      track.error = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
-      results.push({ taskId: track.taskId, action: "track-error", details: track.error });
-    } else {
-      const result = outcome.value;
-      const sprintTask = (readSprintState(opts.stateFile).tasks ?? []).find((t) => t.id === track.taskId);
-      const sprintTerminal = sprintTask && ["Done", "Failed"].includes(sprintTask.state);
-      track.state = opts.dryRun || result.terminal || result.skipped || sprintTerminal ? "settled" : "running";
-      track.lastHeartbeat = settledAt;
-      track.resultAction = result.action;
-      if (result.pid) {
-        track.pid = result.pid;
-      }
-      if (sprintTask) {
-        track.sprintState = sprintTask.state;
-      }
-      results.push(result);
-    }
+    const sprintTask = (readSprintState(opts.stateFile).tasks ?? []).find((t) => t.id === track.taskId);
+    results.push(settleWorkerTrackOutcome(track, outcome, sprintTask, settledAt));
   }
 
   await writeTracks(opts.workDir, tracksDoc, opts.runId);
@@ -1045,13 +1658,16 @@ async function orchestrateAwaitWorkers(opts) {
   }
 
   const stateAfterWorkers = readSprintState(opts.stateFile);
-  const plannedTaskIds = new Set(planTaskIds(run.candidatePlan));
-  const doneTasks = (stateAfterWorkers.tasks ?? [])
-    .filter((task) => plannedTaskIds.has(task.id) && task.state === "Done");
+  const doneTasks = selectCommitReadyTasks(stateAfterWorkers, run.candidatePlan, tracksDoc);
+  const failedTracks = (tracksDoc.tracks ?? []).filter((track) => track.resultStatus === "failed");
   let approvalPolicy = null;
   let autoApproval = null;
 
-  run.phase = "awaiting-commit-approval";
+  run.phase = doneTasks.length > 0
+    ? "awaiting-commit-approval"
+    : failedTracks.length > 0
+      ? "error"
+      : "running";
   if (doneTasks.length > 0) {
     const changeContext = await collectApprovalChangeContext(opts.workDir);
     approvalPolicy = evaluateApprovalPolicy({
@@ -1068,16 +1684,6 @@ async function orchestrateAwaitWorkers(opts) {
     };
     if (approvalPolicy.autoApproved) {
       run.approvedCommitTasks = doneTasks.map((task) => task.id);
-      run.phase = "commit-approved";
-      autoApproval = {
-        approvedCommitTasks: run.approvedCommitTasks,
-        approvalPolicy,
-      };
-      await appendGovernanceEvent(opts, run, "commit.approved", {
-        approvalMode: "approvalPolicy",
-        approvedCommitTasks: run.approvedCommitTasks,
-        approvalPolicy,
-      });
       await sprintBoardExec(
         [
           "journal",
@@ -1091,12 +1697,36 @@ async function orchestrateAwaitWorkers(opts) {
         opts
       );
     }
+    // Bind the manifest only after every approval side effect that changes a
+    // manager-owned file (notably the journal). Otherwise an auto-approval
+    // invalidates itself before `commit` can consume it.
+    const commitApproval = buildCommitApprovalManifest(doneTasks, tracksDoc, opts);
+    run.commitApprovalManifest = commitApproval.manifest;
+    run.commitApprovalManifestHash = commitApproval.hash;
+    run.approvedCommitManifest = null;
+    run.approvedCommitManifestHash = null;
+    if (approvalPolicy.autoApproved) {
+      run.approvedCommitManifest = commitApproval.manifest;
+      run.approvedCommitManifestHash = commitApproval.hash;
+      run.phase = "commit-approved";
+      autoApproval = {
+        approvedCommitTasks: run.approvedCommitTasks,
+        approvedCommitManifestHash: run.approvedCommitManifestHash,
+        approvalPolicy,
+      };
+      await appendGovernanceEvent(opts, run, "commit.approved", {
+        approvalMode: "approvalPolicy",
+        approvedCommitTasks: run.approvedCommitTasks,
+        approvedCommitManifestHash: run.approvedCommitManifestHash,
+        approvalPolicy,
+      });
+    }
   }
   run.updatedAt = new Date().toISOString();
   await writeRun(opts.workDir, run, opts.runId);
 
   const payload = {
-    ok: true,
+    ok: failedTracks.length === 0,
     phase: run.phase,
     runId: run.runId,
     results,
@@ -1105,27 +1735,126 @@ async function orchestrateAwaitWorkers(opts) {
     autoApproval,
   };
   await refreshSnapshot(opts);
+  if (failedTracks.length > 0) {
+    const error = /** @type {Error & { code: string, failedTracks: any[] }} */ (
+      new Error(`${failedTracks.length} worker track(s) failed: ${failedTracks.map((track) => `${track.taskId}: ${track.error || track.resultAction}`).join("; ")}`)
+    );
+    error.code = "WORKER_TRACK_FAILED";
+    error.failedTracks = failedTracks.map((track) => ({
+      taskId: track.taskId,
+      state: track.state,
+      resultStatus: track.resultStatus,
+      resultAction: track.resultAction,
+      error: track.error ?? "",
+    }));
+    throw error;
+  }
   return emitResult(opts, payload);
+}
+
+async function orchestrateAwaitWorkers(opts) {
+  const executorLockTarget = `${orchestrationPaths(opts.workDir, opts.runId).run}.executor`;
+  try {
+    return await withPilotFileLock(executorLockTarget, async () => {
+      const run = readRun(opts.workDir, opts.runId);
+      assertRunnablePhase(run, opts);
+      run.locks = { ...(run.locks ?? {}), executorPid: process.pid };
+      run.updatedAt = new Date().toISOString();
+      await writeRun(opts.workDir, run, opts.runId);
+      try {
+        return await orchestrateAwaitWorkersUnlocked(opts);
+      } finally {
+        const latest = readRun(opts.workDir, opts.runId);
+        if (latest?.locks?.executorPid === process.pid) {
+          latest.locks = { ...(latest.locks ?? {}), executorPid: null };
+          latest.updatedAt = new Date().toISOString();
+          await writeRun(opts.workDir, latest, opts.runId);
+        }
+      }
+    }, { timeoutMs: 2_000 });
+  } catch (error) {
+    if (error?.name === "TransactionConflictError") {
+      fail(opts, "EXECUTOR_BUSY", "another await-workers executor is already active for this run", {
+        runId: opts.runId,
+      }, 2);
+    }
+    if (error?.code === "WORKER_TRACK_FAILED") {
+      fail(opts, "WORKER_TRACK_FAILED", error.message, {
+        runId: opts.runId,
+        failedTracks: error.failedTracks ?? [],
+      }, 1);
+    }
+    throw error;
+  }
 }
 
 async function orchestrateApproveCommit(opts) {
   const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
 
-  const tasks = String(opts.tasks || "")
+  if (run.phase !== "awaiting-commit-approval") {
+    fail(opts, "INVALID_PHASE", `approve-commit requires phase awaiting-commit-approval (current: ${run.phase})`, { phase: run.phase }, 2);
+  }
+
+  const tasks = [...new Set(String(opts.tasks || "")
     .split(",")
     .map((item) => item.trim())
-    .filter(Boolean);
+    .filter(Boolean))];
   if (tasks.length === 0) {
     fail(opts, "TASKS_REQUIRED", "approve-commit requires --tasks id1,id2", {}, 2);
   }
 
+  const plannedTaskIds = new Set(planTaskIds(run.candidatePlan));
+  const state = readSprintState(opts.stateFile);
+  const taskById = new Map((state.tasks ?? []).map((task) => [task.id, task]));
+  const tracksByTaskId = new Map((readTracks(opts.workDir, opts.runId).tracks ?? []).map((track) => [track.taskId, track]));
+  for (const taskId of tasks) {
+    const task = taskById.get(taskId);
+    if (!task) {
+      fail(opts, "TASK_NOT_FOUND", `cannot approve unknown task ${taskId}`, { taskId }, 2);
+    }
+    if (!plannedTaskIds.has(taskId)) {
+      fail(opts, "TASK_NOT_PLANNED", `task ${taskId} is not part of the approved candidate plan`, { taskId }, 2);
+    }
+    if (task.state !== "Done") {
+      fail(opts, "INVALID_STATE", `task ${taskId} must be Done before commit approval (current: ${task.state})`, { taskId, state: task.state }, 2);
+    }
+    const track = tracksByTaskId.get(taskId);
+    const readiness = validateCommitReadyTrack(track);
+    if (!readiness.ok) {
+      fail(opts, "TRACK_NOT_COMMITTABLE", `task ${taskId} has no successful settled worker result: ${readiness.reason}`, {
+        taskId,
+        reason: readiness.reason,
+        track: track ?? null,
+      }, 2);
+    }
+  }
+
+  const commitApproval = buildCommitApprovalManifest(
+    tasks.map((taskId) => taskById.get(taskId)),
+    { tracks: [...tracksByTaskId.values()] },
+    opts
+  );
+
   run.approvedCommitTasks = tasks;
+  run.approvedCommitManifest = commitApproval.manifest;
+  run.approvedCommitManifestHash = commitApproval.hash;
   run.phase = "commit-approved";
   run.updatedAt = new Date().toISOString();
   await writeRun(opts.workDir, run, opts.runId);
+  await appendGovernanceEvent(opts, run, "commit.approved", {
+    approvalMode: "human",
+    approvedCommitTasks: tasks,
+    approvedCommitManifestHash: run.approvedCommitManifestHash,
+  });
 
-  const payload = { ok: true, phase: run.phase, runId: run.runId, approvedCommitTasks: tasks };
+  const payload = {
+    ok: true,
+    phase: run.phase,
+    runId: run.runId,
+    approvedCommitTasks: tasks,
+    approvedCommitManifestHash: run.approvedCommitManifestHash,
+  };
   await refreshSnapshot(opts);
   return emitResult(opts, payload);
 }
@@ -1147,16 +1876,18 @@ async function orchestrateCommit(opts) {
   const tracksDoc = readTracks(opts.workDir, opts.runId);
   const tracksByTaskId = new Map((tracksDoc.tracks ?? []).map((track) => [track.taskId, track]));
   const tasksToCommit = [];
+  const approvedTaskObjects = [];
   const commits = [];
 
   for (const taskId of approved) {
     const task = (state.tasks ?? []).find((item) => item.id === taskId);
     if (!task) {
-      continue;
+      fail(opts, "TASK_NOT_FOUND", `approved task ${taskId} no longer exists`, { taskId }, 2);
     }
     if (task.state !== "Done") {
       fail(opts, "INVALID_STATE", `task ${taskId} must be Done before commit (current: ${task.state})`, {}, 2);
     }
+    approvedTaskObjects.push(task);
     if (opts.dryRun) {
       commits.push({ taskId, dryRun: true });
       continue;
@@ -1164,15 +1895,68 @@ async function orchestrateCommit(opts) {
     tasksToCommit.push({ taskId, task });
   }
 
+  const currentApproval = buildCommitApprovalManifest(approvedTaskObjects, tracksDoc, opts);
+  if (!opts.waiveApprovals && !run.approvedCommitManifestHash) {
+    run.phase = "awaiting-commit-approval";
+    run.approvedCommitTasks = [];
+    run.approvedCommitManifest = null;
+    run.approvedCommitManifestHash = null;
+    run.updatedAt = new Date().toISOString();
+    await writeRun(opts.workDir, run, opts.runId);
+    fail(opts, "COMMIT_MANIFEST_REQUIRED", "approve-commit must bind an immutable commit manifest before commit", {}, 2);
+  }
+  if (!opts.waiveApprovals && currentApproval.hash !== run.approvedCommitManifestHash) {
+    const expectedManifestHash = run.approvedCommitManifestHash;
+    run.phase = "awaiting-commit-approval";
+    run.approvedCommitTasks = [];
+    run.approvedCommitManifest = null;
+    run.approvedCommitManifestHash = null;
+    run.updatedAt = new Date().toISOString();
+    await writeRun(opts.workDir, run, opts.runId);
+    fail(opts, "COMMIT_CONTEXT_STALE", "approved files or base HEAD changed after commit approval", {
+      expected: expectedManifestHash,
+      current: currentApproval.hash,
+    }, 2);
+  }
+  const allApprovedWorkingTreeFiles = sortedUniqueStrings([
+    ...(currentApproval.manifest.managerFiles ?? []),
+    ...currentApproval.manifest.tasks.flatMap((entry) => [
+      ...(entry.files ?? []),
+      ...(entry.evidenceFiles ?? []),
+    ]),
+  ]);
+  const runtimeWorktreePaths = (tracksDoc.tracks ?? [])
+    .map((item) => item.worktree?.path)
+    .filter(Boolean);
+  const runtimeWorktreePrefixes = runtimeWorktreePaths
+    .map((worktreePath) => toRepoPath(worktreePath, opts.workDir))
+    .filter(Boolean);
+  const approvalEntryByTaskId = new Map(
+    currentApproval.manifest.tasks.map((entry) => [entry.taskId, entry])
+  );
+  let expectedIntegrationHead = currentApproval.manifest.baseHead;
+
   for (const { taskId, task } of tasksToCommit) {
     const track = tracksByTaskId.get(taskId);
+    const approvedEntry = approvalEntryByTaskId.get(taskId);
     const observedHead = computeGitHead(opts.workDir);
     let result;
     let worktreeMerge;
     try {
       const lockedCommit = await withSerializedCommit(opts, async () => {
+        const lockedHead = computeGitHead(opts.workDir);
+        if (expectedIntegrationHead && lockedHead && lockedHead !== expectedIntegrationHead) {
+          const error = /** @type {Error & { code: string }} */ (new Error(
+            `integration HEAD changed after commit approval: expected ${expectedIntegrationHead}, current ${lockedHead}`
+          ));
+          error.code = "COMMIT_CONTEXT_STALE";
+          throw error;
+        }
         let lockedMergeResult = null;
         if (track?.worktree?.enabled === true) {
+          await assertCleanIntegrationTree(opts, {
+            runtimeWorktreePaths,
+          });
           lockedMergeResult = await squashMergeTrackCommitWithRetry({
             opts,
             track,
@@ -1180,7 +1964,36 @@ async function orchestrateCommit(opts) {
             observedHead,
           });
         }
-        const lockedCommitResult = await finalizeDoneTaskCommit(task, opts);
+        let lockedCommitResult;
+        try {
+          lockedCommitResult = await finalizeDoneTaskCommit(task, {
+            ...opts,
+            commitLockHeld: true,
+            // The shared run event log is committed at the journal boundary,
+            // not inside an individual task's approval manifest.
+            deferCommit: true,
+            approvedCommitFiles: sortedUniqueStrings([
+              ...(track?.approvalFiles ?? []),
+              ...(track?.evidenceFiles ?? []),
+              ...(currentApproval.manifest.managerFiles ?? []),
+            ]),
+            allowedUncommittedFiles: allApprovedWorkingTreeFiles,
+            allowedUncommittedPrefixes: runtimeWorktreePrefixes,
+            approvedCommitFileHashes: {
+              ...(currentApproval.manifest.managerFileHashes ?? {}),
+              ...(approvedEntry?.fileHashes ?? {}),
+              ...(approvedEntry?.evidenceFileHashes ?? {}),
+            },
+          });
+        } catch (error) {
+          if (lockedMergeResult?.merged) {
+            await rollbackSquashMergedFiles(track, opts);
+          }
+          throw error;
+        }
+        if (lockedMergeResult?.merged && !lockedCommitResult.ok) {
+          await rollbackSquashMergedFiles(track, opts);
+        }
         return {
           result: lockedCommitResult,
           worktreeMerge: lockedMergeResult,
@@ -1188,7 +2001,17 @@ async function orchestrateCommit(opts) {
       });
       result = lockedCommit.result;
       worktreeMerge = lockedCommit.worktreeMerge;
+      expectedIntegrationHead = computeGitHead(opts.workDir) || expectedIntegrationHead;
     } catch (error) {
+      if (error?.code === "COMMIT_CONTEXT_STALE") {
+        run.phase = "awaiting-commit-approval";
+        run.approvedCommitTasks = [];
+        run.approvedCommitManifest = null;
+        run.approvedCommitManifestHash = null;
+        run.updatedAt = new Date().toISOString();
+        await writeRun(opts.workDir, run, opts.runId);
+        fail(opts, "COMMIT_CONTEXT_STALE", error.message, { taskId }, 2);
+      }
       fail(opts, "WORKTREE_MERGE_FAILED", `failed to squash merge ${taskId} worktree result`, {
         taskId,
         worktree: track?.worktree ?? null,
@@ -1199,6 +2022,8 @@ async function orchestrateCommit(opts) {
     if (!result.ok) {
       run.phase = "awaiting-commit-approval";
       run.approvedCommitTasks = [];
+      run.approvedCommitManifest = null;
+      run.approvedCommitManifestHash = null;
       run.updatedAt = new Date().toISOString();
       await writeRun(opts.workDir, run, opts.runId);
       await refreshSnapshot(opts);
@@ -1210,6 +2035,8 @@ async function orchestrateCommit(opts) {
   if (failedCommits.length > 0) {
     run.phase = "awaiting-commit-approval";
     run.approvedCommitTasks = [];
+    run.approvedCommitManifest = null;
+    run.approvedCommitManifestHash = null;
     run.updatedAt = new Date().toISOString();
     await writeRun(opts.workDir, run, opts.runId);
     await refreshSnapshot(opts);
@@ -1217,6 +2044,8 @@ async function orchestrateCommit(opts) {
   }
 
   run.phase = "committed";
+  run.approvedCommitManifest = null;
+  run.approvedCommitManifestHash = null;
   run.updatedAt = new Date().toISOString();
   await writeRun(opts.workDir, run, opts.runId);
   await refreshSnapshot(opts);
@@ -1228,6 +2057,11 @@ async function orchestrateCommit(opts) {
 async function orchestrateJournal(opts) {
   const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
+  if (run.phase !== "committed") {
+    fail(opts, "INVALID_PHASE", `journal requires phase committed (current: ${run.phase})`, {
+      phase: run.phase,
+    }, 2);
+  }
 
   const state = readSprintState(opts.stateFile);
   const stopCondition = detectStopCondition(state);
@@ -1255,7 +2089,11 @@ async function orchestrateJournal(opts) {
     [
       paths.run,
       paths.snapshot,
+      opts.stateFile,
+      opts.boardFile,
       opts.journalFile,
+      opts.pitfallsFile,
+      resolveHumanBoardPath(opts.stateFile),
       eventsLog,
     ],
     `chore(orchestration): close cycle ${run.cycle}`,
@@ -1310,7 +2148,10 @@ async function orchestrateRunUnattended(opts) {
       .filter((task) => plannedTaskIds.has(task.id) && task.state === "Done")
       .map((task) => task.id);
     if (doneTasks.length > 0) {
-      await orchestrateApproveCommit({ ...opts, tasks: doneTasks.join(","), json: false });
+      const latestRun = readRun(opts.workDir, opts.runId);
+      if (latestRun.phase !== "commit-approved") {
+        await orchestrateApproveCommit({ ...opts, tasks: doneTasks.join(","), json: false });
+      }
       await orchestrateCommit({ ...opts, waiveApprovals: true, json: false });
     }
     await orchestrateJournal({ ...opts, json: false });
@@ -1434,7 +2275,9 @@ export async function runOrchestrateCommand(subcommand, argv) {
   // lease that recover uses to detect dead runs and release their claims. One
   // command = one process, so there is no long-lived daemon to write heartbeats —
   // the command boundary IS the heartbeat.
-  if (opts.runId && !["init", "list-runs"].includes(subcommand)) {
+  // Recovery must observe the persisted lease as-is. Refreshing the selected
+  // run here would revive a dead run immediately before recover scans it.
+  if (opts.runId && !["init", "list-runs", "recover"].includes(subcommand)) {
     const run = readRun(opts.workDir, opts.runId);
     if (run?.runId) {
       // Heartbeat is best-effort: a short lock timeout (no long backoff) so command

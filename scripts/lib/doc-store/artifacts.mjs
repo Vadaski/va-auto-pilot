@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { buildArtifactPath, toStableJson } from "./shared.mjs";
+import { InvalidInputError } from "./errors.mjs";
 
 function artifactBodyFromRecord(record) {
   return {
@@ -37,7 +38,45 @@ async function writeAtomic(filePath, content) {
  * @returns {string}
  */
 export function resolveArtifactPath(rootPath, record) {
-  return path.join(rootPath, record.path);
+  const root = path.resolve(rootPath);
+  if (path.isAbsolute(record.path)) {
+    throw new InvalidInputError(`artifact path must be relative: ${record.path}`);
+  }
+  const target = path.resolve(root, record.path);
+  const relative = path.relative(root, target);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new InvalidInputError(`artifact path escapes the store root: ${record.path}`);
+  }
+  const expected = buildArtifactPath(record.kind, record.frontmatter?.slug, record.archived === true);
+  if (record.path !== expected) {
+    throw new InvalidInputError(`artifact path is not canonical: expected ${expected}, got ${record.path}`);
+  }
+  return target;
+}
+
+export async function assertSafeArtifactParent(rootPath, targetPath) {
+  const root = path.resolve(rootPath);
+  const parent = path.dirname(path.resolve(targetPath));
+  const relative = path.relative(root, parent);
+  const segments = relative ? relative.split(path.sep).filter(Boolean) : [];
+  let current = root;
+  for (const segment of ["", ...segments]) {
+    if (segment) current = path.join(current, segment);
+    try {
+      const stat = await fs.lstat(current);
+      if (stat.isSymbolicLink()) {
+        throw new InvalidInputError(`artifact parent must not be a symbolic link: ${current}`);
+      }
+      if (!stat.isDirectory()) {
+        throw new InvalidInputError(`artifact parent must be a directory: ${current}`);
+      }
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 /**
@@ -46,7 +85,9 @@ export function resolveArtifactPath(rootPath, record) {
  * @returns {Promise<void>}
  */
 export async function writeArtifact(rootPath, record) {
-  await writeAtomic(resolveArtifactPath(rootPath, record), toStableJson(artifactBodyFromRecord(record)));
+  const artifactPath = resolveArtifactPath(rootPath, record);
+  await assertSafeArtifactParent(rootPath, artifactPath);
+  await writeAtomic(artifactPath, toStableJson(artifactBodyFromRecord(record)));
 }
 
 /**
@@ -55,7 +96,9 @@ export async function writeArtifact(rootPath, record) {
  * @returns {Promise<void>}
  */
 export async function removeArtifact(rootPath, record) {
-  await fs.rm(resolveArtifactPath(rootPath, record), { force: true });
+  const artifactPath = resolveArtifactPath(rootPath, record);
+  await assertSafeArtifactParent(rootPath, artifactPath);
+  await fs.rm(artifactPath, { force: true });
 }
 
 /**

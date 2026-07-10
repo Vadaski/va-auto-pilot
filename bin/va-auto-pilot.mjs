@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
   inferProjectGateCommands,
@@ -221,6 +222,187 @@ function walkFiles(dir, base = dir) {
   return files;
 }
 
+function lstatIfPresent(filePath) {
+  try {
+    return fs.lstatSync(filePath);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function isContainedPath(rootPath, candidatePath) {
+  const relative = path.relative(rootPath, candidatePath);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function assertSafeTargetRoot(targetDir) {
+  const resolvedRoot = path.resolve(targetDir);
+  const rootStat = lstatIfPresent(resolvedRoot);
+  if (!rootStat) {
+    return resolvedRoot;
+  }
+  if (rootStat.isSymbolicLink()) {
+    throw new Error(`Unsafe target root is a symbolic link: ${resolvedRoot}`);
+  }
+  if (!rootStat.isDirectory()) {
+    throw new Error(`Unsafe target root is not a directory: ${resolvedRoot}`);
+  }
+  return resolvedRoot;
+}
+
+/**
+ * Validate a scaffold destination without following links in the project tree.
+ * Existing parent components must be real directories and the final entry must
+ * be a regular file (or absent). The canonical check protects containment when
+ * the path used to reach the target root itself contains platform-level links.
+ */
+function assertSafeDestination(targetDir, destination) {
+  const resolvedRoot = assertSafeTargetRoot(targetDir);
+  const resolvedDestination = path.resolve(destination);
+  if (!isContainedPath(resolvedRoot, resolvedDestination) || resolvedDestination === resolvedRoot) {
+    throw new Error(`Unsafe destination escapes target root: ${resolvedDestination}`);
+  }
+
+  const relative = path.relative(resolvedRoot, resolvedDestination);
+  const parentSegments = relative.split(path.sep).slice(0, -1);
+  let current = resolvedRoot;
+  for (const segment of parentSegments) {
+    current = path.join(current, segment);
+    const currentStat = lstatIfPresent(current);
+    if (!currentStat) {
+      break;
+    }
+    if (currentStat.isSymbolicLink()) {
+      throw new Error(`Unsafe destination parent is a symbolic link: ${current}`);
+    }
+    if (!currentStat.isDirectory()) {
+      throw new Error(`Unsafe destination parent is not a directory: ${current}`);
+    }
+  }
+
+  const destinationStat = lstatIfPresent(resolvedDestination);
+  if (destinationStat?.isSymbolicLink()) {
+    throw new Error(`Unsafe destination is a symbolic link: ${resolvedDestination}`);
+  }
+  if (destinationStat && !destinationStat.isFile()) {
+    throw new Error(`Unsafe destination is not a regular file: ${resolvedDestination}`);
+  }
+
+  const rootStat = lstatIfPresent(resolvedRoot);
+  const parentPath = path.dirname(resolvedDestination);
+  const parentStat = lstatIfPresent(parentPath);
+  if (rootStat && parentStat) {
+    const canonicalRoot = fs.realpathSync(resolvedRoot);
+    const canonicalParent = fs.realpathSync(parentPath);
+    if (!isContainedPath(canonicalRoot, canonicalParent)) {
+      throw new Error(`Unsafe destination escapes canonical target root: ${resolvedDestination}`);
+    }
+  }
+
+  return resolvedDestination;
+}
+
+/**
+ * @param {string} targetDir
+ * @param {string} destination
+ * @param {string | NodeJS.ArrayBufferView} content
+ * @param {{ encoding?: BufferEncoding, mode?: number }} [options]
+ */
+function writeFileSafely(targetDir, destination, content, options = {}) {
+  const { encoding, mode } = options;
+  const resolvedDestination = assertSafeDestination(targetDir, destination);
+  const parentPath = path.dirname(resolvedDestination);
+  fs.mkdirSync(parentPath, { recursive: true });
+
+  // Re-check after mkdir so a pre-existing link or non-directory cannot be
+  // hidden by recursive creation. The temporary file plus rename means the
+  // final destination is never opened through a symbolic link.
+  assertSafeDestination(targetDir, resolvedDestination);
+  const temporaryPath = path.join(
+    parentPath,
+    `.${path.basename(resolvedDestination)}.${process.pid}.${randomUUID()}.tmp`
+  );
+  const existingStat = lstatIfPresent(resolvedDestination);
+  const fileMode = mode ?? (existingStat ? existingStat.mode & 0o777 : 0o666);
+  let fileDescriptor;
+
+  try {
+    fileDescriptor = fs.openSync(
+      temporaryPath,
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
+      fileMode
+    );
+    fs.writeFileSync(fileDescriptor, content, encoding ? { encoding } : undefined);
+    fs.closeSync(fileDescriptor);
+    fileDescriptor = undefined;
+
+    // Rename replaces an existing entry atomically on POSIX; if an attacker
+    // swaps in a symlink after validation, rename replaces the link itself
+    // instead of following it. Never unlink the old file first: a crash or
+    // failed rename must not leave a previously valid scaffold file missing.
+    assertSafeDestination(targetDir, resolvedDestination);
+    const finalStat = lstatIfPresent(resolvedDestination);
+    if (finalStat) {
+      if (finalStat.isSymbolicLink()) {
+        throw new Error(`Unsafe destination became a symbolic link: ${resolvedDestination}`);
+      }
+      if (!finalStat.isFile()) {
+        throw new Error(`Unsafe destination is not a regular file: ${resolvedDestination}`);
+      }
+    }
+    assertSafeDestination(targetDir, resolvedDestination);
+    try {
+      fs.renameSync(temporaryPath, resolvedDestination);
+    } catch (error) {
+      const replaceUnsupported = finalStat
+        && error
+        && typeof error === "object"
+        && "code" in error
+        && ["EEXIST", "EPERM", "EACCES"].includes(error.code);
+      if (!replaceUnsupported) {
+        throw error;
+      }
+
+      // Some platforms do not replace an existing file with rename. Preserve
+      // the old entry under a same-directory backup and restore it if the
+      // second rename fails. A crash may leave the backup for diagnosis, but
+      // cannot silently destroy the only copy of the previous file.
+      const backupPath = path.join(
+        parentPath,
+        `.${path.basename(resolvedDestination)}.${process.pid}.${randomUUID()}.backup`
+      );
+      fs.renameSync(resolvedDestination, backupPath);
+      try {
+        assertSafeDestination(targetDir, resolvedDestination);
+        fs.renameSync(temporaryPath, resolvedDestination);
+        fs.unlinkSync(backupPath);
+      } catch (replaceError) {
+        if (!lstatIfPresent(resolvedDestination) && lstatIfPresent(backupPath)) {
+          fs.renameSync(backupPath, resolvedDestination);
+        }
+        throw replaceError;
+      }
+    }
+  } finally {
+    if (fileDescriptor !== undefined) {
+      fs.closeSync(fileDescriptor);
+    }
+    if (lstatIfPresent(temporaryPath)) {
+      fs.unlinkSync(temporaryPath);
+    }
+  }
+}
+
+function copyFileSafely(targetDir, source, destination) {
+  const sourceStat = fs.statSync(source);
+  writeFileSafely(targetDir, destination, fs.readFileSync(source), {
+    mode: sourceStat.mode & 0o777
+  });
+}
+
 function applyTemplate(raw, context) {
   let output = raw;
   for (const [key, value] of Object.entries(context)) {
@@ -244,6 +426,7 @@ function readTargetPackageJson(packageJsonPath) {
 
 function ensureRuntimeDependencies(targetDir, { dryRun, demo = false }) {
   const packageJsonPath = path.join(targetDir, "package.json");
+  assertSafeDestination(targetDir, packageJsonPath);
   const existing = readTargetPackageJson(packageJsonPath);
   const targetPackage = existing ?? {
     name: path.basename(path.resolve(targetDir)) || "va-auto-pilot-project",
@@ -299,8 +482,12 @@ function ensureRuntimeDependencies(targetDir, { dryRun, demo = false }) {
     return { destination: packageJsonPath, dryRun: true };
   }
 
-  fs.mkdirSync(path.dirname(packageJsonPath), { recursive: true });
-  fs.writeFileSync(packageJsonPath, JSON.stringify(targetPackage, null, 2) + "\n", "utf8");
+  writeFileSafely(
+    targetDir,
+    packageJsonPath,
+    JSON.stringify(targetPackage, null, 2) + "\n",
+    { encoding: "utf8" }
+  );
   return { destination: packageJsonPath, dryRun: false };
 }
 
@@ -378,8 +565,12 @@ function writeVersionFile(targetDir, versionInfo, { dryRun }) {
   if (dryRun) {
     return;
   }
-  fs.mkdirSync(path.dirname(versionPath), { recursive: true });
-  fs.writeFileSync(versionPath, JSON.stringify(versionInfo, null, 2) + "\n", "utf8");
+  writeFileSafely(
+    targetDir,
+    versionPath,
+    JSON.stringify(versionInfo, null, 2) + "\n",
+    { encoding: "utf8" }
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +585,7 @@ function writeTemplateFiles(targetDir, context, { force, dryRun }) {
   for (const relativePath of templateFiles) {
     const source = path.join(templatesRoot, relativePath);
     const destination = path.join(targetDir, relativePath);
+    assertSafeDestination(targetDir, destination);
 
     if (fs.existsSync(destination) && !force) {
       throw new Error(
@@ -409,8 +601,7 @@ function writeTemplateFiles(targetDir, context, { force, dryRun }) {
       continue;
     }
 
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.writeFileSync(destination, rendered, "utf8");
+    writeFileSafely(targetDir, destination, rendered, { encoding: "utf8" });
     written.push({ destination, dryRun: false });
   }
 
@@ -420,6 +611,7 @@ function writeTemplateFiles(targetDir, context, { force, dryRun }) {
   for (const relativePath of scriptFiles) {
     const source = path.join(scriptsRoot, relativePath);
     const destination = path.join(targetDir, "scripts", relativePath);
+    assertSafeDestination(targetDir, destination);
 
     if (fs.existsSync(destination) && !force) {
       throw new Error(
@@ -432,8 +624,7 @@ function writeTemplateFiles(targetDir, context, { force, dryRun }) {
       continue;
     }
 
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.copyFileSync(source, destination);
+    copyFileSafely(targetDir, source, destination);
     written.push({ destination, dryRun: false });
   }
 
@@ -484,6 +675,7 @@ function writeDemoFiles(targetDir, { force, dryRun }) {
 
   for (const file of files) {
     const destination = path.join(targetDir, file.relativePath);
+    assertSafeDestination(targetDir, destination);
     if (fs.existsSync(destination) && !force) {
       throw new Error(
         `Refusing to overwrite existing file: ${destination}. Use --force to overwrite.`
@@ -491,8 +683,7 @@ function writeDemoFiles(targetDir, { force, dryRun }) {
     }
 
     if (!dryRun) {
-      fs.mkdirSync(path.dirname(destination), { recursive: true });
-      fs.writeFileSync(destination, file.content, "utf8");
+      writeFileSafely(targetDir, destination, file.content, { encoding: "utf8" });
     }
     written.push({ destination, dryRun });
   }
@@ -505,11 +696,30 @@ function runInit(parsed) {
   const dryRun = parsed.flags.has("dry-run");
   const demo = parsed.flags.has("demo");
   const targetDir = path.resolve(process.cwd(), parsed.targetDir);
-  const context = resolveContext(parsed.options, targetDir, parsed.flags);
+  assertSafeTargetRoot(targetDir);
 
   if (!dryRun) {
     fs.mkdirSync(targetDir, { recursive: true });
+    assertSafeTargetRoot(targetDir);
   }
+
+  const plannedDestinations = [
+    path.join(targetDir, "package.json"),
+    path.join(targetDir, VERSION_FILE_NAME),
+    ...walkFiles(templatesRoot).map((relativePath) => path.join(targetDir, relativePath)),
+    ...walkFiles(scriptsRoot).map((relativePath) => path.join(targetDir, "scripts", relativePath))
+  ];
+  if (demo) {
+    plannedDestinations.push(
+      path.join(targetDir, "src/onboarding-target.mjs"),
+      path.join(targetDir, "scripts/demo-smoke.mjs")
+    );
+  }
+  for (const destination of plannedDestinations) {
+    assertSafeDestination(targetDir, destination);
+  }
+
+  const context = resolveContext(parsed.options, targetDir, parsed.flags);
 
   const written = writeTemplateFiles(targetDir, context, { force, dryRun });
   if (demo) {
@@ -627,6 +837,10 @@ function runUpgrade(parsed) {
   const dryRun = parsed.flags.has("dry-run");
   const targetDir = path.resolve(process.cwd(), parsed.targetDir);
   const sentinelPath = path.join(targetDir, UPGRADE_SENTINEL);
+  const versionPath = path.join(targetDir, VERSION_FILE_NAME);
+  assertSafeTargetRoot(targetDir);
+  assertSafeDestination(targetDir, sentinelPath);
+  assertSafeDestination(targetDir, versionPath);
 
   // 0. Check for interrupted previous upgrade.
   if (fs.existsSync(sentinelPath)) {
@@ -680,6 +894,7 @@ function runUpgrade(parsed) {
     const source = path.join(scriptsRoot, relativePath);
     const destination = path.join(targetDir, "scripts", relativePath);
     const destRelative = path.join("scripts", relativePath);
+    assertSafeDestination(targetDir, destination);
 
     actions.push({
       type: "overwrite",
@@ -706,6 +921,8 @@ function runUpgrade(parsed) {
       });
       continue;
     }
+
+    assertSafeDestination(targetDir, destination);
 
     // Merge-aware files: only overwrite with --force; otherwise warn.
     if (fs.existsSync(destination)) {
@@ -781,8 +998,9 @@ function runUpgrade(parsed) {
 
   // 4. Write sentinel before file operations (skip in dry-run).
   if (!dryRun) {
-    fs.mkdirSync(path.dirname(sentinelPath), { recursive: true });
-    fs.writeFileSync(sentinelPath, new Date().toISOString() + "\n", "utf8");
+    writeFileSafely(targetDir, sentinelPath, new Date().toISOString() + "\n", {
+      encoding: "utf8"
+    });
   }
 
   // 5. Report and execute actions.
@@ -800,14 +1018,13 @@ function runUpgrade(parsed) {
         console.log(`${prefix} ${action.relative}`);
 
         if (!dryRun) {
-          fs.mkdirSync(path.dirname(action.destination), { recursive: true });
           if (action.category === "script") {
-            fs.copyFileSync(action.source, action.destination);
+            copyFileSafely(targetDir, action.source, action.destination);
           } else {
             // Template file — read raw template and resolve tokens from config.
             const raw = fs.readFileSync(action.source, "utf8");
             const rendered = applyTemplate(raw, upgradeContext);
-            fs.writeFileSync(action.destination, rendered, "utf8");
+            writeFileSafely(targetDir, action.destination, rendered, { encoding: "utf8" });
           }
         }
         updated++;
@@ -839,7 +1056,7 @@ function runUpgrade(parsed) {
   writeVersionFile(targetDir, newVersion, { dryRun });
 
   // 7. Remove sentinel — upgrade completed successfully.
-  if (!dryRun && fs.existsSync(sentinelPath)) {
+  if (!dryRun && lstatIfPresent(sentinelPath)) {
     fs.unlinkSync(sentinelPath);
   }
 

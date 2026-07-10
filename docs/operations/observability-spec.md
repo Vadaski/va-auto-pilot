@@ -22,7 +22,7 @@ Out of scope for AP-087: live streaming, long-term storage backends, or UI rende
 
 - **Append-only event log**: every phase change, command, gate, review, and decision is one event.
 - **One evidence bundle per task**: deterministic path from `runId` + `taskId`.
-- **Redaction is a copy operation**: originals stay intact; a redacted shareable copy is produced.
+- **Secret-safe primary evidence**: persistence removes credentials and secrets before writing; a shareable copy applies additional path redaction.
 - **Survive restarts**: log and manifest are flushed atomically; paths are deterministic.
 
 ## Event envelope
@@ -197,26 +197,44 @@ manifest and event logs without an in-memory registry.
 
 ## Redaction rules
 
-Redaction produces a **copy**. The original bundle is never modified.
+Persistence redaction is mandatory: primary events, manifests, and text artifacts
+are stripped of credentials and secret-bearing fields before they reach disk.
+Shareable redaction then produces a copy with additional environment-specific
+details, such as home-directory paths, normalized.
 
-Default redaction rules:
+Default text redaction rules (matching `DEFAULT_REDACTION_RULES` in
+`scripts/lib/observability.mjs`):
 
 | Rule name | Targets |
 |-----------|---------|
-| `env-secrets` | Lines matching `export .*SECRET`, `.*_TOKEN=`, `password=`, `api_key=`. |
-| `auth-headers` | `Authorization:` or `Bearer ` tokens. |
-| `paths` | Absolute home-directory paths (replaced with `~`). |
+| `private-keys` | PEM private-key blocks. |
+| `cookie-headers` | Values of `Cookie:` and `Set-Cookie:` headers. |
+| `auth-headers` | Credential values in `Authorization:` and `Proxy-Authorization:` headers. |
+| `bearer-tokens` | Standalone `Bearer` token values. |
+| `quoted-secrets` | Quoted values assigned to secret-, token-, password-, and key-like names. |
+| `assigned-secrets` | Unquoted values assigned to secret-, token-, password-, and key-like names. |
+| `secret-flags` | Values passed to sensitive command-line flags such as `--token` and `--api-key`. |
+| `provider-tokens` | Recognized OpenAI, Stripe, GitHub, Slack, npm, Google, and AWS token/key formats. |
+| `jwt-tokens` | Three-segment JWT-shaped values. |
+| `url-credentials` | Passwords embedded in URL authority components. |
+| `paths` | Absolute paths under the current home directory (replaced with `~` in shareable copies only). |
 
-When a redacted copy is created:
+Recursive event/manifest redaction additionally replaces values whose field names
+are sensitive (including `credentials`) and values following sensitive argv flags;
+these are recorded as `sensitive-fields` in redaction metadata. Persistence uses
+all rules above except `paths`; shareable copies use the full set.
+
+When a shareable copy is created:
 
 1. A new `redacted/` directory is populated.
 2. Text artifacts are rewritten with rules applied.
 3. The redacted manifest records `redacted: true` on each artifact.
 4. Event `payload` fields known to contain sensitive output are stripped or replaced.
-5. The original manifest's `redactedShareable` field points to the redacted manifest.
+5. The primary manifest's `redactedShareable` field points to the shareable manifest.
 
-Redaction is opt-in via `redactBundle(bundleDir)`; by default bundles contain raw
-command output so the manager can debug failures.
+Primary secret redaction is not optional. `redactBundle(bundleDir)` materializes
+the additional shareable projection and may update primary artifact hashes when
+legacy/raw content is sanitized during bundle finalization.
 
 ## Restart-survival semantics
 

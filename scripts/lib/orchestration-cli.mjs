@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 
 import { DEFAULT_AGENT_TEMPLATE, parseArgv, resolveDefaults } from "./sprint-utils.mjs";
 import { resolveHumanBoardPath } from "./human-board.mjs";
-import { resolveActiveRunId, resolveOrchestrationDir } from "./orchestration-state.mjs";
+import { readRun, resolveActiveRunId, resolveOrchestrationDir } from "./orchestration-state.mjs";
 import { resolveWorkspacePaths } from "./workspace.mjs";
 import { DEFAULT_TRACK_TIMEOUT_MS, DEFAULT_MAX_PARALLEL } from "./constants.mjs";
 
@@ -40,13 +40,26 @@ export function buildOrchestrationOpts(argv, extra = {}) {
   const defaults = resolveDefaults(workDir);
   const explicitRunId = parsed.options["run-id"] ?? "";
   const runId = explicitRunId || (extra.resolveActiveRunId === false ? "" : resolveActiveRunId(workDir));
+  const persistedRun = runId ? readRun(workDir, runId) : null;
+  const persistedWorkspace = persistedRun?.workspace && typeof persistedRun.workspace === "object"
+    ? persistedRun.workspace
+    : null;
 
   // Workspace routing: resolve which backlog paths this run sees. Only activates
   // when the user explicitly selects a workspace (named, --isolated, or execution-
   // tree flags). Unspecified → "default" shared workspace → project-root defaults
   // (zero-config single-run behavior unchanged).
-  const workspaceName = parsed.options["workspace"] ?? "";
-  const isolatedWorkspace = parsed.flags.has("isolated") || workspaceName !== "";
+  const workspaceNameOption = parsed.options["workspace"] ?? "";
+  const hasExplicitWorkspace = Boolean(workspaceNameOption)
+    || parsed.flags.has("isolated")
+    || parsed.flags.has("isolated-tree")
+    || parsed.flags.has("shared-tree");
+  const workspaceName = hasExplicitWorkspace
+    ? (workspaceNameOption || "default")
+    : String(persistedWorkspace?.name ?? "default");
+  const isolatedWorkspace = hasExplicitWorkspace
+    ? parsed.flags.has("isolated") || workspaceName !== "default"
+    : persistedWorkspace?.type === "isolated";
   const workspace = resolveWorkspacePaths(workDir, {
     name: workspaceName || "default",
     isolated: isolatedWorkspace,
@@ -61,9 +74,14 @@ export function buildOrchestrationOpts(argv, extra = {}) {
     ? "shared"
     : parsed.flags.has("isolated-tree")
       ? "isolated"
+      : persistedWorkspace?.executionTree === "shared"
+        ? "shared"
       : workspace.type === "shared"
         ? "isolated" // 甲模式默认 isolated-tree (batch 4 enforces); shared-tree is expert opt-in
         : "isolated";
+  const persistedPath = (key, fallback) => (!hasExplicitWorkspace && persistedWorkspace?.[key])
+    ? persistedWorkspace[key]
+    : fallback;
 
   return {
     ...extra,
@@ -88,10 +106,10 @@ export function buildOrchestrationOpts(argv, extra = {}) {
     },
     timeoutMs: Number.parseInt(parsed.options.timeout ?? String(DEFAULT_TRACK_TIMEOUT_MS), 10),
     pollIntervalMs: Number.parseInt(parsed.options["poll-interval"] ?? "2000", 10),
-    stateFile: path.resolve(parsed.options["state-file"] ?? workspace.stateFile),
-    boardFile: path.resolve(parsed.options["board-file"] ?? workspace.boardFile),
-    journalFile: path.resolve(parsed.options["journal-file"] ?? workspace.journalFile),
-    pitfallsFile: path.resolve(parsed.options["pitfalls-file"] ?? workspace.pitfallsFile),
+    stateFile: path.resolve(parsed.options["state-file"] ?? persistedPath("stateFile", workspace.stateFile)),
+    boardFile: path.resolve(parsed.options["board-file"] ?? persistedPath("boardFile", workspace.boardFile)),
+    journalFile: path.resolve(parsed.options["journal-file"] ?? persistedPath("journalFile", workspace.journalFile)),
+    pitfallsFile: path.resolve(parsed.options["pitfalls-file"] ?? persistedPath("pitfallsFile", workspace.pitfallsFile)),
     workDir: process.cwd(),
     agentTemplate: parsed.options["agent-template"] ?? DEFAULT_AGENT_TEMPLATE,
     trackTimeout: Number.parseInt(parsed.options["track-timeout"] ?? String(DEFAULT_TRACK_TIMEOUT_MS), 10),

@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
 
+import { assertSafeRunId, assertSafeTaskId } from "./identifiers.mjs";
 import { withPilotFileLock, writeTextFileAtomicSync } from "./pilot-state.mjs";
 
 export const OBSERVABILITY_SCHEMA_VERSION = 1;
@@ -48,19 +49,92 @@ const TEXT_KIND_SUFFIXES = new Set([
 
 export const DEFAULT_REDACTION_RULES = Object.freeze([
   {
-    name: "env-secrets",
-    pattern: /^(.*(?:SECRET|_TOKEN|PASSWORD|API_KEY|ACCESS_KEY)\s*[:=]\s*).+$/gim,
-    replacement: "$1[REDACTED:env-secrets]",
+    name: "private-keys",
+    pattern: /-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/g,
+    replacement: "[REDACTED:private-keys]",
+  },
+  {
+    name: "cookie-headers",
+    pattern: /(\b(?:set-cookie|cookie)\s*:\s*)[^\r\n]+/gi,
+    replacement: "$1[REDACTED:cookie-headers]",
   },
   {
     name: "auth-headers",
-    pattern: /((?:Authorization|Bearer|Basic)\s*[:\s]+)(Bearer\s+)?\S+/gi,
-    replacement: "$1$2[REDACTED:auth-headers]",
+    pattern: /(\b(?:proxy-)?authorization\s*:\s*)(?:(?:bearer|basic|token)\s+)?[A-Za-z0-9._~+/=-]+/gi,
+    replacement: "$1[REDACTED:auth-headers]",
+  },
+  {
+    name: "bearer-tokens",
+    pattern: /(\bbearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi,
+    replacement: "$1[REDACTED:bearer-tokens]",
+  },
+  {
+    name: "quoted-secrets",
+    pattern: /((?:["']?(?:[A-Za-z][A-Za-z0-9_.-]*[_-])?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?token|password|passwd|passphrase|client[_-]?secret|webhook[_-]?secret|private[_-]?key|secret|token)["']?)\s*[:=]\s*)(["'])(.*?)\2/gi,
+    replacement: "$1$2[REDACTED:quoted-secrets]$2",
+  },
+  {
+    name: "assigned-secrets",
+    pattern: /(\b(?:[A-Za-z][A-Za-z0-9_.-]*[_-])?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?token|password|passwd|passphrase|client[_-]?secret|webhook[_-]?secret|private[_-]?key|secret|token)\s*[:=]\s*)(?!\[REDACTED:)[^\s,"';}\]]+/gi,
+    replacement: "$1[REDACTED:assigned-secrets]",
+  },
+  {
+    name: "secret-flags",
+    pattern: /(^|\s)(--?(?:api[-_]?key|access[-_]?token|refresh[-_]?token|auth[-_]?token|password|passphrase|client[-_]?secret|secret|token)(?:=|\s+))(?!\[REDACTED:)[^\s,"';}\]]+/gim,
+    replacement: "$1$2[REDACTED:secret-flags]",
+  },
+  {
+    name: "provider-tokens",
+    pattern: /\b(?:sk-(?:ant|proj|svcacct)-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{32,}|sk_live_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|xox[baprs]-[A-Za-z0-9-]{8,}|npm_[A-Za-z0-9]{8,}|AIza[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b/g,
+    replacement: "[REDACTED:provider-tokens]",
+  },
+  {
+    name: "jwt-tokens",
+    pattern: /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/g,
+    replacement: "[REDACTED:jwt-tokens]",
+  },
+  {
+    name: "url-credentials",
+    pattern: /(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:)[^\s/@]+(@)/gi,
+    replacement: "$1[REDACTED:url-credentials]$2",
   },
   {
     name: "paths",
   },
 ]);
+
+export const PERSISTENCE_REDACTION_RULES = Object.freeze(
+  DEFAULT_REDACTION_RULES.filter((rule) => rule.name !== "paths")
+);
+
+const SENSITIVE_FIELD_NAMES = new Set([
+  "authorization",
+  "proxyauthorization",
+  "cookie",
+  "setcookie",
+  "apikey",
+  "accesstoken",
+  "refreshtoken",
+  "authtoken",
+  "bearertoken",
+  "sessiontoken",
+  "password",
+  "passwd",
+  "passphrase",
+  "secret",
+  "clientsecret",
+  "webhooksecret",
+  "privatekey",
+  "signingkey",
+  "credential",
+  "credentials",
+  "awsaccesskeyid",
+  "awssecretaccesskey",
+]);
+
+const SENSITIVE_FIELD_SUFFIX = /(?:apikey|accesskey|privatekey|password|passwd|passphrase|secret|token)$/;
+const SENSITIVE_ARG_FLAG = /^--?(?:api[-_]?key|access[-_]?token|refresh[-_]?token|auth[-_]?token|session[-_]?token|password|passwd|passphrase|client[-_]?secret|private[-_]?key|secret|token)$/i;
+const REDACTED_SENSITIVE_FIELD = "[REDACTED:sensitive-field]";
 
 function isNonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
@@ -68,6 +142,49 @@ function isNonEmptyString(value) {
 
 export function resolveEvidenceDir(workDir = process.cwd()) {
   return path.resolve(workDir, ".va-auto-pilot", "evidence");
+}
+
+/**
+ * Validate and create a managed path without following symlinked components
+ * below the trusted project root. The returned path stays in the caller's
+ * lexical namespace, while checks run from the root's canonical location.
+ */
+export function ensureSafeManagedPath(baseRoot, targetPath, { directory = false, create = true } = {}) {
+  const lexicalBase = path.resolve(baseRoot);
+  const lexicalTarget = path.resolve(targetPath);
+  const relative = path.relative(lexicalBase, lexicalTarget);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`managed path escapes its trusted root: ${targetPath}`);
+  }
+
+  const canonicalBase = fs.realpathSync(lexicalBase);
+  const parts = relative.split(path.sep).filter(Boolean);
+  const directoryParts = directory ? parts : parts.slice(0, -1);
+  let current = canonicalBase;
+  for (const part of directoryParts) {
+    current = path.join(current, part);
+    if (!fs.existsSync(current)) {
+      if (!create) {
+        throw new Error(`managed path component does not exist: ${current}`);
+      }
+      fs.mkdirSync(current);
+    }
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new Error(`managed path component must be a real directory: ${current}`);
+    }
+  }
+
+  if (!directory) {
+    const canonicalTarget = path.join(canonicalBase, ...parts);
+    if (fs.existsSync(canonicalTarget)) {
+      const stat = fs.lstatSync(canonicalTarget);
+      if (stat.isSymbolicLink() || !stat.isFile()) {
+        throw new Error(`managed file must be a regular file: ${canonicalTarget}`);
+      }
+    }
+  }
+  return lexicalTarget;
 }
 
 export function observabilityPaths(workDir = process.cwd()) {
@@ -81,7 +198,11 @@ export function observabilityPaths(workDir = process.cwd()) {
 }
 
 export function taskEvidenceBundleDir(workDir, runId, taskId) {
-  return path.resolve(resolveEvidenceDir(workDir), runId ?? "unknown", taskId ?? "unknown");
+  return path.resolve(
+    resolveEvidenceDir(workDir),
+    assertSafeRunId(runId ?? "unknown"),
+    assertSafeTaskId(taskId ?? "unknown")
+  );
 }
 
 export function taskEvidenceBundlePaths(workDir, runId, taskId) {
@@ -168,7 +289,6 @@ function isTextArtifact(artifactName) {
 
 export function redactText(text, rules = DEFAULT_REDACTION_RULES) {
   let redacted = String(text ?? "");
-  let count = 0;
   const appliedRules = [];
 
   for (const rule of rules) {
@@ -183,54 +303,148 @@ export function redactText(text, rules = DEFAULT_REDACTION_RULES) {
     }
     if (redacted !== before) {
       appliedRules.push(rule.name);
-      count += 1;
     }
   }
 
-  return { text: redacted, applied: count > 0, count, rules: appliedRules };
+  return {
+    text: redacted,
+    applied: appliedRules.length > 0,
+    count: appliedRules.length,
+    rules: appliedRules,
+  };
 }
 
-function redactValue(value, rules, pathPrefix, removed) {
+function normalizeSensitiveFieldName(key) {
+  return String(key ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function isSensitiveFieldName(key) {
+  const normalized = normalizeSensitiveFieldName(key);
+  return SENSITIVE_FIELD_NAMES.has(normalized) || SENSITIVE_FIELD_SUFFIX.test(normalized);
+}
+
+function addRedaction(redactedFields, appliedRules, pathPrefix, ruleName) {
+  redactedFields.push(pathPrefix);
+  appliedRules.push(ruleName);
+}
+
+function redactForcedValue(value, rules, pathPrefix, redactedFields, appliedRules) {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item, index) => redactForcedValue(
+      item,
+      rules,
+      `${pathPrefix}[${index}]`,
+      redactedFields,
+      appliedRules
+    ));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+      key,
+      redactForcedValue(
+        child,
+        rules,
+        pathPrefix ? `${pathPrefix}.${key}` : key,
+        redactedFields,
+        appliedRules
+      ),
+    ]));
+  }
+  addRedaction(redactedFields, appliedRules, pathPrefix, "sensitive-fields");
+  return REDACTED_SENSITIVE_FIELD;
+}
+
+function redactValue(value, rules, pathPrefix, redactedFields, appliedRules, forceRedact = false) {
+  if (forceRedact) {
+    return redactForcedValue(value, rules, pathPrefix, redactedFields, appliedRules);
+  }
   if (typeof value === "string") {
     const result = redactText(value, rules);
     if (result.applied) {
-      removed.push(pathPrefix);
+      redactedFields.push(pathPrefix);
+      appliedRules.push(...result.rules);
     }
     return result.text;
   }
   if (Array.isArray(value)) {
-    return value.map((item, index) => redactValue(item, rules, `${pathPrefix}[${index}]`, removed));
+    let redactNext = false;
+    return value.map((item, index) => {
+      const itemPath = `${pathPrefix}[${index}]`;
+      const redacted = redactValue(
+        item,
+        rules,
+        itemPath,
+        redactedFields,
+        appliedRules,
+        redactNext
+      );
+      redactNext = typeof item === "string" && SENSITIVE_ARG_FLAG.test(item.trim());
+      return redacted;
+    });
   }
   if (value && typeof value === "object") {
-    const out = {};
-    for (const [key, child] of Object.entries(value)) {
-      out[key] = redactValue(child, rules, pathPrefix ? `${pathPrefix}.${key}` : key, removed);
-    }
-    return out;
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+      key,
+      redactValue(
+        child,
+        rules,
+        pathPrefix ? `${pathPrefix}.${key}` : key,
+        redactedFields,
+        appliedRules,
+        isSensitiveFieldName(key)
+      ),
+    ]));
   }
   return value;
 }
 
+export function redactSensitiveValue(value, rules = DEFAULT_REDACTION_RULES, pathPrefix = "value") {
+  const fieldsRedacted = [];
+  const appliedRules = [];
+  const redactedValue = redactValue(value, rules, pathPrefix, fieldsRedacted, appliedRules);
+  return {
+    value: redactedValue,
+    applied: fieldsRedacted.length > 0,
+    rules: [...new Set(appliedRules)],
+    fieldsRedacted: [...new Set(fieldsRedacted)],
+  };
+}
+
 export function redactEvent(event, rules = DEFAULT_REDACTION_RULES) {
-  const removed = [];
-  const redactedPayload = redactValue(event?.payload, rules, "payload", removed);
+  const result = redactSensitiveValue(event?.payload, rules, "payload");
+  const previous = event?.redaction ?? {};
+  const fieldsRemoved = [
+    ...(Array.isArray(previous.fieldsRemoved) ? previous.fieldsRemoved : []),
+    ...result.fieldsRedacted,
+  ];
+  const appliedRules = [
+    ...(Array.isArray(previous.rules) ? previous.rules : []),
+    ...result.rules,
+  ];
   return {
     ...event,
-    payload: redactedPayload,
+    payload: result.value,
     redaction: {
-      applied: removed.length > 0,
-      rules: removed.length > 0 ? [...new Set(rules.map((r) => r.name))] : [],
-      fieldsRemoved: removed,
+      applied: previous.applied === true || result.applied,
+      rules: [...new Set(appliedRules)],
+      fieldsRemoved: [...new Set(fieldsRemoved)],
     },
   };
 }
 
-export async function appendEventLog(logFile, event) {
-  fs.mkdirSync(path.dirname(path.resolve(logFile)), { recursive: true });
-  const line = `${JSON.stringify(event)}\n`;
-  await withPilotFileLock(logFile, async () => {
-    const existing = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
-    writeTextFileAtomicSync(logFile, `${existing}${line}`);
+export async function appendEventLog(logFile, event, options = {}) {
+  const target = options.safeRoot
+    ? ensureSafeManagedPath(options.safeRoot, logFile)
+    : path.resolve(logFile);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const line = `${JSON.stringify(redactEvent(event, PERSISTENCE_REDACTION_RULES))}\n`;
+  await withPilotFileLock(target, async () => {
+    const existing = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "";
+    const safeExisting = redactEventLogText(existing, PERSISTENCE_REDACTION_RULES);
+    writeTextFileAtomicSync(target, `${safeExisting}${line}`);
   });
 }
 
@@ -401,75 +615,226 @@ export function validateBundleManifest(manifest) {
   return { ok: errors.length === 0, errors };
 }
 
-export function writeBundleManifest(manifestPath, manifest) {
-  fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
-  writeTextFileAtomicSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+export function writeBundleManifest(manifestPath, manifest, options = {}) {
+  const target = options.safeRoot
+    ? ensureSafeManagedPath(options.safeRoot, manifestPath)
+    : path.resolve(manifestPath);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const safeManifest = redactSensitiveValue(manifest, PERSISTENCE_REDACTION_RULES, "manifest").value;
+  writeTextFileAtomicSync(target, `${JSON.stringify(safeManifest, null, 2)}\n`);
 }
 
-export function ensureBundleDirs(bundleDir) {
-  fs.mkdirSync(path.join(bundleDir, "artifacts"), { recursive: true });
-  fs.mkdirSync(path.join(bundleDir, "findings"), { recursive: true });
+export function ensureBundleDirs(bundleDir, options = {}) {
+  const target = path.resolve(bundleDir);
+  if (options.safeRoot) {
+    ensureSafeManagedPath(options.safeRoot, path.join(target, "artifacts"), { directory: true });
+    ensureSafeManagedPath(options.safeRoot, path.join(target, "findings"), { directory: true });
+  } else {
+    fs.mkdirSync(path.join(target, "artifacts"), { recursive: true });
+    fs.mkdirSync(path.join(target, "findings"), { recursive: true });
+  }
 }
 
-export function writeArtifact(artifactPath, content) {
-  fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
-  writeTextFileAtomicSync(artifactPath, content);
+export function writeArtifact(artifactPath, content, options = {}) {
+  const target = options.safeRoot
+    ? ensureSafeManagedPath(options.safeRoot, artifactPath)
+    : path.resolve(artifactPath);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const input = String(content ?? "");
+  const safeText = redactArtifactText(input, target, PERSISTENCE_REDACTION_RULES);
+  writeTextFileAtomicSync(target, safeText);
+  return {
+    text: safeText,
+    applied: safeText !== input,
+  };
 }
 
-export function redactBundle(bundleDir, rules = DEFAULT_REDACTION_RULES) {
+function resolveContainedBundlePath(rootDir, relativePath, label) {
+  if (!isNonEmptyString(relativePath) || path.isAbsolute(relativePath)) {
+    throw new Error(`${label} must be a non-empty relative path`);
+  }
+  const root = path.resolve(rootDir);
+  const target = path.resolve(root, relativePath);
+  if (target === root || !target.startsWith(`${root}${path.sep}`)) {
+    throw new Error(`${label} escapes the evidence bundle: ${relativePath}`);
+  }
+  return target;
+}
+
+function redactEventLogText(content, rules) {
+  const hadTrailingNewline = String(content).endsWith("\n");
+  const lines = String(content).split("\n");
+  if (hadTrailingNewline) {
+    lines.pop();
+  }
+  const redactedLines = lines.map((line) => {
+    if (!line.trim()) {
+      return line;
+    }
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.payload) {
+        return JSON.stringify(redactEvent(parsed, rules));
+      }
+      return JSON.stringify(redactSensitiveValue(parsed, rules, "record").value);
+    } catch {
+      // Non-JSON diagnostic lines are still covered by text rules below.
+    }
+    return redactText(line, rules).text;
+  });
+  return `${redactedLines.join("\n")}${hadTrailingNewline ? "\n" : ""}`;
+}
+
+function redactJsonText(content, rules) {
+  const input = String(content);
+  try {
+    const parsed = JSON.parse(input);
+    const safeValue = redactSensitiveValue(parsed, rules, "artifact").value;
+    const indent = input.includes("\n") ? 2 : 0;
+    const trailingNewline = input.endsWith("\n") ? "\n" : "";
+    return `${JSON.stringify(safeValue, null, indent)}${trailingNewline}`;
+  } catch {
+    return redactText(input, rules).text;
+  }
+}
+
+function redactArtifactText(content, artifactPath, rules, eventLog = false) {
+  if (eventLog || path.basename(artifactPath) === "events.jsonl") {
+    return redactEventLogText(content, rules);
+  }
+  const extension = path.extname(artifactPath).toLowerCase();
+  if (extension === ".json") {
+    return redactJsonText(content, rules);
+  }
+  if (extension === ".jsonl") {
+    return redactEventLogText(content, rules);
+  }
+  return redactText(content, rules).text;
+}
+
+function readSafeTextArtifact(sourcePath, rules, eventLog = false) {
+  if (!fs.existsSync(sourcePath)) {
+    return null;
+  }
+  const sourceStat = fs.lstatSync(sourcePath);
+  if (sourceStat.isSymbolicLink()) {
+    throw new Error(`Evidence text artifact must not be a symbolic link: ${sourcePath}`);
+  }
+  if (!sourceStat.isFile()) {
+    throw new Error(`Evidence text artifact must be a regular file: ${sourcePath}`);
+  }
+  const raw = fs.readFileSync(sourcePath, "utf8");
+  const safeText = redactArtifactText(raw, sourcePath, rules, eventLog);
+  if (safeText !== raw) {
+    writeTextFileAtomicSync(sourcePath, safeText);
+  }
+  return { text: safeText, applied: safeText !== raw };
+}
+
+export function redactBundle(bundleDir, rules = DEFAULT_REDACTION_RULES, options = {}) {
+  if (options.safeRoot) {
+    ensureSafeManagedPath(options.safeRoot, bundleDir, { directory: true });
+  }
   const manifestPath = path.join(bundleDir, "manifest.json");
   if (!fs.existsSync(manifestPath)) {
     throw new Error(`Bundle manifest not found: ${manifestPath}`);
   }
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const parsedManifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const manifest = redactSensitiveValue(
+    parsedManifest,
+    PERSISTENCE_REDACTION_RULES,
+    "manifest"
+  ).value;
   const redactedDir = path.join(bundleDir, "redacted");
-  fs.mkdirSync(path.join(redactedDir, "artifacts"), { recursive: true });
-  fs.mkdirSync(path.join(redactedDir, "findings"), { recursive: true });
-
-  const redactedArtifacts = [];
-  for (const artifact of manifest.artifacts ?? []) {
-    const sourcePath = path.join(bundleDir, artifact.path);
-    const redactedPath = path.join(redactedDir, artifact.path);
-    let sizeBytes = artifact.sizeBytes;
-    let sha256 = artifact.sha256;
-    let redacted = artifact.redacted;
-
-    if (isTextArtifact(artifact.name) && fs.existsSync(sourcePath)) {
-      const raw = fs.readFileSync(sourcePath, "utf8");
-      const result = redactText(raw, rules);
-      if (result.applied) {
-        writeTextFileAtomicSync(redactedPath, result.text);
-        sizeBytes = Buffer.byteLength(result.text, "utf8");
-        sha256 = hashText(result.text);
-        redacted = true;
-      } else {
-        writeTextFileAtomicSync(redactedPath, raw);
-      }
-    }
-
-    redactedArtifacts.push({
-      ...artifact,
-      path: path.relative(redactedDir, redactedPath),
-      sizeBytes,
-      sha256,
-      redacted,
-    });
+  if (options.safeRoot) {
+    ensureSafeManagedPath(options.safeRoot, path.join(redactedDir, "artifacts"), { directory: true });
+    ensureSafeManagedPath(options.safeRoot, path.join(redactedDir, "findings"), { directory: true });
+  } else {
+    fs.mkdirSync(path.join(redactedDir, "artifacts"), { recursive: true });
+    fs.mkdirSync(path.join(redactedDir, "findings"), { recursive: true });
   }
 
-  const redactedManifest = {
+  const safeArtifacts = [];
+  const redactedArtifacts = [];
+  for (const artifact of manifest.artifacts ?? []) {
+    const sourcePath = resolveContainedBundlePath(bundleDir, artifact.path, "artifact.path");
+    const redactedPath = resolveContainedBundlePath(redactedDir, artifact.path, "artifact.path");
+    if (options.safeRoot) {
+      ensureSafeManagedPath(options.safeRoot, sourcePath);
+      ensureSafeManagedPath(options.safeRoot, redactedPath);
+    }
+    let safeArtifact = { ...artifact };
+    let redactedArtifact = {
+      ...artifact,
+      path: path.relative(redactedDir, redactedPath),
+    };
+
+    if (isTextArtifact(artifact.name) && fs.existsSync(sourcePath)) {
+      const safeResult = readSafeTextArtifact(sourcePath, PERSISTENCE_REDACTION_RULES);
+      if (!safeResult) {
+        throw new Error(`Evidence text artifact disappeared while redacting: ${sourcePath}`);
+      }
+      const safeSizeBytes = Buffer.byteLength(safeResult.text, "utf8");
+      const safeSha256 = hashText(safeResult.text);
+      const primaryRedacted = artifact.redacted
+        || safeResult.applied
+        || artifact.sizeBytes !== safeSizeBytes
+        || artifact.sha256 !== safeSha256;
+      safeArtifact = {
+        ...artifact,
+        sizeBytes: safeSizeBytes,
+        sha256: safeSha256,
+        redacted: primaryRedacted,
+      };
+
+      const shareableText = redactArtifactText(safeResult.text, sourcePath, rules);
+      fs.mkdirSync(path.dirname(redactedPath), { recursive: true });
+      writeTextFileAtomicSync(redactedPath, shareableText);
+      redactedArtifact = {
+        ...safeArtifact,
+        path: path.relative(redactedDir, redactedPath),
+        sizeBytes: Buffer.byteLength(shareableText, "utf8"),
+        sha256: hashText(shareableText),
+        redacted: primaryRedacted || shareableText !== safeResult.text,
+      };
+    }
+
+    safeArtifacts.push(safeArtifact);
+    redactedArtifacts.push(redactedArtifact);
+  }
+
+  if (isNonEmptyString(manifest.eventsLog)) {
+    const sourceEventsPath = resolveContainedBundlePath(bundleDir, manifest.eventsLog, "eventsLog");
+    const redactedEventsPath = resolveContainedBundlePath(redactedDir, manifest.eventsLog, "eventsLog");
+    if (options.safeRoot) {
+      ensureSafeManagedPath(options.safeRoot, sourceEventsPath);
+      ensureSafeManagedPath(options.safeRoot, redactedEventsPath);
+    }
+    const safeEvents = readSafeTextArtifact(sourceEventsPath, PERSISTENCE_REDACTION_RULES, true);
+    if (safeEvents !== null) {
+      fs.mkdirSync(path.dirname(redactedEventsPath), { recursive: true });
+      writeTextFileAtomicSync(
+        redactedEventsPath,
+        redactArtifactText(safeEvents.text, sourceEventsPath, rules, true)
+      );
+    }
+  }
+
+  const redactedManifest = redactSensitiveValue({
     ...manifest,
     bundleId: `${manifest.bundleId}-redacted`,
     artifacts: redactedArtifacts,
     eventsLog: manifest.eventsLog,
     redactedShareable: "manifest.json",
-  };
-  writeBundleManifest(path.join(redactedDir, "manifest.json"), redactedManifest);
+  }, rules, "manifest").value;
+  writeBundleManifest(path.join(redactedDir, "manifest.json"), redactedManifest, options);
 
   const updatedManifest = {
     ...manifest,
+    artifacts: safeArtifacts,
     redactedShareable: "redacted/manifest.json",
   };
-  writeBundleManifest(manifestPath, updatedManifest);
+  writeBundleManifest(manifestPath, updatedManifest, options);
 
   return { redactedDir, redactedManifest, updatedManifest };
 }

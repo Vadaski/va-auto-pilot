@@ -193,6 +193,12 @@ journal 证据会先压缩成最近完成项、失败项、gate 和决策摘要�
 过期 placeholder gate 由 agent 通过 `va-auto-pilot gates audit` 和 `va-auto-pilot gates maintain --apply` 维护。
 显式目标路径是 `goal -> plan-from-goal -> candidate backlog -> orchestrate plan -> review-plan`；`orchestrate plan` 也会自动消费未处理的 objective intent。
 
+显式编排模式把“审批”当作真正的完整性边界：计划审查必须以明确的
+`PLAN REVIEW STATUS: PASS|FAIL` 作为最后一个非空行（如有发现，结构化输出放在它之前），任何审查豁免都必须说明理由；提交审批会绑定任务、允许提交的文件集
+（或隔离 worktree commit）、证据引用和当前集成分支 `HEAD`。任一上下文发生变化，运行会退回
+审批阶段，而不是提交过期或无关改动。run/task ID 只能使用路径安全的标识符；human-board
+和状态的并发更新采用加锁原子写；`init`/`upgrade` 会拒绝指向符号链接的脚手架目标。
+
 默认 cockpit 输出从人类需要做的决策开始：
 
 ```text

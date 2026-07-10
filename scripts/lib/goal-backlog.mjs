@@ -6,7 +6,7 @@ import {
   resolveHumanBoardPath,
 } from "./human-board.mjs";
 import { sprintBoardExec } from "./orchestration-cli.mjs";
-import { writeCandidateBacklog } from "./orchestration-state.mjs";
+import { readSprintStateFile, writeCandidateBacklog } from "./orchestration-state.mjs";
 
 export const GOAL_BACKLOG_SCHEMA_VERSION = 1;
 
@@ -81,7 +81,7 @@ function buildTaskNotes({ objective, constraints, risks, acceptances, overrides,
 }
 
 function parseAddedTaskId(stdout) {
-  const match = String(stdout ?? "").match(/Task added:\s+([A-Z][A-Z0-9-]*-\d+)/);
+  const match = String(stdout ?? "").match(/Task (?:added|reused):\s+([^\s]+)/);
   return match ? match[1] : "";
 }
 
@@ -111,7 +111,16 @@ export function buildCandidateBacklogFromIntents(rawInstructions, options = {}) 
     };
   }
 
-  const seed = JSON.stringify({ objective, constraints, risks, acceptances, overrides, notes });
+  // Identity must survive concurrent insertions that shift human-board line
+  // numbers. Only semantic intent contributes to the source hash.
+  const seed = JSON.stringify({
+    objective: objective.text,
+    constraints: constraints.map((intent) => intent.text),
+    risks: risks.map((intent) => intent.text),
+    acceptances: acceptances.map((intent) => intent.text),
+    overrides: overrides.map((intent) => intent.text),
+    notes: notes.map((intent) => intent.text),
+  });
   const sourceHash = shortHash(seed);
   const item = {
     title: truncateTitle(objective.text),
@@ -187,12 +196,25 @@ export async function planFromGoal(opts, options = {}) {
   }
 
   const appliedTasks = [];
+  const currentState = readSprintStateFile(opts.stateFile);
   for (const item of candidateBacklog.items) {
+    const existing = (currentState.tasks ?? []).find((task) => task.source === item.source);
+    if (existing) {
+      appliedTasks.push({
+        id: existing.id,
+        title: existing.title,
+        priority: existing.priority,
+        source: existing.source,
+        reused: true,
+      });
+      continue;
+    }
     const args = [
       "add",
       "--title", item.title,
       "--priority", item.priority,
       "--source", item.source,
+      "--reuse-source-title",
     ];
     if (item.notes) {
       args.push("--note", item.notes);
@@ -221,14 +243,39 @@ export async function planFromGoal(opts, options = {}) {
       title: item.title,
       priority: item.priority,
       source: item.source,
+      reused: /Task reused:/.test(result.stdout),
     });
   }
 
-  const handledIntent = markHumanBoardInstructionsHandled(
+  const consumedLineNumbers = new Set(candidateBacklog.consumedIntentLineNumbers);
+  const consumedInstructions = rawInstructions.filter((instruction) => (
+    consumedLineNumbers.has(instruction.lineNumber)
+  ));
+  const handledIntent = await markHumanBoardInstructionsHandled(
     boardPath,
-    candidateBacklog.consumedIntentLineNumbers,
+    consumedInstructions,
     options.reason ?? "plan-from-goal"
   );
+
+  if ((handledIntent.conflicts ?? []).length > 0) {
+    candidateBacklog.status = "needs-reconciliation";
+    candidateBacklog.appliedTasks = appliedTasks;
+    candidateBacklog.handledIntent = handledIntent;
+    await writeCandidateBacklog(opts.workDir, candidateBacklog, opts.runId);
+    return {
+      ok: false,
+      error: {
+        code: "INTENT_RECONCILIATION_REQUIRED",
+        message: "Backlog items were created or reused, but human intent changed before it could be marked handled.",
+      },
+      boardPath,
+      candidateBacklog,
+      applied: appliedTasks.length > 0,
+      appliedTasks,
+      handledIntent,
+      intents: built.intents,
+    };
+  }
 
   candidateBacklog.status = "applied";
   candidateBacklog.appliedAt = new Date().toISOString();

@@ -200,6 +200,16 @@ Agents can maintain stale placeholder gates with `va-auto-pilot gates audit` and
 `goal -> plan-from-goal -> candidate backlog -> orchestrate plan -> review-plan`;
 `orchestrate plan` also consumes unchecked objective intent automatically.
 
+Orchestrated mode treats approval as a concrete integrity boundary. Plan review
+must end with an explicit `PLAN REVIEW STATUS: PASS|FAIL` marker (with structured
+findings before it when applicable); review
+waivers require a reason. Commit approval is bound to the selected tasks,
+approved file set (or isolated-worktree commits), evidence references, and the
+current integration `HEAD`. If any of that context changes, the run returns to
+approval instead of committing stale or unrelated work. Run and task IDs are
+restricted to path-safe identifiers, concurrent human-board/state updates are
+locked and atomic, and `init`/`upgrade` refuse symlinked scaffold destinations.
+
 Default cockpit output starts with the decisions a human needs:
 
 ```text

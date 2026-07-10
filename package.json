@@ -76,11 +76,11 @@
     "check:smoke": "node ./scripts/smoke-test-runner.mjs --config test-flows/cli-critical-smoke.yaml --timeout 60000",
     "check:public-narrative": "node ./scripts/validate-public-narrative.mjs",
     "check:website": "node ./scripts/validate-website.mjs",
-    "lint": "npx eslint scripts/ bin/",
-    "lint:fix": "npx eslint --fix scripts/ bin/",
-    "check:coverage": "c8 --reporter=text node --test scripts/test-units.mjs",
+    "lint": "npx eslint scripts/ bin/ e2e/ tests/ website/*.js --max-warnings=0",
+    "lint:fix": "npx eslint --fix scripts/ bin/ e2e/ tests/ website/*.js --max-warnings=0",
+    "check:coverage": "c8 --check-coverage --lines 80 --statements 80 --functions 80 --branches 65 --reporter=text node --test tests/*.test.mjs scripts/test-units.mjs",
     "typecheck": "npx tsc --noEmit",
-    "check:all": "npm run check && npm run typecheck && npm run check:sprint && npm run check:units && npm run check:doc-store && npm run check:doc-store-mode && npm run check:cli-flows && npm run check:smoke && npm run check:observability && npm run check:mcp-resources && npm run check:protocol-fixtures && npm run check:runtime-proof && npm run check:public-narrative && npm run check:website && npm run validate:distribution",
+    "check:all": "npm run check && npm run lint && npm run typecheck && npm run check:sprint && npm run check:units && npm run check:doc-store && npm run check:doc-store-mode && npm run check:cli-flows && npm run check:smoke && npm run check:observability && npm run check:mcp-resources && npm run check:protocol-fixtures && npm run check:runtime-proof && npm run check:public-narrative && npm run check:website && npm run validate:distribution",
     "check:e2e": "node e2e/run-e2e.mjs --all",
     "check:quality": "node e2e/quality/run-quality.mjs --all",
     "validate:distribution": "node ./scripts/validate-distribution.mjs",
@@ -88,7 +88,8 @@
     "doc-store:demo": "node ./scripts/doc-store-demo.mjs",
     "doc-store:init": "node ./scripts/doc-store-cli.mjs init",
     "doc-store:doctor": "node ./scripts/doc-store-cli.mjs doctor",
-    "doc-store:enforce-staged": "node ./scripts/doc-store-cli.mjs enforce-staged"
+    "doc-store:enforce-staged": "node ./scripts/doc-store-cli.mjs enforce-staged",
+    "prepublishOnly": "npm run check:all && npm run check:coverage && npm run check:e2e"
   },
   "dependencies": {
     "tsx": "^4.22.4",

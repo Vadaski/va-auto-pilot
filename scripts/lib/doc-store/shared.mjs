@@ -12,6 +12,8 @@ export const KIND_DIRECTORIES = {
   archive: "archive"
 };
 
+const SAFE_ARTIFACT_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
 export function nowIso() {
   return new Date().toISOString();
 }
@@ -86,7 +88,25 @@ export function buildDocumentId(kind, slug) {
   return `${kind}:${slug}`;
 }
 
+/**
+ * Artifact slugs are persisted as filenames, so accepting path syntax here
+ * would turn an otherwise canonical-looking record into a path traversal.
+ * Generated slugs already use this alphabet via slugify().
+ *
+ * @param {unknown} slug
+ * @returns {slug is string}
+ */
+export function isSafeArtifactSlug(slug) {
+  return typeof slug === "string" && SAFE_ARTIFACT_SLUG.test(slug);
+}
+
 export function buildArtifactPath(kind, slug, archived = false) {
+  if (!DOCUMENT_KINDS.includes(kind)) {
+    throw new TypeError(`unsupported document kind: ${kind}`);
+  }
+  if (!isSafeArtifactSlug(slug)) {
+    throw new TypeError(`artifact slug is not path-safe: ${String(slug)}`);
+  }
   // Archived filenames now include kind to avoid cross-kind slug collisions. No migration is needed yet because there is no existing archived data.
   return path.join(directoryForKind(kind, archived), `${archived ? `${kind}__` : ""}${slug}.json`);
 }

@@ -61,6 +61,9 @@ function normalizeDependsOn(raw) {
  */
 function normalizeTask(task) {
   return {
+    // Historical/external boards may contain identifiers outside the safe
+    // execution alphabet. Keep the board readable; execution/path boundaries
+    // validate only the selected task before interpolation or artifact writes.
     id: String(task.id ?? ""),
     title: String(task.title ?? ""),
     priority: String(task.priority ?? "P2"),
@@ -230,9 +233,10 @@ function detectCycles(tasks) {
 /**
  * @param {Task[]} tasks
  * @param {number} [nowMs]
+ * @param {string} [claimRunId]
  * @returns {NextTaskResult | null}
  */
-function findNextTask(tasks, nowMs = Date.now()) {
+function findNextTask(tasks, nowMs = Date.now(), claimRunId = "") {
   const doneIds = new Set(
     tasks
       .filter((task) => task.state === "Done")
@@ -245,7 +249,13 @@ function findNextTask(tasks, nowMs = Date.now()) {
     // has advanced beyond Backlog is live work its owning run (or the board views)
     // still needs to see. Hiding it caused next/summary/auto-pilot-loop to report
     // null or start lower-priority backlog items.
-    const claimGate = (task) => state === "Backlog" ? !hasActiveClaim(task, nowMs) : true;
+    const claimGate = (task) => {
+      const active = hasActiveClaim(task, nowMs);
+      if (!claimRunId) {
+        return state === "Backlog" ? !active : true;
+      }
+      return !active || task.claimedBy === claimRunId;
+    };
     let candidates = sortTasks(tasks.filter((task) => task.state === state && claimGate(task)));
     if (state === "Backlog") {
       candidates = candidates.filter((task) => isDependencySatisfied(task, doneIds));
@@ -273,9 +283,10 @@ function findNextTask(tasks, nowMs = Date.now()) {
  * @param {Task[]} tasks
  * @param {number} maxParallel
  * @param {number} [nowMs]
+ * @param {string} [claimRunId]
  * @returns {ParallelPlan | null}
  */
-function buildParallelPlan(tasks, maxParallel, nowMs = Date.now()) {
+function buildParallelPlan(tasks, maxParallel, nowMs = Date.now(), claimRunId = "") {
   // Guard: report cycles before planning to prevent silent deadlocks.
   const cycles = detectCycles(tasks);
   if (cycles.length > 0) {
@@ -286,7 +297,7 @@ function buildParallelPlan(tasks, maxParallel, nowMs = Date.now()) {
     );
   }
 
-  const primary = findNextTask(tasks, nowMs);
+  const primary = findNextTask(tasks, nowMs, claimRunId);
   if (!primary) return null;
 
   const parallelAllowedActions = new Set(["start-task", "continue-implementation"]);
@@ -316,7 +327,7 @@ function buildParallelPlan(tasks, maxParallel, nowMs = Date.now()) {
   const backlog = sortTasks(tasks.filter(
     (task) => task.state === "Backlog"
       && task.id !== primaryTask.id
-      && !hasActiveClaim(task, nowMs)
+      && (!hasActiveClaim(task, nowMs) || task.claimedBy === claimRunId)
   ));
 
   for (const task of backlog) {

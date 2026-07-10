@@ -6,7 +6,6 @@ description: |
 setup:
   fixture: minimal-node
   agent_behavior: pass
-  review_behavior: pass
   sprint_state:
     projectPrefix: E2E
     tasks:
@@ -17,19 +16,45 @@ setup:
         dependsOn: []
   pitfalls:
     entries: []
+  config: |
+    version: 1
+    projectPrefix: E2E
+    sprint:
+      stateFile: .va-auto-pilot/sprint-state.json
+      boardFile: docs/todo/sprint.md
+      runJournalFile: docs/todo/run-journal.md
+    qualityGate:
+      buildCommand: "false"
+      reviewCommand: "touch review-gate-ran.txt"
+      acceptanceTestCommand: "touch acceptance-gate-ran.txt"
+    review:
+      domainRoleName: E2E Reviewer
+      domainPrompt: "E2E test reviewer"
 
 run:
   args: ["scripts/auto-pilot-loop.mjs"]
-  flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "2", "--skip-sprint-review"]
-  # Override config to make build fail
-  extra_args: []
+  flags: ["--no-colony", "--no-commit", "--no-parallel", "--max-cycles", "1", "--skip-sprint-review"]
 
 assert:
   must:
-    - type: gate_passed
+    - type: exit_code
+      value: 0
+    - type: gate_failed
       gate: build
+    - type: gate_not_run
+      gate: review
+    - type: gate_not_run
+      gate: acceptance
     - type: state_after
       task: E2E-001
       field: state
-      value: Done
+      value: Failed
+    - type: task_field
+      task: E2E-001
+      field: failCount
+      value: 1
+    - type: file_not_exists
+      path: review-gate-ran.txt
+    - type: file_not_exists
+      path: acceptance-gate-ran.txt
   should: []

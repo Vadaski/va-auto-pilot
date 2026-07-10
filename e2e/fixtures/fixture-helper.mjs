@@ -2,8 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const E2E_ROOT = path.resolve(import.meta.dirname, "..");
+const E2E_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES_ROOT = path.join(E2E_ROOT, "fixtures");
 
 /**
@@ -92,7 +93,7 @@ export function createIsolatedDir(fixtureName, options = {}) {
   execSync('git commit -m "init"', { cwd: dir, stdio: "pipe" });
 
   const cleanup = () => {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
   };
 
   return { dir, stateFile, boardFile, journalFile, pitfallsFile, configFile, cleanup };

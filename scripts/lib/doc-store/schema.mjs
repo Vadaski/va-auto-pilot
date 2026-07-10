@@ -1,6 +1,6 @@
 import { InvalidInputError } from "./errors.mjs";
 import { DOCUMENT_KINDS } from "./types.mjs";
-import { isPlainObject } from "./shared.mjs";
+import { buildArtifactPath, isPlainObject, isSafeArtifactSlug } from "./shared.mjs";
 
 function validateRelations(value, fieldName, errors) {
   if (!Array.isArray(value)) {
@@ -51,8 +51,12 @@ export function validatePublicInput(input, options = {}) {
   if (source.body !== undefined && typeof source.body !== "string") {
     errors.push("body must be a string");
   }
-  if (source.slug !== undefined && typeof source.slug !== "string") {
-    errors.push("slug must be a string");
+  if (source.slug !== undefined) {
+    if (typeof source.slug !== "string") {
+      errors.push("slug must be a string");
+    } else if (!source.slug || /[./\\]/.test(source.slug)) {
+      errors.push("slug must not be empty or contain path syntax (., /, or \\)");
+    }
   }
   if (!isPatch && source.id !== undefined && typeof source.id !== "string") {
     errors.push("id must be a string");
@@ -128,6 +132,13 @@ export function validateDocumentRecord(obj) {
   }
   if (!isPlainObject(record.frontmatter)) {
     errors.push("frontmatter must be an object");
+  } else if (!isSafeArtifactSlug(record.frontmatter.slug)) {
+    errors.push("frontmatter.slug must be a path-safe lowercase slug containing only letters, numbers, and single hyphens");
+  } else if (DOCUMENT_KINDS.includes(record.kind) && typeof record.path === "string") {
+    const expectedPath = buildArtifactPath(record.kind, record.frontmatter.slug, record.archived === true);
+    if (record.path !== expectedPath) {
+      errors.push(`path must equal canonical artifact path ${expectedPath}`);
+    }
   }
   if (!isPlainObject(record.extensions)) {
     errors.push("extensions must be an object");

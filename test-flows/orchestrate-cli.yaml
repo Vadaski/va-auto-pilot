@@ -126,6 +126,7 @@ flows:
 
   - name: "orchestrate: review-plan dry-run then approve-plan"
     command: "bash"
+    timeout_ms: 120000
     args:
       - "-lc"
       - |
@@ -156,6 +157,7 @@ flows:
 
   - name: "goal-to-backlog: plan-from-goal applies candidate backlog and marks intent handled"
     command: "bash"
+    timeout_ms: 120000
     args:
       - "-lc"
       - |
@@ -193,6 +195,7 @@ flows:
 
   - name: "orchestrate: plan auto converts objective intent into candidate backlog"
     command: "bash"
+    timeout_ms: 120000
     args:
       - "-lc"
       - |
@@ -227,6 +230,7 @@ flows:
 
   - name: "approvalPolicy: review-plan can auto approve low-risk trusted plan"
     command: "bash"
+    timeout_ms: 120000
     args:
       - "-lc"
       - |
@@ -326,7 +330,7 @@ flows:
 
   - name: "orchestrate: stale checkpoint blocks sprint-state human-board and git-head drift"
     command: "bash"
-    timeout_ms: 120000
+    timeout_ms: 300000
     args:
       - "-lc"
       - |
@@ -414,7 +418,7 @@ flows:
 
   - name: "orchestrate: full governed cycle commits deterministic worker output"
     command: "bash"
-    timeout_ms: 120000
+    timeout_ms: 300000
     args:
       - "-lc"
       - |
@@ -438,7 +442,7 @@ flows:
           buildCommand: test -f AP-001.txt
           reviewCommand: /bin/echo REVIEW_STATUS_PASS
           acceptanceTestCommand: test -f AP-001.txt
-          planReviewCommand: "/bin/echo WARNING: dogfood-plan-reviewed"
+          planReviewCommand: "/bin/echo 'PLAN REVIEW STATUS: PASS'"
         EOF
         cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
         {
@@ -532,7 +536,7 @@ flows:
 
         assert(read('plan.json').candidatePlan.primaryTaskId === 'AP-001', 'plan did not select AP-001');
         assert(read('review-plan.json').review.passed === true, 'plan review did not pass');
-        assert(read('review-plan.json').review.command === '/bin/echo WARNING: dogfood-plan-reviewed', 'plan review command did not come from fixture config');
+        assert(read('review-plan.json').review.command === "/bin/echo 'PLAN REVIEW STATUS: PASS'", 'plan review command did not come from fixture config');
         assert(read('approve-plan.json').checkpoint.observability.eventLogPath.endsWith('.va-auto-pilot/evidence/events.jsonl'), 'checkpoint event log path missing');
         assert(read('approve-plan.json').checkpoint.observability.evidenceBundleDir.endsWith('.va-auto-pilot/evidence'), 'checkpoint evidence bundle dir missing');
         assert(read('dispatch.json').queuedTasks.includes('AP-001'), 'dispatch did not queue AP-001');
@@ -589,7 +593,7 @@ flows:
 
   - name: "orchestrate: permission scope blocks out-of-scope and destructive worker paths"
     command: "bash"
-    timeout_ms: 120000
+    timeout_ms: 300000
     args:
       - "-lc"
       - |
@@ -634,7 +638,11 @@ flows:
         node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --dry-run --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json >/dev/null
-        node "$repo/scripts/auto-pilot.mjs" orchestrate await-workers --no-colony --agent-template "node write-outside.mjs" --json > "$evidence/out-of-scope-await.json"
+        set +e
+        node "$repo/scripts/auto-pilot.mjs" orchestrate await-workers --no-colony --agent-template "node write-outside.mjs" --json 2> "$evidence/out-of-scope-await.json"
+        out_scope_status=$?
+        set -e
+        test "$out_scope_status" -ne 0
 
         node - <<'NODE' "$out_scope_dir" "$evidence/out-of-scope-await.json"
         const fs = require('fs');
@@ -647,7 +655,8 @@ flows:
         const events = fs.readFileSync(path.join(dir, '.va-auto-pilot/evidence/events.jsonl'), 'utf8');
         const worktreePath = tracks.tracks?.[0]?.worktree?.path;
         const assert = (condition, message) => { if (!condition) throw new Error(message); };
-        assert(payload.results.some((item) => item.action === 'permission-failed'), 'await-workers did not report permission-failed');
+        assert(payload.error?.code === 'WORKER_TRACK_FAILED', 'await-workers did not fail closed');
+        assert(payload.error?.context?.failedTracks?.some((item) => item.resultAction === 'permission-failed'), 'await-workers did not report permission-failed');
         assert(state.tasks[0].state === 'Failed', 'out-of-scope worker did not fail the task');
         assert(worktreePath, 'worktree path missing from tracks.json');
         assert(fs.existsSync(path.join(worktreePath, 'outside.txt')), 'fixture did not create outside file inside the isolated worktree before enforcement');
@@ -705,7 +714,7 @@ flows:
 
   - name: "orchestrate: run-unattended replans after journal commits"
     command: "bash"
-    timeout_ms: 120000
+    timeout_ms: 300000
     args:
       - "-lc"
       - |
@@ -729,6 +738,8 @@ flows:
           buildCommand: test -f AP-001.txt -o -f AP-002.txt
           reviewCommand: /bin/echo REVIEW_STATUS_PASS
           acceptanceTestCommand: test -f AP-001.txt -o -f AP-002.txt
+        approvalPolicy:
+          smallRefactor: auto-if-gates-trusted
         EOF
         cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
         {
@@ -789,7 +800,7 @@ flows:
 
   - name: "orchestrate: commit failure clears stale approval"
     command: "bash"
-    timeout_ms: 120000
+    timeout_ms: 300000
     args:
       - "-lc"
       - |
@@ -808,7 +819,7 @@ flows:
           buildCommand: test -f AP-001.txt -o -f AP-002.txt
           reviewCommand: /bin/echo REVIEW_STATUS_PASS
           acceptanceTestCommand: test -f AP-001.txt -o -f AP-002.txt
-          planReviewCommand: "/bin/echo WARNING: dogfood-plan-reviewed"
+          planReviewCommand: "/bin/echo 'PLAN REVIEW STATUS: PASS'"
         EOF
         cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
         {"projectPrefix":"AP","tasks":[{"id":"AP-001","title":"Commit failure artifact","priority":"P0","state":"Backlog","owner":"","source":"commit-failure-fixture","createdAt":"2026-07-01","startedAt":"","completedAt":"","lastFailedAt":"","failCount":0,"reason":"","verification":"","notes":"","review":{},"testing":{},"dependsOn":[]},{"id":"AP-002","title":"Do not commit after failure","priority":"P0","state":"Backlog","owner":"","source":"commit-failure-fixture","createdAt":"2026-07-02","startedAt":"","completedAt":"","lastFailedAt":"","failCount":0,"reason":"","verification":"","notes":"","review":{},"testing":{},"dependsOn":[]}]}
@@ -871,6 +882,81 @@ flows:
         assert(Array.isArray(run.approvedCommitTasks) && run.approvedCommitTasks.length === 0, 'stale approvedCommitTasks were not cleared');
         assert(state.tasks.find((task) => task.id === 'AP-001').state === 'Failed', 'failed commit did not roll task back to Failed');
         assert(state.tasks.find((task) => task.id === 'AP-002').state === 'Done', 'unattempted task should remain Done for fresh approval');
+        NODE
+    env:
+      ROOT: "."
+    assert:
+      must:
+        - exit_code: 0
+      should: []
+
+  - name: "orchestrate: approved commit manifest rejects post-approval drift"
+    command: "bash"
+    timeout_ms: 300000
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        evidence="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot" "$tmpdir/docs/todo"
+        cat > "$tmpdir/.va-auto-pilot/config.yaml" <<'EOF'
+        version: 1
+        qualityGate:
+          buildCommand: test -f AP-001.txt
+          reviewCommand: /bin/echo REVIEW_STATUS_PASS
+          acceptanceTestCommand: test -f AP-001.txt
+          planReviewCommand: "/bin/echo 'PLAN REVIEW STATUS: PASS'"
+        EOF
+        cat > "$tmpdir/.va-auto-pilot/sprint-state.json" <<'EOF'
+        {"projectPrefix":"AP","tasks":[{"id":"AP-001","title":"Hash-bound artifact","priority":"P0","state":"Backlog","source":"AP-001.txt","dependsOn":[]}]}
+        EOF
+        cat > "$tmpdir/docs/todo/human-board.md" <<'EOF'
+        # Human Board
+
+        ## Instructions
+
+        EOF
+        cat > "$tmpdir/docs/todo/run-journal.md" <<'EOF'
+        # Run Journal
+
+        EOF
+        repo="$(cd "$ROOT" && pwd)"
+        cd "$tmpdir"
+        node "$repo/scripts/sprint-board.mjs" render >/dev/null
+        git init -q
+        git config user.email dogfood@example.invalid
+        git config user.name "VA Auto-Pilot Dogfood"
+        git add .
+        git commit -q -m "chore: seed manifest drift fixture"
+
+        node "$repo/scripts/auto-pilot.mjs" orchestrate init --shared-tree --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate await-workers --no-colony --agent-template "node $repo/e2e/stubs/deterministic-agent.mjs" --json >/dev/null
+        node "$repo/scripts/auto-pilot.mjs" orchestrate approve-commit --tasks AP-001 --json >/dev/null
+        before="$(git rev-parse HEAD)"
+        printf 'tampered after approval\n' > AP-001.txt
+        set +e
+        node "$repo/scripts/auto-pilot.mjs" orchestrate commit --json > "$evidence/commit.json" 2> "$evidence/commit.err"
+        status=$?
+        set -e
+        test "$status" -ne 0
+        grep -q COMMIT_CONTEXT_STALE "$evidence/commit.err"
+        test "$(git rev-parse HEAD)" = "$before"
+
+        node - <<'NODE' "$tmpdir"
+        const fs = require('fs');
+        const path = require('path');
+        const dir = process.argv[2];
+        const active = JSON.parse(fs.readFileSync(path.join(dir, '.va-auto-pilot/orchestration/active.json'), 'utf8'));
+        const runId = active.runs[0].runId;
+        const run = JSON.parse(fs.readFileSync(path.join(dir, '.va-auto-pilot/orchestration/runs', runId, 'run.json'), 'utf8'));
+        if (run.phase !== 'awaiting-commit-approval') throw new Error(`unexpected phase ${run.phase}`);
+        if (run.approvedCommitTasks.length !== 0) throw new Error('approval tasks were not cleared');
+        if (run.approvedCommitManifestHash !== null) throw new Error('approval manifest was not cleared');
         NODE
     env:
       ROOT: "."

@@ -2,6 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
+import {
+  ensureSafeManagedPath,
+  PERSISTENCE_REDACTION_RULES,
+  redactSensitiveValue,
+} from "./observability.mjs";
+import { withPilotFileLock, writeTextFileAtomicSync } from "./pilot-state.mjs";
+
 export const EVAL_HISTORY_VERSION = 1;
 export const DEFAULT_EVAL_HISTORY_FILE = ".va-auto-pilot/evidence/eval-history.jsonl";
 
@@ -61,9 +68,29 @@ export function buildEvalHistoryRecord({
   };
 }
 
-export function appendEvalHistoryRecord(filePath, record) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.appendFileSync(filePath, `${JSON.stringify(record)}\n`, "utf8");
+export async function appendEvalHistoryRecord(filePath, record, options = {}) {
+  const target = options.safeRoot
+    ? ensureSafeManagedPath(options.safeRoot, filePath)
+    : path.resolve(filePath);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  await withPilotFileLock(target, async () => {
+    const safeLines = fs.existsSync(target)
+      ? fs.readFileSync(target, "utf8").split(/\r?\n/).filter(Boolean).map((line) => {
+        try {
+          return JSON.stringify(redactSensitiveValue(
+            JSON.parse(line),
+            PERSISTENCE_REDACTION_RULES,
+            "evalHistory"
+          ).value);
+        } catch {
+          return redactSensitiveValue(line, PERSISTENCE_REDACTION_RULES, "evalHistory").value;
+        }
+      })
+      : [];
+    const safeRecord = redactSensitiveValue(record, PERSISTENCE_REDACTION_RULES, "evalHistory").value;
+    safeLines.push(JSON.stringify(safeRecord));
+    writeTextFileAtomicSync(target, `${safeLines.join("\n")}\n`);
+  });
 }
 
 export function readEvalHistory(filePath) {

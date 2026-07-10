@@ -53,7 +53,7 @@ export async function runIntent(subcommand, argv) {
 
 export async function captureIntent(opts, { type, text, source }) {
   const boardPath = resolveHumanBoardPath(opts.stateFile);
-  const entry = appendHumanIntent(boardPath, { type, text, source });
+  const entry = await appendHumanIntent(boardPath, { type, text, source });
   appendIntentJournal(opts.journalFile, { type, text, source });
   const snapshot = await refreshSnapshot(opts);
   return { entry, snapshot };

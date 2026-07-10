@@ -15,9 +15,11 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+      - run: npm run lint
       - run: npm run typecheck
       - run: npm run check:website
       - run: npm run check:all
+      - run: npm run check:coverage
       - run: npm run check:e2e
 
   doc-store:

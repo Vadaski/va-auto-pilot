@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./pilot-state.mjs";
+import { assertSafeIdentifier } from "./identifiers.mjs";
 
 /**
  * Workspace = isolation boundary that owns the task backlog (sprint-state)
@@ -31,18 +32,35 @@ export function resolveWorkspacesRoot(workDir = process.cwd()) {
 
 /** @returns {string} the workspace.json path for a given workspace name */
 export function resolveWorkspaceDir(workDir, name) {
-  return path.resolve(resolveWorkspacesRoot(workDir), sanitizeWorkspaceName(name));
+  const root = resolveWorkspacesRoot(workDir);
+  const workspaceName = sanitizeWorkspaceName(name);
+  const resolved = path.resolve(root, workspaceName);
+  if (!resolved.startsWith(`${root}${path.sep}`)) {
+    throw new Error(`workspace path escapes the managed workspace root: ${workspaceName}`);
+  }
+  return resolved;
 }
 
 function sanitizeWorkspaceName(name) {
-  const cleaned = String(name ?? "")
-    .trim()
-    .replace(/[^A-Za-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return cleaned || "default";
+  const cleaned = String(name ?? "").trim();
+  return assertSafeIdentifier(cleaned || "default", "workspace name");
 }
 
 export const DEFAULT_WORKSPACE_NAME = "default";
+
+function resolveUnpersistedWorkspacePaths(workDir, name, isolated, fallback) {
+  const wsDir = resolveWorkspaceDir(workDir, name);
+  return {
+    name,
+    type: /** @type {"isolated" | "shared"} */ (isolated ? "isolated" : "shared"),
+    stateFile: isolated ? path.join(wsDir, "sprint-state.json") : path.resolve(workDir, fallback.stateFile),
+    boardFile: isolated ? path.join(wsDir, "sprint.md") : path.resolve(workDir, fallback.boardFile),
+    journalFile: isolated ? path.join(wsDir, "run-journal.md") : path.resolve(workDir, fallback.journalFile),
+    pitfallsFile: isolated ? path.join(wsDir, "pitfalls.json") : path.resolve(workDir, fallback.pitfallsFile),
+    dir: isolated ? wsDir : path.resolve(workDir),
+    existed: false,
+  };
+}
 
 /**
  * Resolve the effective path set for a workspace. Pure: reads workspace.json if
@@ -64,24 +82,12 @@ export function resolveWorkspacePaths(workDir, options = {}) {
   };
   const wsDir = resolveWorkspaceDir(workDir, name);
   const wsFile = path.join(wsDir, "workspace.json");
+  const isolated = options.isolated === true || name !== DEFAULT_WORKSPACE_NAME;
 
   if (!fs.existsSync(wsFile)) {
     // No persisted workspace → resolve by intent. Isolated requested (or name is
     // not "default") → workspace-scoped paths. Otherwise → project-root defaults.
-    const isolated = options.isolated === true || name !== DEFAULT_WORKSPACE_NAME;
-    return {
-      name,
-      type: isolated ? "isolated" : "shared",
-      stateFile: isolated ? path.join(wsDir, "sprint-state.json") : path.resolve(workDir, fallback.stateFile),
-      boardFile: isolated ? path.join(wsDir, "sprint.md") : path.resolve(workDir, fallback.boardFile),
-      journalFile: isolated ? path.join(wsDir, "run-journal.md") : path.resolve(workDir, fallback.journalFile),
-      pitfallsFile: isolated ? path.join(wsDir, "pitfalls.json") : path.resolve(workDir, fallback.pitfallsFile),
-      // dir anchors workspace-local metadata (workspace.json path parent for isolated).
-      // For default shared, that is the project root — NOT workspaces/default.
-      // Commit serialization lock is NOT here: see resolveCommitLockPath (orchestration/).
-      dir: isolated ? wsDir : path.resolve(workDir),
-      existed: false,
-    };
+    return resolveUnpersistedWorkspacePaths(workDir, name, isolated, fallback);
   }
 
   try {
@@ -98,7 +104,9 @@ export function resolveWorkspacePaths(workDir, options = {}) {
       existed: true,
     };
   } catch {
-    return resolveWorkspacePaths(workDir, { ...options, name });
+    // A corrupt persisted definition must not recurse forever. Fall back to the
+    // caller's explicit routing intent so the CLI can still diagnose/recover it.
+    return resolveUnpersistedWorkspacePaths(workDir, name, isolated, fallback);
   }
 }
 

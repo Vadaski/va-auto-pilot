@@ -134,7 +134,14 @@ function humanizeStaleReason(reason) {
 
 function buildCheckpointStatus(run, checkpoint, opts) {
   if (checkpoint) {
-    const status = isCheckpointStale(checkpoint, { stateFile: opts.stateFile, workDir: opts.workDir, workspace: opts.workspace });
+    const status = isCheckpointStale(checkpoint, {
+      stateFile: opts.stateFile,
+      workDir: opts.workDir,
+      workspace: opts.workspace,
+      runId: run?.runId ?? opts.runId,
+      candidatePlan: run?.candidatePlan,
+      approvedPlanId: run?.approvedPlanId,
+    });
     return {
       exists: true,
       stale: status.stale,

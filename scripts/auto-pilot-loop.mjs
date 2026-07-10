@@ -25,7 +25,9 @@
  */
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
@@ -78,7 +80,9 @@ import {
   writeBundleManifest,
 } from "./lib/observability.mjs";
 import { classifyFailure, getRecoveryStrategy } from "./lib/error-recovery.mjs";
+import { assertSafeTaskId } from "./lib/identifiers.mjs";
 import {
+  DEFAULT_COMMIT_INDEX_LOCK_TIMEOUT_MS,
   DEFAULT_TRACK_TIMEOUT_MS,
   DEFAULT_GATE_TIMEOUT_MS,
   DEFAULT_MAX_PARALLEL
@@ -223,7 +227,7 @@ async function appendTaskEvent(task, eventType, phase, payload, opts) {
     payload,
     provenance: { source: "auto-pilot-loop" },
   });
-  await appendEventLog(paths.eventsLog, event);
+  await appendEventLog(paths.eventsLog, event, { safeRoot: resolveObservabilityWorkDir(opts) });
   return event;
 }
 
@@ -273,7 +277,7 @@ async function materializeTaskEvidenceBundle(task, state, opts, outcomeExtra = {
     .filter((event) => event.runId === runId && event.taskId === task.id);
 
   const eventsContent = taskEvents.map((event) => JSON.stringify(event)).join("\n");
-  writeArtifact(bundlePaths.eventsLog, eventsContent ? `${eventsContent}\n` : "");
+  writeArtifact(bundlePaths.eventsLog, eventsContent ? `${eventsContent}\n` : "", { safeRoot: workDir });
 
   const gates = gateEventsToManifestGates(taskEvents);
   const firstFailingGate = gates.find((gate) => !gate.passed)?.name ?? "";
@@ -298,8 +302,8 @@ async function materializeTaskEvidenceBundle(task, state, opts, outcomeExtra = {
     eventsLog: "events.jsonl",
     redactedShareable: "redacted/manifest.json",
   });
-  writeBundleManifest(bundlePaths.manifest, manifest);
-  redactBundle(bundlePaths.dir);
+  writeBundleManifest(bundlePaths.manifest, manifest, { safeRoot: workDir });
+  redactBundle(bundlePaths.dir, undefined, { safeRoot: workDir });
   return {
     dir: bundlePaths.dir,
     manifest: bundlePaths.manifest,
@@ -759,7 +763,7 @@ async function runGateSequence(gateConfig, opts) {
         const stderr = String(result.stderr ?? "");
         const evalOutput = `${stdout}\n${stderr}`;
         const parsed = parseEvalGateOutput(evalOutput);
-        recordEvalHistory(gate, parsed, {
+        await recordEvalHistory(gate, parsed, {
           ...opts,
           exitCode: 0,
           stdout,
@@ -793,7 +797,7 @@ async function runGateSequence(gateConfig, opts) {
       const exitCode = typeof err.code === "number" ? err.code : 1;
       if (gate.type === "eval") {
         const parsed = parseEvalGateOutput(output);
-        recordEvalHistory(gate, parsed, {
+        await recordEvalHistory(gate, parsed, {
           ...opts,
           exitCode,
           stdout,
@@ -821,7 +825,7 @@ async function runGateSequence(gateConfig, opts) {
   return { passed: true, gate: "", output: "", exitCode: 0, stdout: "", stderr: "" };
 }
 
-function recordEvalHistory(gate, parsed, opts) {
+async function recordEvalHistory(gate, parsed, opts) {
   const workDir = opts.workDir ?? process.cwd();
   const record = buildEvalHistoryRecord({
     taskId: opts.taskId ?? "",
@@ -835,7 +839,11 @@ function recordEvalHistory(gate, parsed, opts) {
     exitCode: opts.exitCode ?? (parsed.passed ? 0 : 1),
     commitHash: currentCommitHash(workDir),
   });
-  appendEvalHistoryRecord(resolveEvalHistoryFile(workDir, opts.evalHistoryFile), record);
+  await appendEvalHistoryRecord(
+    resolveEvalHistoryFile(workDir, opts.evalHistoryFile),
+    record,
+    { safeRoot: workDir }
+  );
 }
 
 function parseEvalGateOutput(output) {
@@ -1236,6 +1244,7 @@ async function computeTaskScope(opts) {
 }
 
 async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts) {
+  assertSafeTaskId(task.id);
   const baseTemplate = opts.workerOverrides?.[task.id] ?? opts.agentTemplate;
   const template = baseTemplate.replaceAll("{taskId}", task.id);
   const logDir = path.resolve(".va-auto-pilot/parallel-runs");
@@ -1686,35 +1695,349 @@ async function stagePaths(files, opts) {
     return [];
   }
 
-  await git(["add", "--all", "--", ...files], opts);
+  await git(["add", "--all", "--force", "--", ...files], opts);
   const staged = await git(["diff", "--cached", "--name-only", "--relative", "--", ...files], opts);
   return splitLines(staged.stdout);
 }
 
-async function commitPaths(header, files, opts) {
-  const stagedFiles = await stagePaths(files, opts);
-  if (stagedFiles.length === 0) {
-    return { committed: false, skipped: true, reason: "no staged changes", files: [], hash: "", header };
+async function hashStagedFile(file, opts) {
+  const commandOptions = {
+    cwd: opts.workDir ?? process.cwd(),
+    timeout: DEFAULT_GATE_TIMEOUT_MS,
+    encoding: /** @type {null} */ (null),
+    maxBuffer: 50 * 1024 * 1024,
+    env: opts.env ?? process.env,
+  };
+  const staged = await execFileAsync("git", ["ls-files", "--stage", "-z", "--", file], commandOptions);
+  const stagedOutput = Buffer.isBuffer(staged.stdout) ? staged.stdout : Buffer.from(staged.stdout ?? "");
+  if (stagedOutput.length === 0) {
+    return null;
+  }
+  const mode = stagedOutput.toString("utf8").split(" ", 1)[0];
+  const blob = await execFileAsync("git", ["show", `:${file}`], commandOptions);
+  const content = Buffer.isBuffer(blob.stdout) ? blob.stdout : Buffer.from(blob.stdout ?? "");
+  return crypto.createHash("sha256")
+    .update(`${mode}\0`, "utf8")
+    .update(content)
+    .digest("hex");
+}
+
+async function assertApprovedStagedFiles(stagedFiles, opts) {
+  const expected = opts.approvedCommitFileHashes;
+  if (!expected || typeof expected !== "object") {
+    return;
+  }
+  for (const file of stagedFiles) {
+    if (!Object.hasOwn(expected, file)) {
+      throw new Error(`staged file is missing an approved content hash: ${file}`);
+    }
+    const actualHash = await hashStagedFile(file, opts);
+    if (actualHash !== expected[file]) {
+      const error = /** @type {Error & { code: string }} */ (new Error(
+        `staged file changed after approval: ${file}`
+      ));
+      error.code = "APPROVED_FILE_HASH_MISMATCH";
+      throw error;
+    }
+  }
+}
+
+async function runGitHookIfPresent(name, args, opts) {
+  const configuredRoot = await git(["config", "--path", "--get", "core.hooksPath"], opts)
+    .then((result) => result.stdout.trim())
+    .catch(() => "");
+  const hookPath = configuredRoot
+    ? path.resolve(opts.workDir ?? process.cwd(), configuredRoot, name)
+    : await git(["rev-parse", "--git-path", `hooks/${name}`], opts)
+      .then((result) => path.resolve(opts.workDir ?? process.cwd(), result.stdout.trim()));
+  if (!fs.existsSync(hookPath)) {
+    return false;
+  }
+  await git(["hook", "run", name, ...(args.length > 0 ? ["--", ...args] : [])], opts);
+  return true;
+}
+
+function resolveCommitLockPath(opts) {
+  return path.resolve(
+    opts.workDir ?? process.cwd(),
+    ".va-auto-pilot",
+    "orchestration",
+    "commit.lock"
+  );
+}
+
+async function acquireGitIndexLock(indexPath, timeoutMs) {
+  const lockPath = `${indexPath}.lock`;
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      return {
+        fd: fs.openSync(lockPath, "wx"),
+        lockPath,
+      };
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        throw error;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        const timeoutError = /** @type {Error & { code: string }} */ (new Error(
+          `git index remained locked for ${timeoutMs}ms: ${lockPath}`
+        ));
+        timeoutError.code = "GIT_INDEX_LOCKED";
+        throw timeoutError;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+}
+
+async function resolveRealIndexPath(opts) {
+  const workDir = opts.workDir ?? process.cwd();
+  const indexOutput = (await git(["rev-parse", "--git-path", "index"], opts)).stdout.trim();
+  return path.resolve(workDir, indexOutput);
+}
+
+async function recoverPendingRealIndex(opts) {
+  const indexPath = await resolveRealIndexPath(opts);
+  const indexDir = path.dirname(indexPath);
+  if (!fs.existsSync(indexDir)) {
+    return { recovered: false, recoveryFile: "" };
+  }
+  const prefix = "va-auto-pilot-index-recovery-";
+  const recoveryFiles = fs.readdirSync(indexDir)
+    .filter((name) => name.startsWith(prefix))
+    .map((name) => path.join(indexDir, name));
+  if (recoveryFiles.length === 0) {
+    return { recovered: false, recoveryFile: "" };
+  }
+  if (recoveryFiles.length !== 1) {
+    const error = /** @type {Error & { code: string }} */ (new Error(
+      `multiple pending Git index recovery snapshots require manual intervention: ${recoveryFiles.join(", ")}`
+    ));
+    error.code = "INDEX_RECOVERY_REQUIRED";
+    throw error;
   }
 
-  await git([
-    "commit",
-    "-m", header,
-    "-m", "Co-Authored-By: Claude <noreply@anthropic.com>",
-    "--only",
-    "--",
-    ...stagedFiles
-  ], opts);
-  const head = await git(["rev-parse", "HEAD"], opts);
+  const recoveryFile = recoveryFiles[0];
+  const expectedHead = path.basename(recoveryFile).slice(prefix.length);
+  const currentHead = await git(["rev-parse", "--verify", "HEAD"], opts)
+    .then((result) => result.stdout.trim())
+    .catch(() => "");
+  if (!expectedHead || currentHead !== expectedHead) {
+    const error = /** @type {Error & { code: string }} */ (new Error(
+      `pending Git index recovery snapshot targets ${expectedHead || "an unknown commit"}, current HEAD is ${currentHead || "unborn"}`
+    ));
+    error.code = "INDEX_RECOVERY_REQUIRED";
+    throw error;
+  }
+
+  const acquired = await acquireGitIndexLock(
+    indexPath,
+    opts.commitIndexLockTimeoutMs ?? DEFAULT_COMMIT_INDEX_LOCK_TIMEOUT_MS
+  );
+  let fdOpen = true;
+  try {
+    const candidate = fs.readFileSync(recoveryFile);
+    fs.ftruncateSync(acquired.fd, 0);
+    fs.writeSync(acquired.fd, candidate, 0, candidate.length, 0);
+    fs.fsyncSync(acquired.fd);
+    fs.closeSync(acquired.fd);
+    fdOpen = false;
+    fs.renameSync(acquired.lockPath, indexPath);
+    fs.rmSync(recoveryFile, { force: true });
+    return { recovered: true, recoveryFile };
+  } catch (cause) {
+    if (fdOpen) {
+      fs.closeSync(acquired.fd);
+    }
+    fs.rmSync(acquired.lockPath, { force: true });
+    const error = /** @type {Error & { code: string, cause?: unknown }} */ (new Error(
+      `failed to publish pending Git index recovery snapshot ${recoveryFile}: ${String(cause?.message ?? cause)}`
+    ));
+    error.code = "INDEX_RECOVERY_REQUIRED";
+    error.cause = cause;
+    throw error;
+  }
+}
+
+async function prepareRealIndexUpdate(commitHash, files, opts, tempDir) {
+  const indexPath = await resolveRealIndexPath(opts);
+  fs.mkdirSync(path.dirname(indexPath), { recursive: true });
+  const acquired = await acquireGitIndexLock(
+    indexPath,
+    opts.commitIndexLockTimeoutMs ?? DEFAULT_COMMIT_INDEX_LOCK_TIMEOUT_MS
+  );
+  const candidateIndex = path.join(tempDir, "real-index-candidate");
+  const recoveryFile = path.join(
+    path.dirname(indexPath),
+    `va-auto-pilot-index-recovery-${commitHash}`
+  );
+  let fdOpen = true;
+  const cleanupLock = () => {
+    if (fdOpen) {
+      fs.closeSync(acquired.fd);
+      fdOpen = false;
+    }
+    fs.rmSync(acquired.lockPath, { force: true });
+  };
+
+  try {
+    const candidateOpts = {
+      ...opts,
+      env: {
+        ...process.env,
+        ...(opts.env ?? {}),
+        GIT_INDEX_FILE: candidateIndex,
+      },
+    };
+    if (fs.existsSync(indexPath)) {
+      fs.copyFileSync(indexPath, candidateIndex);
+    } else {
+      await git(["read-tree", "--empty"], candidateOpts);
+    }
+    await git(["reset", "-q", commitHash, "--", ...files], candidateOpts);
+    const candidate = fs.readFileSync(candidateIndex);
+    fs.ftruncateSync(acquired.fd, 0);
+    fs.writeSync(acquired.fd, candidate, 0, candidate.length, 0);
+    fs.fsyncSync(acquired.fd);
+    fs.closeSync(acquired.fd);
+    fdOpen = false;
+    // Persist the candidate before HEAD advances. If publishing index.lock
+    // later fails, the next pilot commit can repair the real index first.
+    fs.copyFileSync(candidateIndex, recoveryFile, fs.constants.COPYFILE_EXCL);
+  } catch (error) {
+    cleanupLock();
+    fs.rmSync(recoveryFile, { force: true });
+    throw error;
+  }
 
   return {
-    committed: true,
-    skipped: false,
-    reason: "",
-    header,
-    files: stagedFiles,
-    hash: head.stdout.trim()
+    rollback() {
+      cleanupLock();
+      fs.rmSync(recoveryFile, { force: true });
+    },
+    finalize() {
+      try {
+        const renameIndexFile = opts.renameIndexFile ?? fs.renameSync;
+        renameIndexFile(acquired.lockPath, indexPath);
+        fs.rmSync(recoveryFile, { force: true });
+        return { ok: true, recoveryFile: "", error: "" };
+      } catch (error) {
+        fs.rmSync(acquired.lockPath, { force: true });
+        return {
+          ok: false,
+          recoveryFile,
+          error: String(error?.message ?? error),
+        };
+      }
+    },
   };
+}
+
+async function commitPathsUnlocked(header, files, opts) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-auto-pilot-index-"));
+  const indexFile = path.join(tempDir, "index");
+  const messageFile = path.join(tempDir, "message.txt");
+  const isolatedOpts = {
+    ...opts,
+    env: {
+      ...process.env,
+      ...(opts.env ?? {}),
+      GIT_INDEX_FILE: indexFile,
+    },
+  };
+  try {
+    const recoveredIndex = await recoverPendingRealIndex(opts);
+    if (recoveredIndex.recovered) {
+      log(opts, `  recovered pending Git index snapshot ${recoveredIndex.recoveryFile}`);
+    }
+    const parent = await git(["rev-parse", "--verify", "HEAD"], opts)
+      .then((result) => result.stdout.trim())
+      .catch(() => "");
+    await git(parent ? ["read-tree", parent] : ["read-tree", "--empty"], isolatedOpts);
+
+    const stagedFiles = await stagePaths(files, isolatedOpts);
+    if (stagedFiles.length === 0) {
+      return { committed: false, skipped: true, reason: "no staged changes", files: [], hash: "", header };
+    }
+    await assertApprovedStagedFiles(stagedFiles, isolatedOpts);
+
+    fs.writeFileSync(
+      messageFile,
+      `${header}\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`,
+      "utf8"
+    );
+    await runGitHookIfPresent("pre-commit", [], isolatedOpts);
+    await runGitHookIfPresent("prepare-commit-msg", [messageFile, "message"], isolatedOpts);
+    await runGitHookIfPresent("commit-msg", [messageFile], isolatedOpts);
+
+    const finalStaged = splitLines((await git([
+      "diff", "--cached", "--name-only", "--relative"
+    ], isolatedOpts)).stdout).sort();
+    if (JSON.stringify(finalStaged) !== JSON.stringify([...stagedFiles].sort())) {
+      const error = /** @type {Error & { code: string }} */ (new Error(
+        `git hook changed the approved staged file set: ${finalStaged.join(", ")}`
+      ));
+      error.code = "UNAPPROVED_WORKTREE_CHANGES";
+      throw error;
+    }
+    await assertApprovedStagedFiles(finalStaged, isolatedOpts);
+
+    const tree = (await git(["write-tree"], isolatedOpts)).stdout.trim();
+    const commitArgs = ["commit-tree", tree];
+    if (parent) {
+      commitArgs.push("-p", parent);
+    }
+    commitArgs.push("-F", messageFile);
+    const commitHash = (await git(commitArgs, isolatedOpts)).stdout.trim();
+    const expectedOld = parent || "0000000000000000000000000000000000000000";
+    const realIndexUpdate = await prepareRealIndexUpdate(commitHash, finalStaged, opts, tempDir);
+    try {
+      await git(["update-ref", "HEAD", commitHash, expectedOld], opts);
+    } catch (error) {
+      realIndexUpdate.rollback();
+      error.code = "COMMIT_CONTEXT_STALE";
+      throw error;
+    }
+
+    // The candidate index was built from the real index while holding Git's
+    // index lock. Publish it atomically only after HEAD advances, preserving
+    // unrelated user-staged entries and preventing a half-committed failure.
+    const indexRefresh = realIndexUpdate.finalize();
+    if (!indexRefresh.ok) {
+      log(
+        opts,
+        `  WARNING: commit ${commitHash} is durable, but the real index could not be published; recovery snapshot: ${indexRefresh.recoveryFile}`
+      );
+    }
+    await runGitHookIfPresent("post-commit", [], isolatedOpts).catch(() => {});
+
+    return {
+      committed: true,
+      skipped: false,
+      reason: "",
+      header,
+      files: finalStaged,
+      hash: commitHash,
+      parent,
+      indexRefresh,
+    };
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function commitPaths(header, files, opts) {
+  if (opts.commitLockHeld) {
+    return commitPathsUnlocked(header, files, opts);
+  }
+  const lockPath = resolveCommitLockPath(opts);
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  return withPilotFileLock(
+    lockPath,
+    () => commitPathsUnlocked(header, files, opts),
+    { timeoutMs: opts.commitLockTimeoutMs ?? DEFAULT_GATE_TIMEOUT_MS }
+  );
 }
 
 async function ensureTaskBaseline(task, opts) {
@@ -2021,7 +2344,25 @@ function buildCommitHeader(task) {
   return `${deriveCommitType(task)}(${deriveCommitScope(task)}): ${description}`;
 }
 
-async function autoCommitTask(task, opts) {
+async function rollbackBaselineCommit(baselineCommit, opts) {
+  const currentHead = await git(["rev-parse", "--verify", "HEAD"], opts)
+    .then((result) => result.stdout.trim())
+    .catch(() => "");
+  if (currentHead !== baselineCommit.hash) {
+    return {
+      rolledBack: false,
+      reason: `HEAD advanced from baseline ${baselineCommit.hash} to ${currentHead || "unborn"}`,
+    };
+  }
+  if (baselineCommit.parent) {
+    await git(["update-ref", "HEAD", baselineCommit.parent, baselineCommit.hash], opts);
+  } else {
+    await git(["update-ref", "-d", "HEAD", baselineCommit.hash], opts);
+  }
+  return { rolledBack: true, reason: "" };
+}
+
+async function autoCommitTaskUnlocked(task, opts) {
   if (opts.dryRun) {
     return { committed: false, skipped: true, reason: "dry-run", files: [], hash: "" };
   }
@@ -2035,7 +2376,36 @@ async function autoCommitTask(task, opts) {
     return { committed: false, skipped: true, reason: "working tree clean", files: [], hash: "" };
   }
 
-  const baseline = opts.taskBaselines.get(task.id);
+  const approvedCommitFiles = Array.isArray(opts.approvedCommitFiles)
+    ? [...new Set(opts.approvedCommitFiles.map(String))].sort()
+    : null;
+  if (approvedCommitFiles) {
+    const approved = new Set([
+      ...approvedCommitFiles,
+      ...(Array.isArray(opts.allowedUncommittedFiles) ? opts.allowedUncommittedFiles.map(String) : []),
+    ]);
+    const allowedPrefixes = (Array.isArray(opts.allowedUncommittedPrefixes)
+      ? opts.allowedUncommittedPrefixes
+      : [])
+      .map((value) => String(value).replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/\/+$/, ""))
+      .filter((value) => value && !value.startsWith("/") && !value.split("/").includes(".."))
+      .map((value) => `${value}/`);
+    const unexpected = [...currentFiles]
+      .filter((file) => !approved.has(file))
+      .filter((file) => !allowedPrefixes.some((prefix) => file.startsWith(prefix)))
+      .filter((file) => !isOrchestrationRuntimeFile(file, opts))
+      .filter((file) => !isAutoPilotControlFile(file, opts))
+      .sort();
+    if (unexpected.length > 0) {
+      const error = /** @type {Error & { code: string }} */ (new Error(
+        `refusing to commit files outside the approved manifest: ${unexpected.join(", ")}`
+      ));
+      error.code = "UNAPPROVED_WORKTREE_CHANGES";
+      throw error;
+    }
+  }
+
+  const baseline = approvedCommitFiles ? null : opts.taskBaselines.get(task.id);
   const baselineFiles = baseline ? [...baseline.files].sort() : [];
   let baselineCommit = { committed: false, skipped: true, reason: "no baseline changes", files: [], hash: "" };
 
@@ -2067,7 +2437,7 @@ async function autoCommitTask(task, opts) {
   }
 
   const header = buildCommitHeader(task);
-  const taskFiles = [...(await listChangedFiles(opts))]
+  const taskFiles = approvedCommitFiles ?? [...(await listChangedFiles(opts))]
     .filter((file) => !isOrchestrationRuntimeFile(file, opts))
     .sort();
   let taskCommit;
@@ -2076,7 +2446,10 @@ async function autoCommitTask(task, opts) {
   } catch (error) {
     if (baselineCommit.committed) {
       try {
-        await git(["reset", "--soft", "HEAD~1"], opts);
+        const rollback = await rollbackBaselineCommit(baselineCommit, opts);
+        if (!rollback.rolledBack) {
+          error.message = `${error.message} (baseline rollback skipped safely: ${rollback.reason})`;
+        }
       } catch (rollbackError) {
         error.message = `${error.message} (baseline rollback failed: ${formatGitError(rollbackError)})`;
       }
@@ -2089,6 +2462,19 @@ async function autoCommitTask(task, opts) {
     ...taskCommit,
     baselineCommit
   };
+}
+
+async function autoCommitTask(task, opts) {
+  if (opts.dryRun || opts.noCommit || opts.commitLockHeld) {
+    return autoCommitTaskUnlocked(task, opts);
+  }
+  const lockPath = resolveCommitLockPath(opts);
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  return withPilotFileLock(
+    lockPath,
+    () => autoCommitTaskUnlocked(task, { ...opts, commitLockHeld: true }),
+    { timeoutMs: opts.commitLockTimeoutMs ?? DEFAULT_GATE_TIMEOUT_MS }
+  );
 }
 
 function formatGitError(error) {
@@ -2118,6 +2504,13 @@ async function finalizeDoneTaskCommit(task, opts) {
         : `all gates passed; commit skipped (${commitResult.reason})`
     };
   } catch (error) {
+    if (["UNAPPROVED_WORKTREE_CHANGES", "APPROVED_FILE_HASH_MISMATCH"].includes(error?.code)) {
+      return {
+        ok: false,
+        error,
+        details: error.message,
+      };
+    }
     return {
       ok: false,
       error,
@@ -2439,6 +2832,9 @@ async function executeSingleTask(taskId, bridge, pitfalls, gateConfig, opts) {
     }
 
     if (refreshedTask.state === "Done") {
+      const deferredCommitFiles = opts.deferCommit
+        ? await listTaskDeltaFiles(refreshedTask, opts)
+        : [];
       const completedBundle = await materializeTaskEvidenceBundle(refreshedTask, "completed", opts, {
         commitDeferred: Boolean(opts.deferCommit),
       });
@@ -2448,6 +2844,7 @@ async function executeSingleTask(taskId, bridge, pitfalls, gateConfig, opts) {
           action: "awaiting-commit-approval",
           details: "gates passed; commit deferred for orchestrated approve-commit",
           evidenceBundle: completedBundle?.relativeManifest ?? "",
+          commitFiles: deferredCommitFiles,
           steps,
           terminal: true
         };
@@ -3087,6 +3484,7 @@ export {
   deriveCommitType,
   deriveCommitScope,
   buildCommitHeader,
+  commitPaths,
   resolveDispatchFailureGate,
   detectStopCondition,
   autoCommitTask,

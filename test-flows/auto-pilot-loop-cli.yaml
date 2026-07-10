@@ -172,7 +172,7 @@ flows:
       should: []
 
   - name: "loop: eval pass fail ambiguous gates write observable history"
-    timeout_ms: 120000
+    timeout_ms: 300000
     command: "bash"
     args:
       - "-lc"

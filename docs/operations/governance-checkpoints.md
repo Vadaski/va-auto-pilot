@@ -22,7 +22,7 @@ The checkpoint carries three layers:
 | Layer | Purpose |
 | --- | --- |
 | `approvedPlanId` and `candidatePlan` | The plan that was approved. |
-| context hashes | `sprintStateHash`, `humanBoardHash`, and `gitHead` bind approval to the state reviewed by the manager. |
+| context hashes | `sprintStateHash`, `humanBoardHash`, `runtimeConfigHash`, `gitHead`, `candidatePlanHash`, and `workerSelectionHash` bind approval to the state reviewed by the manager. |
 | `governance` | The decision point, approval scope, invalidation rules, stale policy, and resume phase. |
 
 Current governance schema:
@@ -34,7 +34,7 @@ Current governance schema:
   "decisionPoint": "plan.approved",
   "approvalScope": ["plan", "dispatch"],
   "requiredBefore": "dispatch",
-  "invalidatesOn": ["sprint-state", "human-board", "git-head"],
+  "invalidatesOn": ["sprint-state", "human-board", "runtime-config", "git-head"],
   "stalePolicy": "block-dispatch-and-require-approve-plan",
   "resumePhase": "plan-approved"
 }
@@ -44,9 +44,9 @@ Current governance schema:
 
 | Checkpoint | CLI action | Required before | Invalidates on | Durable evidence |
 | --- | --- | --- | --- | --- |
-| Plan approval | `orchestrate approve-plan` | `dispatch` | sprint state, projected human intent, git HEAD | `checkpoint.json`, `plan.approved` event |
+| Plan approval | `orchestrate approve-plan` | `dispatch` | sprint state, projected human intent, runtime config/gates, git HEAD | `checkpoint.json`, `plan.approved` event |
 | Dispatch gate | `orchestrate dispatch` | worker execution | stale plan checkpoint, halt directive, unchecked projected intent, active executor lock | `dispatch.queued` or `checkpoint.stale` event |
-| Commit approval | `orchestrate approve-commit --tasks ...` | `commit` | task state no longer Done, missing approved task set | `run.json.approvedCommitTasks` |
+| Commit approval | `orchestrate approve-commit --tasks ...` | `commit` | task/track state, approved file hashes or worktree commits, evidence references, integration HEAD | `run.json.approvedCommitTasks`, `approvedCommitManifestHash`, `commit.approved` event |
 | Release approval | release workflow | publish or distribution promotion | failed checks, stale package evidence, missing human release note | future release checkpoint |
 
 The release checkpoint is a defined governance slot, but this repository does
@@ -114,3 +114,8 @@ Governance writes AP-087 observability events:
 
 These events are append-only. Redacted bundles may quote them when evidence
 needs to be shared outside the local machine.
+
+Commit approval uses the same stale-context rule as plan approval. The manifest
+is rebuilt immediately before commit; a changed file, worktree result commit,
+evidence reference, or integration `HEAD` clears approval and returns the run to
+`awaiting-commit-approval`.

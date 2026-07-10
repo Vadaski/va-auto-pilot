@@ -1920,7 +1920,7 @@ async function runReviewCommand(pitfallsFile, options) {
 
 async function main() {
   const argv = process.argv.slice(2);
-  const parsed = parseArgv(argv, new Set(["json", "help", "reset-fail-count", "unresolved", "list", "strict", "view", "validate"]));
+  const parsed = parseArgv(argv, new Set(["json", "help", "reset-fail-count", "unresolved", "list", "strict", "view", "validate", "reuse-source-title"]));
 
   if (!parsed.command || parsed.flags.has("help") || parsed.command === "help") {
     printHelp();
@@ -2095,7 +2095,7 @@ async function main() {
       let plan = null;
       await withPilotFileLock(stateFile, async () => {
         const state = readState(stateFile);
-        plan = buildParallelPlan(state.tasks, maxParallel);
+        plan = buildParallelPlan(state.tasks, maxParallel, Date.now(), claimRunId);
         if (plan) {
           let planTaskIds = [plan.primaryTaskId, ...(plan.parallelTracks ?? [])]
             .map((id) => String(id ?? ""))
@@ -2114,7 +2114,12 @@ async function main() {
               ),
             };
           }
-          claimTasksInState(state, claimRunId, planTaskIds.length, ttlMs, Date.now(), planTaskIds);
+          const claimResult = claimTasksInState(state, claimRunId, planTaskIds.length, ttlMs, Date.now(), planTaskIds);
+          const claimedIds = new Set(claimResult.claimedTasks.map((task) => task.taskId));
+          const missingClaims = planTaskIds.filter((taskId) => !claimedIds.has(taskId));
+          if (missingClaims.length > 0) {
+            throw new Error(`Plan claim conflict for ${claimRunId}: ${missingClaims.join(", ")}`);
+          }
           writeState(stateFile, state);
           writeBoard(boardFile, state);
         }
@@ -2202,16 +2207,27 @@ async function main() {
   if (parsed.command === "add") {
     /** @type {Task | null} */
     let task = null;
+    let reused = false;
     await withPilotFileLock(stateFile, async () => {
       const state = readState(stateFile);
-      task = addTask(state, parsed.options);
-      writeState(stateFile, state);
-      writeBoard(boardFile, state);
+      task = parsed.flags.has("reuse-source-title")
+        ? state.tasks.find((item) => (
+          item.source === String(parsed.options.source ?? "")
+          && item.title === String(parsed.options.title ?? "")
+          && Boolean(item.source)
+        )) ?? null
+        : null;
+      reused = Boolean(task);
+      if (!task) {
+        task = addTask(state, parsed.options);
+        writeState(stateFile, state);
+        writeBoard(boardFile, state);
+      }
     });
     if (!task) {
       throw new Error("Task add did not produce a task.");
     }
-    console.log(`Task added: ${task.id}`);
+    console.log(`Task ${reused ? "reused" : "added"}: ${task.id}`);
     console.log(`State file: ${path.relative(process.cwd(), stateFile)}`);
     console.log(`Board file: ${path.relative(process.cwd(), boardFile)}`);
     return;

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { splitShellCommand } from "./shell-split.mjs";
 
 export const PERMISSION_SCOPE_SCHEMA_VERSION = 1;
 
@@ -152,7 +153,54 @@ export function detectOutOfScopeFiles(changedFiles, policy) {
   const normalized = normalizePermissionPolicy(policy);
   return [...(changedFiles ?? [])]
     .map((item) => normalizePathForPolicy(item))
-    .filter((filePath) => !normalized.fileScopes.some((scope) => pathMatchesScope(filePath, scope.path)));
+    .filter((filePath) => !normalized.fileScopes.some((scope) => (
+      scope.access === "write" || scope.access === "read-write"
+    ) && pathMatchesScope(filePath, scope.path)));
+}
+
+function isDestructiveCommand(text) {
+  if (DEFAULT_DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(text))) {
+    return true;
+  }
+  const argv = splitShellCommand(text);
+
+  const commandIndexes = (name) => argv
+    .map((token, index) => token === name || token.endsWith(`/${name}`) ? index : -1)
+    .filter((index) => index >= 0);
+  const hasOption = (tokens, shortNames, longName) => {
+    for (const token of tokens) {
+      if (token === "--") {
+        break;
+      }
+      if (token === `--${longName}` || token.startsWith(`--${longName}=`)) {
+        return true;
+      }
+      if (/^-[^-]/.test(token) && [...shortNames].some((name) => token.slice(1).includes(name))) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  for (const rmIndex of commandIndexes("rm")) {
+    const args = argv.slice(rmIndex + 1);
+    if (hasOption(args, "rR", "recursive") && hasOption(args, "f", "force")) {
+      return true;
+    }
+  }
+
+  for (const gitIndex of commandIndexes("git")) {
+    const resetIndex = argv.indexOf("reset", gitIndex + 1);
+    if (resetIndex >= 0 && argv.slice(resetIndex + 1).includes("--hard")) {
+      return true;
+    }
+    const cleanIndex = argv.indexOf("clean", gitIndex + 1);
+    if (cleanIndex >= 0 && hasOption(argv.slice(cleanIndex + 1), "f", "force")) {
+      return true;
+    }
+  }
+
+  return /\b(?:fs\s*\.\s*)?(?:promises\s*\.\s*)?(?:rm|rmSync|rmdir|rmdirSync)\s*\(/.test(text);
 }
 
 export function classifyCommandPermission(command, policy) {
@@ -164,14 +212,14 @@ export function classifyCommandPermission(command, policy) {
   if (normalized.commands.deny.some((pattern) => text.includes(pattern))) {
     return { action: "deny", reason: "command matches deny list" };
   }
-  if (normalized.commands.allow.some((pattern) => text.includes(pattern))) {
-    return { action: "allow", reason: "command matches allow list" };
-  }
-  const destructive = DEFAULT_DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(text));
+  const destructive = isDestructiveCommand(text);
   if (destructive && !normalized.commands.destructiveAllow.some((pattern) => text.includes(pattern))) {
     return normalized.commands.destructiveRequiresOptIn
       ? { action: "requires-opt-in", reason: "destructive command requires explicit opt-in" }
       : { action: "deny", reason: "destructive command is denied" };
+  }
+  if (normalized.commands.allow.some((pattern) => text.includes(pattern))) {
+    return { action: "allow", reason: "command matches allow list" };
   }
   return { action: "allow", reason: "no deny or destructive pattern matched" };
 }

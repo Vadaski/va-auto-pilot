@@ -150,14 +150,36 @@ Between steps the manager may run `intervene` (writes `directives.json`) or capt
 
 Use `node scripts/auto-pilot.mjs orchestrate recover --json` after an interrupted
 or ambiguous long run. The command diagnoses stale checkpoints, dead executor
-locks, dead or expired running tracks, halted runs, and run phases that no
+locks, dead running tracks or tracks with no live process whose last heartbeat
+expired, halted runs, and run phases that no
 longer match sprint state. It returns issues, conservative mutations, and
 executable next commands.
 
 `recover` is read-mostly by default. Add `--apply` only when the proposed
 mutations are acceptable; it can clear dead executor locks, settle stale tracks,
 return a stale approved plan to plan-review/approval, or close a run that has no
-pending sprint work. It does not dispatch workers, approve plans, or commit code.
+pending sprint work. Spawn-backed workers use a READY→persist→GO launcher
+barrier: the agent command cannot start until its PID, dispatch identity, and
+token heartbeat are durable. If the manager dies before GO, the launcher exits
+without running the agent; after GO it supervises the process tree to completion.
+The launcher owns the absolute worker deadline, so manager death cannot turn a
+bounded task into an immortal worker. `run.json` and `tracks.json` publish through
+a durable hash-checked transaction intent that the next command replays before
+reading mixed state; malformed run/track/directive/heartbeat files block rather
+than being interpreted as empty state. Orchestrated `await-workers` therefore
+uses the crash-safe spawn lifecycle even when Colony is installed.
+Recovery and expired-lease claim cleanup acquire the same executor lock as
+`await-workers`, then reread state before mutating it. A live token heartbeat is
+never requeued, concurrent halt state survives late worker settlement, and
+terminal tracks clear active PID/token fields only after exit is verified.
+Stale, corrupt, or post-GO ambiguous identities remain attached and block
+destructive operations for manual inspection. It does not dispatch workers,
+approve plans, or commit code.
+
+Process-group cleanup is best-effort containment, not an OS sandbox. A command
+that deliberately creates a new POSIX session/process group can escape it;
+agent templates must not daemonize, and hostile workloads need a stronger
+external sandbox/cgroup/Job Object boundary.
 
 ### Unattended mode (CI / overnight only)
 
@@ -470,6 +492,9 @@ placeholder gates behind; the manager should audit them with
 `auto-pilot gates audit` and use `auto-pilot gates maintain --apply` to downgrade
 resolved weak placeholders to advisory. Unresolved weak gates remain risk
 signals until the pitfall is resolved or a real command is configured.
+Constraint YAML synthesized from a resolved pitfall is marked `probation` and is
+reported but not injected as a hard rule. Curated constraint sets remain active;
+promotion or retirement of a learned rule is an explicit governance decision.
 
 #### Example: TypeScript Project (default)
 

@@ -25,21 +25,27 @@ import {
   createPlanId,
   createRunId,
   hasHaltDirective,
+  findLiveTrackedWorker,
   isCheckpointStale,
   isTerminalRunPhase,
   orchestrationPaths,
   readActiveRuns,
-  isProcessAlive,
   readCheckpoint,
   readDirectives,
   readRun,
   readTracks,
   readWorkerOverrides,
+  recoverRunTracksTransaction,
   resolveActiveRunId,
+  resolveWorkerLifecycleDir,
+  isTrackWorkerAlive,
   writeActiveRun,
   writeCheckpoint,
-  writeRun,
-  writeTracks,
+  writeDirectives,
+  updateRunAtomic,
+  updateRunAndTracksAtomic,
+  updateRunningTrackLiveness,
+  updateTrackAtomic,
 } from "./lib/orchestration-state.mjs";
 import { planFromGoal } from "./lib/goal-backlog.mjs";
 import {
@@ -84,6 +90,38 @@ import { resolveHumanBoardPath } from "./lib/human-board.mjs";
 
 const execFileAsync = promisify(execFile);
 const MAX_SQUASH_MERGE_ATTEMPTS = 3;
+
+function executorLockTarget(workDir, runId = "") {
+  return `${orchestrationPaths(workDir, runId).run}.executor`;
+}
+
+async function transitionRunIfUnchanged(opts, expectedRun, buildNext, action, onConflict = null) {
+  let updated = false;
+  const persisted = await updateRunAtomic(opts.workDir, opts.runId, (current) => {
+    if (!current
+        || current.runId !== expectedRun.runId
+        || current.phase !== expectedRun.phase
+        || current.updatedAt !== expectedRun.updatedAt
+        || isTerminalRunPhase(current.phase)
+        || hasHaltDirective(readDirectives(opts.workDir, opts.runId))) {
+      return null;
+    }
+    updated = true;
+    return buildNext(current);
+  });
+  if (!updated) {
+    const cleanup = typeof onConflict === "function"
+      ? await onConflict(persisted)
+      : null;
+    fail(opts, "RUN_STATE_CHANGED", `${action} was superseded by a newer run state or halt directive`, {
+      runId: expectedRun.runId,
+      expectedPhase: expectedRun.phase,
+      currentPhase: persisted?.phase ?? "missing",
+      ...(cleanup ? { cleanup } : {}),
+    }, 2);
+  }
+  return persisted;
+}
 
 const ACTION_PHASES = Object.freeze({
   plan: Object.freeze([
@@ -181,6 +219,21 @@ export function selectCommitReadyTasks(state, candidatePlan, tracksDoc) {
  * represented by the same `settled` state used by successful results.
  */
 export function settleWorkerTrackOutcome(track, outcome, sprintTask, settledAt) {
+  const clearTerminalWorker = () => {
+    if (["running", "starting"].includes(track.state)) return;
+    if (track.pid || track.workerToken) {
+      track.lastWorker = {
+        pid: track.pid ?? null,
+        workerToken: track.workerToken ?? "",
+        dispatchId: track.dispatchId ?? "",
+        startedAt: track.startedAt ?? null,
+        endedAt: settledAt,
+      };
+    }
+    track.pid = null;
+    track.workerToken = "";
+    track.heartbeatFile = "";
+  };
   track.lastHeartbeat = settledAt;
   if (sprintTask) {
     track.sprintState = sprintTask.state;
@@ -188,6 +241,14 @@ export function settleWorkerTrackOutcome(track, outcome, sprintTask, settledAt) 
 
   if (outcome.status === "rejected") {
     const message = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+    if (outcome.reason?.code === "WORKER_LAUNCH_AMBIGUOUS") {
+      track.state = "running";
+      track.resultStatus = "failed";
+      track.resultAction = "launch-ambiguous";
+      track.error = message;
+      track.approvalFiles = [];
+      return { taskId: track.taskId, action: "launch-ambiguous", details: message };
+    }
     track.state = "failed";
     track.resultStatus = "failed";
     track.resultAction = "track-error";
@@ -197,6 +258,7 @@ export function settleWorkerTrackOutcome(track, outcome, sprintTask, settledAt) 
       delete track.worktree.resultCommit;
       delete track.worktree.commitResult;
     }
+    clearTerminalWorker();
     return { taskId: track.taskId, action: "track-error", details: message };
   }
 
@@ -222,6 +284,7 @@ export function settleWorkerTrackOutcome(track, outcome, sprintTask, settledAt) 
         delete track.worktree.resultCommit;
         delete track.worktree.commitResult;
       }
+      clearTerminalWorker();
       return { taskId: track.taskId, action: "track-error", details: readiness.reason };
     }
   } else if (sprintTask?.state === "Failed") {
@@ -233,6 +296,7 @@ export function settleWorkerTrackOutcome(track, outcome, sprintTask, settledAt) 
     track.resultStatus = "pending";
   }
 
+  clearTerminalWorker();
   return result;
 }
 
@@ -723,31 +787,70 @@ async function validatePreDispatch(run, opts) {
 
 }
 
-async function orchestrateClose(opts) {
+async function orchestrateCloseUnlocked(opts) {
   const run = readRun(opts.workDir, opts.runId);
   if (!run) {
     return emitResult(opts, { ok: true, action: "close", message: "no active run" });
   }
+  const liveTrack = findLiveTrackedWorker(opts.workDir, opts.runId);
+  if (liveTrack) {
+    fail(opts, "LIVE_WORKERS", `cannot close while worker ${liveTrack.taskId} is alive; halt or await it first`, {
+      taskId: liveTrack.taskId,
+      dispatchId: liveTrack.dispatchId ?? "",
+    }, 2);
+  }
+  const expectedPhase = run.phase;
+  const expectedUpdatedAt = run.updatedAt;
+  const publication = await updateRunAndTracksAtomic(
+    opts.workDir,
+    opts.runId,
+    (currentRun, currentTracks) => {
+      if (currentRun?.runId !== run.runId
+          || currentRun.phase !== expectedPhase
+          || currentRun.updatedAt !== expectedUpdatedAt
+          || findLiveTrackedWorker(opts.workDir, opts.runId, currentTracks)) {
+        return null;
+      }
+      const now = new Date().toISOString();
+      return {
+        run: {
+          ...currentRun,
+          phase: "done",
+          locks: { ...(currentRun.locks ?? {}), executorPid: null },
+          candidatePlan: null,
+          candidateBacklog: null,
+          approvedPlanId: null,
+          approvedCommitTasks: [],
+          commitApprovalManifest: null,
+          commitApprovalManifestHash: null,
+          approvedCommitManifest: null,
+          approvedCommitManifestHash: null,
+          updatedAt: now,
+        },
+        tracksDoc: { ...currentTracks, runId: run.runId, tracks: [] },
+      };
+    }
+  );
+  if (!publication.updated) {
+    fail(opts, "RUN_STATE_CHANGED", "run state changed before close could publish; retry after inspecting the latest state", {
+      runId: run.runId,
+      phase: publication.run?.phase ?? "missing",
+    }, 2);
+  }
+  // Publish the terminal state first. A crash or release failure then leaves a
+  // harmless stale claim (fail-closed), never an active run whose claim was
+  // already released to a sibling.
   const releaseResult = await sprintBoardExec(
     ["release", "--run-id", run.runId, "--json"],
     opts
   );
   if (releaseResult.exitCode !== 0) {
-    fail(opts, "RELEASE_FAILED", releaseResult.stderr || releaseResult.stdout, {}, 1);
+    fail(opts, "RELEASE_FAILED", releaseResult.stderr || releaseResult.stdout, {
+      runId: run.runId,
+      phase: "done",
+      retry: "orchestrate close --run-id <runId>",
+    }, 1);
   }
-  run.phase = "done";
-  run.locks = { executorPid: null };
-  run.candidatePlan = null;
-  run.candidateBacklog = null;
-  run.approvedPlanId = null;
-  run.approvedCommitTasks = [];
-  run.commitApprovalManifest = null;
-  run.commitApprovalManifestHash = null;
-  run.approvedCommitManifest = null;
-  run.approvedCommitManifestHash = null;
-  run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run, opts.runId);
-  await writeTracks(opts.workDir, { runId: run.runId, tracks: [] }, opts.runId);
   clearCheckpoint(opts.workDir, opts.runId);
   clearPlanReview(opts.workDir, opts.runId);
   if (opts.runId) {
@@ -757,102 +860,149 @@ async function orchestrateClose(opts) {
   return emitResult(opts, { ok: true, action: "close", runId: run.runId });
 }
 
-async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
+async function orchestrateClose(opts) {
+  try {
+    return await withPilotFileLock(
+      executorLockTarget(opts.workDir, opts.runId),
+      () => orchestrateCloseUnlocked(opts),
+      { timeoutMs: 2_000 }
+    );
+  } catch (error) {
+    if (error?.name === "TransactionConflictError") {
+      fail(opts, "EXECUTOR_BUSY", "cannot close while await-workers owns this run", {
+        runId: opts.runId,
+      }, 2);
+    }
+    throw error;
+  }
+}
+
+export async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
   if (!opts.parsed?.flags?.has("apply") || plan.mutations.length === 0) {
     return { applied: false, mutations: [] };
   }
 
-  const applied = [];
-  let runChanged = false;
-  let tracksChanged = false;
-  let closeRunRequested = false;
-  const now = new Date().toISOString();
-
-  for (const mutation of plan.mutations) {
-    if (mutation.type === "clear-executor-lock") {
-      run.locks = { ...(run.locks ?? {}), executorPid: null };
-      runChanged = true;
-      applied.push(mutation);
-    }
-
-    if (mutation.type === "return-to-plan-approval") {
-      run.approvedPlanId = null;
-      run.phase = "awaiting-plan-approval";
-      clearCheckpoint(opts.workDir, opts.runId);
-      clearPlanReview(opts.workDir, opts.runId);
-      runChanged = true;
-      applied.push(mutation);
-    }
-
-    if (mutation.type === "settle-track") {
-      for (const track of tracksDoc.tracks ?? []) {
-        if (track.taskId !== mutation.taskId) continue;
-        track.state = "settled";
-        track.resultAction = mutation.resultAction;
-        track.error = mutation.reason;
-        track.lastHeartbeat = now;
-        tracksChanged = true;
+  let applied = [];
+  const publication = await updateRunAndTracksAtomic(
+    opts.workDir,
+    opts.runId,
+    (currentRun, currentTracks) => {
+      if (currentRun?.runId !== run.runId
+          || isTerminalRunPhase(currentRun.phase)
+          || hasHaltDirective(readDirectives(opts.workDir, opts.runId))) {
+        return null;
       }
-      applied.push(mutation);
-    }
+      const now = new Date().toISOString();
+      let nextRun = { ...currentRun, locks: { ...(currentRun.locks ?? {}) } };
+      let nextTracks = (currentTracks.tracks ?? []).map((track) => ({ ...track }));
+      const accepted = [];
+      let requeued = false;
 
-    if (mutation.type === "requeue-track") {
-      for (const track of tracksDoc.tracks ?? []) {
-        if (track.taskId !== mutation.taskId) continue;
-        track.state = "queued";
-        track.pid = null;
-        track.startedAt = null;
-        track.resultStatus = null;
-        track.resultAction = mutation.resultAction;
-        track.error = "";
-        track.lastHeartbeat = now;
-        tracksChanged = true;
+      for (const mutation of plan.mutations) {
+        if (mutation.type === "clear-executor-lock") {
+          nextRun.locks.executorPid = null;
+          accepted.push(mutation);
+          continue;
+        }
+        if (mutation.type === "return-to-plan-approval") {
+          if (findLiveTrackedWorker(opts.workDir, opts.runId, { ...currentTracks, tracks: nextTracks })) continue;
+          if (!["plan-approved", "dispatch-queued", "running"].includes(nextRun.phase)) continue;
+          nextRun.approvedPlanId = null;
+          nextRun.phase = "awaiting-plan-approval";
+          accepted.push(mutation);
+          continue;
+        }
+        if (["settle-track", "requeue-track"].includes(mutation.type)) {
+          const index = nextTracks.findIndex((track) => track.taskId === mutation.taskId);
+          if (index < 0) continue;
+          const track = nextTracks[index];
+          if (track.cancelRequestedAt || track.state === "halted") continue;
+          if (mutation.expectedDispatchId && track.dispatchId !== mutation.expectedDispatchId) continue;
+          if (isTrackWorkerAlive(opts.workDir, opts.runId, track)) continue;
+          const lastWorker = track.pid || track.workerToken ? {
+            pid: track.pid ?? null,
+            workerToken: track.workerToken ?? "",
+            dispatchId: track.dispatchId ?? "",
+            startedAt: track.startedAt ?? null,
+            endedAt: now,
+          } : track.lastWorker ?? null;
+          nextTracks[index] = mutation.type === "settle-track"
+            ? {
+              ...track,
+              state: "settled",
+              pid: null,
+              workerToken: "",
+              heartbeatFile: "",
+              lastWorker,
+              resultAction: mutation.resultAction,
+              error: mutation.reason,
+              lastHeartbeat: now,
+            }
+            : {
+              ...track,
+              state: "queued",
+              pid: null,
+              workerToken: "",
+              heartbeatFile: "",
+              lastWorker,
+              startedAt: null,
+              resultStatus: null,
+              resultAction: mutation.resultAction,
+              error: "",
+              lastHeartbeat: now,
+            };
+          if (mutation.type === "requeue-track") requeued = true;
+          accepted.push(mutation);
+          continue;
+        }
+        if (mutation.type === "close-run") {
+          if (findLiveTrackedWorker(opts.workDir, opts.runId, { ...currentTracks, tracks: nextTracks })) continue;
+          if (nextRun.phase !== "cycle-closed") continue;
+          nextRun = {
+            ...nextRun,
+            phase: "done",
+            locks: { ...(nextRun.locks ?? {}), executorPid: null },
+            approvedPlanId: null,
+            approvedCommitTasks: [],
+            candidatePlan: null,
+            candidateBacklog: null,
+            commitApprovalManifest: null,
+            commitApprovalManifestHash: null,
+            approvedCommitManifest: null,
+            approvedCommitManifestHash: null,
+          };
+          nextTracks = [];
+          accepted.push(mutation);
+        }
       }
-      if (run.phase === "running") {
-        run.phase = "dispatch-queued";
+      if (requeued) {
+        if (nextRun.phase === "running") nextRun.phase = "dispatch-queued";
+        nextRun.locks.executorPid = null;
       }
-      run.locks = { ...(run.locks ?? {}), executorPid: null };
-      runChanged = true;
-      applied.push(mutation);
+      if (accepted.length === 0) return null;
+      nextRun.updatedAt = now;
+      applied = accepted;
+      return {
+        run: nextRun,
+        tracksDoc: { ...currentTracks, runId: run.runId, tracks: nextTracks },
+      };
     }
-
-    if (mutation.type === "close-run") {
-      run.phase = "done";
-      run.locks = { ...(run.locks ?? {}), executorPid: null };
-      run.approvedPlanId = null;
-      run.approvedCommitTasks = [];
-      run.candidatePlan = null;
-      run.candidateBacklog = null;
-      run.commitApprovalManifest = null;
-      run.commitApprovalManifestHash = null;
-      run.approvedCommitManifest = null;
-      run.approvedCommitManifestHash = null;
-      clearCheckpoint(opts.workDir, opts.runId);
-      clearPlanReview(opts.workDir, opts.runId);
-      runChanged = true;
-      closeRunRequested = true;
-      applied.push(mutation);
-    }
+  );
+  if (!publication.updated) applied = [];
+  const returnedToApproval = applied.some((mutation) => mutation.type === "return-to-plan-approval");
+  const closedRun = applied.some((mutation) => mutation.type === "close-run");
+  if (returnedToApproval || closedRun) {
+    clearCheckpoint(opts.workDir, opts.runId);
+    clearPlanReview(opts.workDir, opts.runId);
   }
-
-  if (closeRunRequested) {
+  if (closedRun) {
     const releaseResult = await sprintBoardExec(["release", "--run-id", run.runId, "--json"], opts);
     if (releaseResult.exitCode !== 0) {
-      throw new Error(`recovery could not release claims for ${run.runId}: ${releaseResult.stderr || releaseResult.stdout}`);
+      throw new Error(`recovery closed ${run.runId} but could not release its claims: ${releaseResult.stderr || releaseResult.stdout}`);
     }
-    tracksDoc.tracks = [];
-    tracksChanged = true;
     if (opts.runId) {
       await clearActiveRun(opts.workDir, run.runId);
     }
-  }
-
-  if (runChanged) {
-    run.updatedAt = now;
-    await writeRun(opts.workDir, run, opts.runId);
-  }
-  if (tracksChanged) {
-    await writeTracks(opts.workDir, tracksDoc, opts.runId);
   }
   if (applied.length > 0) {
     await sprintBoardExec(
@@ -860,32 +1010,63 @@ async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
       opts
     );
   }
-  return { applied: true, mutations: applied };
+  return { applied: applied.length > 0, mutations: applied };
 }
 
 async function orchestrateRecover(opts) {
-  const run = readRun(opts.workDir, opts.runId);
-  const tracksDoc = readTracks(opts.workDir, opts.runId);
-  const state = readSprintState(opts.stateFile);
-  const checkpoint = readCheckpoint(opts.workDir, opts.runId);
-  const checkpointStatus = isCheckpointStale(checkpoint, {
-    stateFile: opts.stateFile,
-    workDir: opts.workDir,
-    workspace: opts.workspace,
-    runId: run?.runId ?? opts.runId,
-    candidatePlan: run?.candidatePlan,
-    approvedPlanId: run?.approvedPlanId,
-  });
-  const directives = readDirectives(opts.workDir, opts.runId);
-  const plan = buildRecoveryPlan({
-    run,
-    tracksDoc,
-    state,
-    checkpointStatus,
-    halt: hasHaltDirective(directives),
-    trackTimeoutMs: opts.trackTimeout,
-  });
-  const application = run ? await applyRecoveryPlan(plan, run, tracksDoc, opts) : { applied: false, mutations: [] };
+  const inspectAndApply = async () => {
+    // Always rebuild from disk after acquiring the executor boundary. Applying
+    // a plan computed before await-workers started would release live claims or
+    // overwrite its executor/track state.
+    const run = readRun(opts.workDir, opts.runId);
+    const tracksDoc = readTracks(opts.workDir, opts.runId);
+    const state = readSprintState(opts.stateFile);
+    const checkpoint = readCheckpoint(opts.workDir, opts.runId);
+    const checkpointStatus = isCheckpointStale(checkpoint, {
+      stateFile: opts.stateFile,
+      workDir: opts.workDir,
+      workspace: opts.workspace,
+      runId: run?.runId ?? opts.runId,
+      candidatePlan: run?.candidatePlan,
+      approvedPlanId: run?.approvedPlanId,
+    });
+    const directives = readDirectives(opts.workDir, opts.runId);
+    const plan = buildRecoveryPlan({
+      run,
+      tracksDoc,
+      state,
+      workDir: opts.workDir,
+      runSelector: opts.runId,
+      checkpointStatus,
+      halt: hasHaltDirective(directives),
+      trackTimeoutMs: opts.trackTimeout,
+    });
+    const application = run
+      ? await applyRecoveryPlan(plan, run, tracksDoc, opts)
+      : { applied: false, mutations: [] };
+    return { plan, application };
+  };
+
+  let inspection;
+  if (opts.parsed?.flags?.has("apply")) {
+    try {
+      inspection = await withPilotFileLock(
+        executorLockTarget(opts.workDir, opts.runId),
+        inspectAndApply,
+        { timeoutMs: 2_000 }
+      );
+    } catch (error) {
+      if (error?.name === "TransactionConflictError") {
+        fail(opts, "RECOVERY_BUSY", "cannot apply recovery while await-workers owns this run", {
+          runId: opts.runId,
+        }, 2);
+      }
+      throw error;
+    }
+  } else {
+    inspection = await inspectAndApply();
+  }
+  const { plan, application } = inspection;
   // Lazily release claims held by dead runs (lease expired + no active track). This is
   // the "steal expired claim" half of the lazy-takeover policy: recover is the only
   // place that actively scans for dead runs. Only mutates under --apply.
@@ -959,43 +1140,44 @@ export async function recoverDeadRunClaims(opts) {
     if (Number.isFinite(heartbeatMs) && (now - heartbeatMs) < ttlMs) {
       continue; // lease still live
     }
-    // Lease expired — but confirm no live track before releasing. A track whose pid is
-    // alive, or whose heartbeat is within track timeout, means work is still running.
-    const tracksDoc = readTracks(opts.workDir, entry.runId);
-    const tracks = tracksDoc?.tracks ?? [];
-    const hasLiveTrack = tracks.some((track) => {
-      if (track.state !== "running") return false;
-      if (track.pid && isProcessAlive(track.pid)) return true;
-      const trackMs = track.lastHeartbeat ? Date.parse(track.lastHeartbeat) : NaN;
-      return Number.isFinite(trackMs) && (now - trackMs) < opts.trackTimeout;
-    });
-    if (hasLiveTrack) {
-      continue;
-    }
+    try {
+      await withPilotFileLock(executorLockTarget(opts.workDir, entry.runId), async () => {
+        const latestEntry = readActiveRuns(opts.workDir).find((item) => item.runId === entry.runId);
+        const latestHeartbeatMs = latestEntry?.heartbeatAt ? Date.parse(latestEntry.heartbeatAt) : NaN;
+        if (!latestEntry || (Number.isFinite(latestHeartbeatMs) && (Date.now() - latestHeartbeatMs) < ttlMs)) {
+          return;
+        }
+        const persistedRun = readRun(opts.workDir, entry.runId);
+        if (!persistedRun) return;
+        const checkAt = Date.now();
+        const tracksDoc = readTracks(opts.workDir, entry.runId);
+        const hasLiveTrack = (tracksDoc?.tracks ?? []).some((track) => {
+          if (isTrackWorkerAlive(opts.workDir, entry.runId, track)) return true;
+          if (!["starting", "running"].includes(track.state)) return false;
+          const trackMs = track.lastHeartbeat ? Date.parse(track.lastHeartbeat) : NaN;
+          return Number.isFinite(trackMs) && (checkAt - trackMs) < opts.trackTimeout;
+        });
+        if (hasLiveTrack) return;
 
-    // Find tasks this dead run still claims and release them.
-    const persistedRun = readRun(opts.workDir, entry.runId);
-    if (!persistedRun) {
-      continue;
-    }
-    const runOpts = buildPersistedRunOpts(opts, persistedRun);
-    if (!fs.existsSync(runOpts.stateFile)) {
-      continue;
-    }
-    const state = readSprintState(runOpts.stateFile);
-    const claimedByDead = (state.tasks ?? [])
-      .filter((task) => task.claimedBy === entry.runId && task.state !== "Done" && task.state !== "Failed")
-      .map((task) => task.id);
-    if (claimedByDead.length === 0) {
-      continue;
-    }
+        const runOpts = buildPersistedRunOpts(opts, persistedRun);
+        if (!fs.existsSync(runOpts.stateFile)) return;
+        const state = readSprintState(runOpts.stateFile);
+        const claimedByDead = (state.tasks ?? [])
+          .filter((task) => task.claimedBy === entry.runId && task.state !== "Done" && task.state !== "Failed")
+          .map((task) => task.id);
+        if (claimedByDead.length === 0) return;
 
-    const releaseResult = await sprintBoardExec(
-      ["release", "--run-id", entry.runId, "--json"],
-      runOpts
-    );
-    if (releaseResult.exitCode === 0) {
-      released.push({ runId: entry.runId, taskIds: claimedByDead });
+        const releaseResult = await sprintBoardExec(
+          ["release", "--run-id", entry.runId, "--json"],
+          runOpts
+        );
+        if (releaseResult.exitCode === 0) {
+          released.push({ runId: entry.runId, taskIds: claimedByDead });
+        }
+      }, { timeoutMs: 250 });
+    } catch (error) {
+      if (error?.name !== "TransactionConflictError") throw error;
+      // A live await-workers executor owns the run; leave its claims untouched.
     }
   }
 
@@ -1006,14 +1188,25 @@ async function promoteLegacyRootRun(opts) {
   const rootPaths = orchestrationPaths(opts.workDir);
   fs.mkdirSync(rootPaths.rootDir, { recursive: true });
   const promotionLock = path.join(rootPaths.rootDir, "legacy-root-promotion");
-  return withPilotFileLock(promotionLock, async () => {
+  return withPilotFileLock(executorLockTarget(opts.workDir, ""), () => (
+    withPilotFileLock(promotionLock, async () => {
     const legacyRun = readRun(opts.workDir, "");
-    if (!legacyRun?.runId) {
+    if (!legacyRun?.runId || legacyRun.phase === "migrated") {
       return null;
+    }
+    const legacyTracks = readTracks(opts.workDir, "");
+    const liveTrack = findLiveTrackedWorker(opts.workDir, "", legacyTracks);
+    if (liveTrack) {
+      const error = /** @type {Error & { code: string }} */ (new Error(
+        `cannot promote legacy root run while worker ${liveTrack.taskId} is still alive`
+      ));
+      error.code = "LEGACY_RUN_BUSY";
+      throw error;
     }
     const runId = assertSafeRunId(legacyRun.runId);
     const scopedPaths = orchestrationPaths(opts.workDir, runId);
-    if (!fs.existsSync(scopedPaths.run)) {
+    const completionMarker = path.join(scopedPaths.dir, "legacy-promotion-complete.json");
+    if (!fs.existsSync(completionMarker)) {
       fs.mkdirSync(scopedPaths.dir, { recursive: true });
       for (const key of [
         "run",
@@ -1032,8 +1225,21 @@ async function promoteLegacyRootRun(opts) {
         if (stat.isSymbolicLink() || !stat.isFile()) {
           throw new Error(`legacy orchestration control file is not a regular file: ${source}`);
         }
-        const value = JSON.parse(fs.readFileSync(source, "utf8"));
+        const value = key === "run"
+          ? legacyRun
+          : JSON.parse(fs.readFileSync(source, "utf8"));
         writeJsonFileAtomicSync(destination, value);
+      }
+      writeJsonFileAtomicSync(completionMarker, {
+        schemaVersion: 1,
+        runId,
+        source: "legacy-root",
+        completedAt: new Date().toISOString(),
+      });
+    } else {
+      const marker = JSON.parse(fs.readFileSync(completionMarker, "utf8"));
+      if (marker?.runId !== runId) {
+        throw new Error(`legacy promotion marker belongs to another run: ${marker?.runId ?? "missing"}`);
       }
     }
     if (!isTerminalRunPhase(legacyRun.phase)) {
@@ -1043,11 +1249,36 @@ async function promoteLegacyRootRun(opts) {
         heartbeatAt: legacyRun.updatedAt ?? legacyRun.startedAt,
       });
     }
+    const migrated = await updateRunAndTracksAtomic(opts.workDir, "", (currentRun, currentTracks) => {
+      if (currentRun?.runId !== legacyRun.runId
+          || currentRun.phase !== legacyRun.phase
+          || findLiveTrackedWorker(opts.workDir, "", currentTracks)) {
+        return null;
+      }
+      return {
+        run: {
+          ...currentRun,
+          phase: "migrated",
+          migratedTo: runId,
+          locks: { ...(currentRun.locks ?? {}), executorPid: null },
+          updatedAt: new Date().toISOString(),
+        },
+        tracksDoc: { ...currentTracks, runId: legacyRun.runId, migratedTo: runId, tracks: [] },
+      };
+    });
+    if (!migrated.updated) {
+      const error = /** @type {Error & { code: string }} */ (new Error(
+        "legacy root run changed while promotion was publishing"
+      ));
+      error.code = "LEGACY_PROMOTION_STALE";
+      throw error;
+    }
     return legacyRun;
-  });
+    })
+  ), { timeoutMs: 2_000 });
 }
 
-async function initRun(opts) {
+async function initRunUnlocked(opts) {
   // B4 default-startup guard: the first run is zero-config (bare init == today's
   // single-run behavior). But once an active run exists, a bare init is ambiguous —
   // does the user want to join the shared backlog or start an isolated sprint? Force
@@ -1058,6 +1289,13 @@ async function initRun(opts) {
     || opts.parsed?.flags?.has("isolated")
     || opts.parsed?.flags?.has("isolated-tree")
     || opts.parsed?.flags?.has("shared-tree");
+  const liveLegacyTrack = findLiveTrackedWorker(opts.workDir, "");
+  if (liveLegacyTrack) {
+    fail(opts, "LEGACY_RUN_BUSY", `cannot initialize while legacy worker ${liveLegacyTrack.taskId} is still alive`, {
+      taskId: liveLegacyTrack.taskId,
+      dispatchId: liveLegacyTrack.dispatchId ?? "",
+    }, 2);
+  }
   if (!hasExplicitRunId && !hasExplicitWorkspace) {
     const active = readActiveRuns(opts.workDir);
     const legacyRoot = readRun(opts.workDir, "");
@@ -1087,6 +1325,16 @@ async function initRun(opts) {
   const scopedRunId = explicitMultiRunChoice ? (opts.runId || createRunId()) : "";
   const runId = scopedRunId || createRunId();
   opts.runId = scopedRunId;
+  const liveScopedTrack = scopedRunId
+    ? findLiveTrackedWorker(opts.workDir, scopedRunId)
+    : null;
+  if (liveScopedTrack) {
+    fail(opts, "RUN_BUSY", `cannot reinitialize while worker ${liveScopedTrack.taskId} is still alive`, {
+      runId: scopedRunId,
+      taskId: liveScopedTrack.taskId,
+      dispatchId: liveScopedTrack.dispatchId ?? "",
+    }, 2);
+  }
   const now = new Date().toISOString();
   // Persist workspace definition when the user explicitly opted into a non-default
   // workspace, so subsequent commands resolve the same backlog paths without re-passing flags.
@@ -1154,8 +1402,29 @@ async function initRun(opts) {
     startedAt: now,
     updatedAt: now,
   };
-  await writeRun(opts.workDir, run, scopedRunId);
-  await writeTracks(opts.workDir, { runId, tracks: [] }, scopedRunId);
+  const existingTargetRun = readRun(opts.workDir, scopedRunId);
+  if (existingTargetRun && !isTerminalRunPhase(existingTargetRun.phase)) {
+    fail(opts, "RUN_ALREADY_ACTIVE", "cannot initialize over an existing non-terminal run", {
+      runId: existingTargetRun.runId,
+      phase: existingTargetRun.phase,
+    }, 2);
+  }
+  await writeDirectives(opts.workDir, { schemaVersion: 1, runId, directives: [] }, scopedRunId);
+  const initialized = await updateRunAndTracksAtomic(opts.workDir, scopedRunId, (currentRun, currentTracks) => {
+    if (currentRun && !isTerminalRunPhase(currentRun.phase)) {
+      return null;
+    }
+    return {
+      run,
+      tracksDoc: { ...currentTracks, runId, tracks: [] },
+    };
+  });
+  if (!initialized.updated) {
+    fail(opts, "RUN_ALREADY_ACTIVE", "cannot initialize over an existing non-terminal run", {
+      runId: initialized.run?.runId ?? runId,
+      phase: initialized.run?.phase ?? "missing",
+    }, 2);
+  }
   clearCheckpoint(opts.workDir, scopedRunId);
   clearPlanReview(opts.workDir, scopedRunId);
   if (scopedRunId) {
@@ -1168,6 +1437,18 @@ async function initRun(opts) {
   // A legacy root run is intentionally not indexed. Do not clear active.json:
   // another process may have registered a scoped run after the startup guard.
   return run;
+}
+
+async function initRun(opts) {
+  const initLock = path.join(orchestrationPaths(opts.workDir).rootDir, "init");
+  try {
+    return await withPilotFileLock(initLock, () => initRunUnlocked(opts), { timeoutMs: 2_000 });
+  } catch (error) {
+    if (error?.name === "TransactionConflictError") {
+      fail(opts, "INIT_BUSY", "another initialization or legacy promotion is active", {}, 2);
+    }
+    throw error;
+  }
 }
 
 async function orchestratePlan(opts) {
@@ -1226,17 +1507,38 @@ async function orchestratePlan(opts) {
   }
   const candidatePlan = planParsed.value;
 
-  run.candidatePlan = candidatePlan;
-  run.candidateBacklog = goalBacklogResult.ok ? goalBacklogResult.candidateBacklog : (run.candidateBacklog ?? null);
-  run.approvedPlanId = null;
-  run.approvedCommitTasks = [];
-  run.commitApprovalManifest = null;
-  run.commitApprovalManifestHash = null;
-  run.approvedCommitManifest = null;
-  run.approvedCommitManifestHash = null;
-  run.phase = "awaiting-plan-approval";
-  run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run, opts.runId);
+  const plannedRun = await transitionRunIfUnchanged(opts, run, (current) => ({
+    ...current,
+    candidatePlan,
+    candidateBacklog: goalBacklogResult.ok
+      ? goalBacklogResult.candidateBacklog
+      : (current.candidateBacklog ?? null),
+    approvedPlanId: null,
+    approvedCommitTasks: [],
+    commitApprovalManifest: null,
+    commitApprovalManifestHash: null,
+    approvedCommitManifest: null,
+    approvedCommitManifestHash: null,
+    phase: "awaiting-plan-approval",
+    updatedAt: new Date().toISOString(),
+  }), "plan publication", async (current) => {
+    // `sprint-board plan --claim-run-id` claims before run publication. A halt
+    // may finish between those two operations, so a late plan must compensate
+    // for the claim it just created. Restrict cleanup to a fully persisted halt
+    // with no live identity; ordinary concurrent replans must keep their claims.
+    const halted = current?.runId === run.runId
+      && current.phase === "halted"
+      && hasHaltDirective(readDirectives(opts.workDir, opts.runId));
+    if (!halted || findLiveTrackedWorker(opts.workDir, opts.runId)) {
+      return { claimsReleased: false, reason: halted ? "live-worker" : "not-halted" };
+    }
+    const release = await sprintBoardExec(["release", "--run-id", run.runId, "--json"], opts);
+    return {
+      claimsReleased: release.exitCode === 0,
+      ...(release.exitCode === 0 ? {} : { error: release.stderr || release.stdout }),
+    };
+  });
+  Object.assign(run, plannedRun);
   clearPlanReview(opts.workDir, opts.runId);
 
   const payload = {
@@ -1274,16 +1576,19 @@ async function orchestrateReviewPlan(opts) {
   // A requested re-review supersedes the old decision immediately. If the new
   // reviewer fails or crashes, the prior checkpoint must not remain dispatchable.
   if (run.phase === "plan-approved") {
-    run.approvedPlanId = null;
-    run.approvedCommitTasks = [];
-    run.commitApprovalManifest = null;
-    run.commitApprovalManifestHash = null;
-    run.approvedCommitManifest = null;
-    run.approvedCommitManifestHash = null;
-    run.phase = "awaiting-plan-approval";
-    run.updatedAt = new Date().toISOString();
+    const invalidated = await transitionRunIfUnchanged(opts, run, (current) => ({
+      ...current,
+      approvedPlanId: null,
+      approvedCommitTasks: [],
+      commitApprovalManifest: null,
+      commitApprovalManifestHash: null,
+      approvedCommitManifest: null,
+      approvedCommitManifestHash: null,
+      phase: "awaiting-plan-approval",
+      updatedAt: new Date().toISOString(),
+    }), "plan review invalidation");
+    Object.assign(run, invalidated);
     clearCheckpoint(opts.workDir, opts.runId);
-    await writeRun(opts.workDir, run, opts.runId);
   }
 
   const gateConfig = readQualityGateConfig();
@@ -1301,10 +1606,16 @@ async function orchestrateReviewPlan(opts) {
     fail(opts, "PLAN_REVIEW_CRITICAL", "plan review found CRITICAL findings", { review }, 1);
   }
 
+  const reviewedRun = await transitionRunIfUnchanged(opts, run, (current) => ({
+    ...current,
+    phase: "plan-reviewed",
+    updatedAt: new Date().toISOString(),
+  }), "plan review publication");
+  Object.assign(run, reviewedRun);
+  // A crash here leaves plan-reviewed without a matching review artifact, which
+  // approve-plan rejects fail-closed. Publishing the PASS before the CAS would
+  // leave misleading success evidence when a concurrent halt wins.
   await writePlanReview(opts.workDir, review, opts.runId);
-  run.phase = "plan-reviewed";
-  run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run, opts.runId);
 
   await sprintBoardExec(
     [
@@ -1348,11 +1659,15 @@ async function orchestrateReviewPlan(opts) {
       opts
     );
   } else {
-    run.approvalPolicyDecisions = {
-      ...(run.approvalPolicyDecisions ?? {}),
-      plan: approvalPolicy,
-    };
-    await writeRun(opts.workDir, run, opts.runId);
+    const policyRun = await transitionRunIfUnchanged(opts, run, (current) => ({
+      ...current,
+      approvalPolicyDecisions: {
+        ...(current.approvalPolicyDecisions ?? {}),
+        plan: approvalPolicy,
+      },
+      updatedAt: new Date().toISOString(),
+    }), "plan approval-policy publication");
+    Object.assign(run, policyRun);
   }
 
   const payload = {
@@ -1370,15 +1685,6 @@ async function orchestrateReviewPlan(opts) {
 
 async function approveCandidatePlan(run, opts, { approvalMode = "human", policyDecision = null } = {}) {
   const planId = createPlanId();
-  run.approvedPlanId = planId;
-  run.phase = "plan-approved";
-  run.updatedAt = new Date().toISOString();
-  run.approvalPolicyDecisions = {
-    ...(run.approvalPolicyDecisions ?? {}),
-    ...(policyDecision ? { plan: policyDecision } : {}),
-  };
-  await writeRun(opts.workDir, run, opts.runId);
-
   const checkpoint = buildCheckpoint({
     stateFile: opts.stateFile,
     workDir: opts.workDir,
@@ -1392,6 +1698,17 @@ async function approveCandidatePlan(run, opts, { approvalMode = "human", policyD
     approvalMode,
     ...(policyDecision ? { approvalPolicy: policyDecision } : {}),
   };
+  const approvedRun = await transitionRunIfUnchanged(opts, run, (current) => ({
+    ...current,
+    approvedPlanId: planId,
+    phase: "plan-approved",
+    updatedAt: new Date().toISOString(),
+    approvalPolicyDecisions: {
+      ...(current.approvalPolicyDecisions ?? {}),
+      ...(policyDecision ? { plan: policyDecision } : {}),
+    },
+  }), "plan approval");
+  Object.assign(run, approvedRun);
   await writeCheckpoint(opts.workDir, checkpoint, opts.runId);
   await appendGovernanceEvent(opts, run, "plan.approved", {
     planId,
@@ -1443,7 +1760,7 @@ async function orchestrateApprovePlan(opts) {
   return emitResult(opts, payload);
 }
 
-async function orchestrateDispatch(opts) {
+async function orchestrateDispatchUnlocked(opts) {
   const run = readRun(opts.workDir, opts.runId);
   assertRunnablePhase(run, opts);
   await validatePreDispatch(run, opts);
@@ -1462,7 +1779,10 @@ async function orchestrateDispatch(opts) {
       taskId,
       state: "queued",
       worker: workerOverrides.get(taskId) ?? null,
+      dispatchId: crypto.randomUUID(),
       pid: null,
+      workerToken: "",
+      heartbeatFile: "",
       logFile: null,
       startedAt: null,
       lastHeartbeat: new Date().toISOString(),
@@ -1479,11 +1799,42 @@ async function orchestrateDispatch(opts) {
     tracks.push(track);
   }
 
-  run.phase = "dispatch-queued";
-  run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run, opts.runId);
-  await writeTracks(opts.workDir, { runId: run.runId, tracks }, opts.runId);
-  await appendGovernanceEvent(opts, run, "dispatch.queued", {
+  let rejection = "";
+  const publication = await updateRunAndTracksAtomic(
+    opts.workDir,
+    opts.runId,
+    (currentRun, currentTracks) => {
+      if (currentRun?.runId !== run.runId
+          || currentRun.phase !== "plan-approved"
+          || currentRun.approvedPlanId !== run.approvedPlanId
+          || JSON.stringify(currentRun.candidatePlan ?? null) !== JSON.stringify(run.candidatePlan ?? null)) {
+        rejection = "run or approved plan changed while dispatch worktrees were being prepared";
+        return null;
+      }
+      if (hasHaltDirective(readDirectives(opts.workDir, opts.runId))) {
+        rejection = "a halt directive arrived while dispatch worktrees were being prepared";
+        return null;
+      }
+      const liveTrack = findLiveTrackedWorker(opts.workDir, opts.runId, currentTracks);
+      if (liveTrack) {
+        rejection = `worker ${liveTrack.taskId} is still alive`;
+        return null;
+      }
+      const now = new Date().toISOString();
+      return {
+        run: { ...currentRun, phase: "dispatch-queued", updatedAt: now },
+        tracksDoc: { ...currentTracks, runId: run.runId, tracks },
+      };
+    }
+  );
+  if (!publication.updated) {
+    fail(opts, "DISPATCH_CONTEXT_CHANGED", rejection || "dispatch context changed before publication", {
+      runId: run.runId,
+      phase: publication.run?.phase ?? "missing",
+    }, 2);
+  }
+  const publishedRun = publication.run;
+  await appendGovernanceEvent(opts, publishedRun, "dispatch.queued", {
     checkpointId: readCheckpoint(opts.workDir, opts.runId)?.governance?.checkpointId ?? run.approvedPlanId,
     queuedTasks: taskIds,
     worktreeIsolation: {
@@ -1495,8 +1846,8 @@ async function orchestrateDispatch(opts) {
 
   const payload = {
     ok: true,
-    phase: run.phase,
-    runId: run.runId,
+    phase: publishedRun.phase,
+    runId: publishedRun.runId,
     queuedTasks: taskIds,
     worktreeIsolation: {
       enabled: worktreeConfig.enabled === true,
@@ -1508,15 +1859,105 @@ async function orchestrateDispatch(opts) {
   return emitResult(opts, payload);
 }
 
-async function createBridge(opts) {
+async function orchestrateDispatch(opts) {
+  try {
+    return await withPilotFileLock(
+      executorLockTarget(opts.workDir, opts.runId),
+      () => orchestrateDispatchUnlocked(opts),
+      { timeoutMs: 2_000 }
+    );
+  } catch (error) {
+    if (error?.name === "TransactionConflictError") {
+      fail(opts, "EXECUTOR_BUSY", "cannot dispatch while another executor or recovery owns this run", {
+        runId: opts.runId,
+      }, 2);
+    }
+    throw error;
+  }
+}
+
+async function createBridge(opts, lifecycle = {}) {
   const bridge = new ColonyBridge({
     workDir: opts.workDir,
-    useColony: !opts.noColony,
+    // Orchestrated workers need a locally durable READY→persist→GO identity.
+    // Colony adapters do not currently expose a crash-safe execution handle,
+    // so lifecycle-managed dispatch deliberately uses the spawn supervisor.
+    useColony: !opts.noColony && lifecycle.requireSpawnLifecycle !== true,
+    ...lifecycle,
   });
   if (!opts.dryRun) {
     await bridge.init();
   }
   return bridge;
+}
+
+function createWorkerProcessStartedHandler(opts, tracksDoc) {
+  let pendingWrite = Promise.resolve();
+  return (event) => {
+    const operation = pendingWrite.then(async () => {
+      const heartbeatAt = event.startedAt ?? new Date().toISOString();
+      const persisted = await updateRunningTrackLiveness(
+        opts.workDir,
+        opts.runId,
+        event.taskId,
+        {
+          pid: event.pid,
+          dispatchId: event.dispatchId,
+          workerToken: event.workerToken,
+          heartbeatAt,
+        }
+      );
+      if (!persisted.updated) {
+        throw new Error(`track ${event.taskId} is ${persisted.state}; refusing to run an untracked worker process`);
+      }
+      const inMemoryTrack = (tracksDoc.tracks ?? []).find((track) => track.taskId === event.taskId);
+      if (inMemoryTrack?.state === "running"
+          && (!event.dispatchId || !inMemoryTrack.dispatchId || event.dispatchId === inMemoryTrack.dispatchId)) {
+        inMemoryTrack.pid = event.pid;
+        inMemoryTrack.workerToken = event.workerToken;
+        inMemoryTrack.heartbeatFile = event.heartbeatFile;
+        inMemoryTrack.lastHeartbeat = heartbeatAt;
+      }
+    });
+    pendingWrite = operation.catch(() => {});
+    return operation;
+  };
+}
+
+export async function persistSettledWorkerTrack(opts, candidate) {
+  const result = await updateTrackAtomic(opts.workDir, opts.runId, candidate.taskId, (current) => {
+    if (current.dispatchId && candidate.dispatchId && current.dispatchId !== candidate.dispatchId) {
+      const error = /** @type {Error & { code: string }} */ (new Error(
+        `worker settlement dispatch mismatch for ${candidate.taskId}: ${candidate.dispatchId} != ${current.dispatchId}`
+      ));
+      error.code = "TRACK_DISPATCH_STALE";
+      throw error;
+    }
+    if (current.state === "halted" || current.cancelRequestedAt) {
+      return {
+        ...current,
+        state: "halted",
+        pid: null,
+        workerToken: "",
+        heartbeatFile: "",
+        lastWorker: candidate.lastWorker ?? current.lastWorker ?? null,
+        resultStatus: "cancelled",
+        resultAction: "halted",
+        approvalFiles: [],
+        error: current.error || "halted by intervention",
+        lastHeartbeat: candidate.lastHeartbeat ?? new Date().toISOString(),
+      };
+    }
+    return { ...candidate };
+  });
+  if (!result.updated) {
+    const error = /** @type {Error & { code: string }} */ (new Error(
+      `worker settlement could not update ${candidate.taskId}: ${result.state}`
+    ));
+    error.code = "TRACK_SETTLEMENT_STALE";
+    throw error;
+  }
+  return result.track;
 }
 
 async function orchestrateAwaitWorkersUnlocked(opts) {
@@ -1550,15 +1991,35 @@ async function orchestrateAwaitWorkersUnlocked(opts) {
 
   if (opts.dryRun) {
     const previewAt = new Date().toISOString();
-    for (const track of queued) {
-      track.state = "preview";
-      track.lastHeartbeat = previewAt;
-      track.resultAction = "dry-run-skipped";
+    const preview = await updateRunAndTracksAtomic(opts.workDir, opts.runId, (currentRun, currentTracks) => {
+      if (currentRun?.runId !== run.runId
+          || currentRun.phase !== "dispatch-queued"
+          || currentRun.updatedAt !== run.updatedAt
+          || hasHaltDirective(readDirectives(opts.workDir, opts.runId))) {
+        return null;
+      }
+      const queuedIds = new Set(queued.map((track) => track.taskId));
+      return {
+        run: { ...currentRun, phase: "dry-run-preview", updatedAt: previewAt },
+        tracksDoc: {
+          ...currentTracks,
+          tracks: (currentTracks.tracks ?? []).map((track) => queuedIds.has(track.taskId)
+            ? {
+              ...track,
+              state: "preview",
+              lastHeartbeat: previewAt,
+              resultAction: "dry-run-skipped",
+            }
+            : track),
+        },
+      };
+    });
+    if (!preview.updated) {
+      fail(opts, "RUN_STATE_CHANGED", "dry-run preview was superseded by a newer run state or halt directive", {
+        runId: run.runId,
+      }, 2);
     }
-    await writeTracks(opts.workDir, tracksDoc, opts.runId);
-    run.phase = "dry-run-preview";
-    run.updatedAt = previewAt;
-    await writeRun(opts.workDir, run, opts.runId);
+    Object.assign(run, preview.run);
     const payload = {
       ok: true,
       phase: run.phase,
@@ -1570,8 +2031,11 @@ async function orchestrateAwaitWorkersUnlocked(opts) {
     return emitResult(opts, payload);
   }
 
+  const onProcessStarted = createWorkerProcessStartedHandler(opts, tracksDoc);
+  const lifecycleDir = resolveWorkerLifecycleDir(opts.workDir, opts.runId);
+  const lifecycle = { onProcessStarted, lifecycleDir, requireSpawnLifecycle: true };
   const usesWorktreeIsolation = queued.some((track) => track.worktree?.enabled === true && track.worktree?.path);
-  const sharedBridge = usesWorktreeIsolation ? null : await createBridge(opts);
+  const sharedBridge = usesWorktreeIsolation ? null : await createBridge(opts, lifecycle);
   const gateConfig = readQualityGateConfig();
   const pitfalls = await loadUnresolvedPitfalls(opts);
   const execOpts = {
@@ -1579,34 +2043,71 @@ async function orchestrateAwaitWorkersUnlocked(opts) {
     runId: run.runId,
     deferCommit: true,
     observabilityWorkDir: opts.workDir,
+    dispatchIds: new Map(queued.map((track) => [track.taskId, track.dispatchId ?? ""])),
     workerOverrides: buildWorkerOverrideCommands(opts.workDir, (workDir) => readWorkerOverrides(workDir, run.runId)),
   };
 
-  run.phase = "running";
-  run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run, opts.runId);
+  const runningRun = await updateRunAtomic(opts.workDir, opts.runId, (current) => {
+    if (current?.phase === "halted" || hasHaltDirective(readDirectives(opts.workDir, opts.runId))) return current;
+    if (!current || current.runId !== run.runId || current.phase !== "dispatch-queued") {
+      const error = /** @type {Error & { code: string }} */ (new Error(
+        `run changed before worker start (phase=${current?.phase ?? "missing"})`
+      ));
+      error.code = "RUN_START_STALE";
+      throw error;
+    }
+    return { ...current, phase: "running", updatedAt: new Date().toISOString() };
+  });
+  Object.assign(run, runningRun);
+  if (run.phase === "halted" || hasHaltDirective(readDirectives(opts.workDir, opts.runId))) {
+    if (sharedBridge?.shutdown) await sharedBridge.shutdown();
+    await refreshSnapshot(opts);
+    return emitResult(opts, {
+      ok: true,
+      phase: "halted",
+      runId: run.runId,
+      results: [],
+      parallel: 0,
+    });
+  }
 
   const now = new Date().toISOString();
   for (const track of queued) {
-    if (track.state === "halted") {
-      continue;
+    const started = await updateTrackAtomic(opts.workDir, opts.runId, track.taskId, (current) => {
+      if (current.state === "halted"
+          || current.cancelRequestedAt
+          || hasHaltDirective(readDirectives(opts.workDir, opts.runId))) return null;
+      if (current.state !== "queued"
+          || (current.dispatchId && track.dispatchId && current.dispatchId !== track.dispatchId)) {
+        const error = /** @type {Error & { code: string }} */ (new Error(
+          `track ${track.taskId} changed before worker start (state=${current.state})`
+        ));
+        error.code = "TRACK_START_STALE";
+        throw error;
+      }
+      return { ...current, state: "running", startedAt: now, lastHeartbeat: now };
+    });
+    if (started.track) {
+      Object.assign(track, started.track);
     }
-    track.state = "running";
-    track.startedAt = now;
-    track.lastHeartbeat = now;
   }
-  await writeTracks(opts.workDir, tracksDoc, opts.runId);
 
   const runTrack = async (track) => {
-    if (track.state === "halted") {
+    const latestRun = readRun(opts.workDir, opts.runId);
+    const latestTrack = (readTracks(opts.workDir, opts.runId).tracks ?? [])
+      .find((item) => item.taskId === track.taskId);
+    if (track.state !== "running"
+        || latestTrack?.state !== "running"
+        || isTerminalRunPhase(latestRun?.phase)
+        || hasHaltDirective(readDirectives(opts.workDir, opts.runId))) {
       return { taskId: track.taskId, action: "halted", terminal: true, skipped: true };
     }
     const trackOpts = track.worktree?.enabled === true && track.worktree?.path
       ? buildTrackOpts(execOpts, { workDir: track.worktree.path })
       : execOpts;
     const bridge = track.worktree?.enabled === true && track.worktree?.path
-      ? await createBridge(trackOpts)
-      : (sharedBridge ?? await createBridge(trackOpts));
+      ? await createBridge(trackOpts, lifecycle)
+      : (sharedBridge ?? await createBridge(trackOpts, lifecycle));
     try {
       const result = await executeSingleTask(track.taskId, bridge, pitfalls, gateConfig, trackOpts);
       track.approvalFiles = [...new Set(result?.commitFiles ?? [])].sort();
@@ -1651,14 +2152,27 @@ async function orchestrateAwaitWorkersUnlocked(opts) {
     results.push(settleWorkerTrackOutcome(track, outcome, sprintTask, settledAt));
   }
 
-  await writeTracks(opts.workDir, tracksDoc, opts.runId);
+  for (let index = 0; index < queued.length; index += 1) {
+    const persisted = await persistSettledWorkerTrack(opts, queued[index]);
+    queued[index] = persisted;
+    const trackIndex = (tracksDoc.tracks ?? []).findIndex((track) => track.taskId === persisted.taskId);
+    if (trackIndex >= 0) tracksDoc.tracks[trackIndex] = persisted;
+    if (persisted.state === "halted") {
+      results[index] = { taskId: persisted.taskId, action: "halted", details: persisted.error };
+    }
+  }
 
   if (!opts.dryRun && sharedBridge?.shutdown) {
     await sharedBridge.shutdown();
   }
 
   const stateAfterWorkers = readSprintState(opts.stateFile);
-  const doneTasks = selectCommitReadyTasks(stateAfterWorkers, run.candidatePlan, tracksDoc);
+  const runBeforeApproval = readRun(opts.workDir, opts.runId);
+  const haltedBeforeApproval = runBeforeApproval?.phase === "halted"
+    || hasHaltDirective(readDirectives(opts.workDir, opts.runId));
+  const doneTasks = haltedBeforeApproval
+    ? []
+    : selectCommitReadyTasks(stateAfterWorkers, run.candidatePlan, tracksDoc);
   const failedTracks = (tracksDoc.tracks ?? []).filter((track) => track.resultStatus === "failed");
   let approvalPolicy = null;
   let autoApproval = null;
@@ -1723,7 +2237,26 @@ async function orchestrateAwaitWorkersUnlocked(opts) {
     }
   }
   run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run, opts.runId);
+  const persistedRun = await updateRunAtomic(opts.workDir, opts.runId, (current) => {
+    if (!current || current.runId !== run.runId) {
+      const error = /** @type {Error & { code: string }} */ (new Error("run changed before worker settlement"));
+      error.code = "RUN_SETTLEMENT_STALE";
+      throw error;
+    }
+    if (current.phase === "halted" || isTerminalRunPhase(current.phase)) {
+      return {
+        ...current,
+        approvedCommitTasks: [],
+        commitApprovalManifest: null,
+        commitApprovalManifestHash: null,
+        approvedCommitManifest: null,
+        approvedCommitManifestHash: null,
+        updatedAt: run.updatedAt,
+      };
+    }
+    return run;
+  });
+  Object.assign(run, persistedRun);
 
   const payload = {
     ok: failedTracks.length === 0,
@@ -1753,23 +2286,28 @@ async function orchestrateAwaitWorkersUnlocked(opts) {
 }
 
 async function orchestrateAwaitWorkers(opts) {
-  const executorLockTarget = `${orchestrationPaths(opts.workDir, opts.runId).run}.executor`;
+  const lockTarget = executorLockTarget(opts.workDir, opts.runId);
   try {
-    return await withPilotFileLock(executorLockTarget, async () => {
+    return await withPilotFileLock(lockTarget, async () => {
       const run = readRun(opts.workDir, opts.runId);
       assertRunnablePhase(run, opts);
-      run.locks = { ...(run.locks ?? {}), executorPid: process.pid };
-      run.updatedAt = new Date().toISOString();
-      await writeRun(opts.workDir, run, opts.runId);
+      const ownedRun = await transitionRunIfUnchanged(opts, run, (current) => ({
+        ...current,
+        locks: { ...(current.locks ?? {}), executorPid: process.pid },
+        updatedAt: new Date().toISOString(),
+      }), "await-workers executor acquisition");
       try {
         return await orchestrateAwaitWorkersUnlocked(opts);
       } finally {
-        const latest = readRun(opts.workDir, opts.runId);
-        if (latest?.locks?.executorPid === process.pid) {
-          latest.locks = { ...(latest.locks ?? {}), executorPid: null };
-          latest.updatedAt = new Date().toISOString();
-          await writeRun(opts.workDir, latest, opts.runId);
-        }
+        await updateRunAtomic(opts.workDir, opts.runId, (latest) => (
+          latest?.runId === ownedRun.runId && latest?.locks?.executorPid === process.pid
+            ? {
+              ...latest,
+              locks: { ...(latest.locks ?? {}), executorPid: null },
+              updatedAt: new Date().toISOString(),
+            }
+            : null
+        ));
       }
     }, { timeoutMs: 2_000 });
   } catch (error) {
@@ -1836,12 +2374,15 @@ async function orchestrateApproveCommit(opts) {
     opts
   );
 
-  run.approvedCommitTasks = tasks;
-  run.approvedCommitManifest = commitApproval.manifest;
-  run.approvedCommitManifestHash = commitApproval.hash;
-  run.phase = "commit-approved";
-  run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run, opts.runId);
+  const approvedRun = await transitionRunIfUnchanged(opts, run, (current) => ({
+    ...current,
+    approvedCommitTasks: tasks,
+    approvedCommitManifest: commitApproval.manifest,
+    approvedCommitManifestHash: commitApproval.hash,
+    phase: "commit-approved",
+    updatedAt: new Date().toISOString(),
+  }), "commit approval");
+  Object.assign(run, approvedRun);
   await appendGovernanceEvent(opts, run, "commit.approved", {
     approvalMode: "human",
     approvedCommitTasks: tasks,
@@ -1897,22 +2438,28 @@ async function orchestrateCommit(opts) {
 
   const currentApproval = buildCommitApprovalManifest(approvedTaskObjects, tracksDoc, opts);
   if (!opts.waiveApprovals && !run.approvedCommitManifestHash) {
-    run.phase = "awaiting-commit-approval";
-    run.approvedCommitTasks = [];
-    run.approvedCommitManifest = null;
-    run.approvedCommitManifestHash = null;
-    run.updatedAt = new Date().toISOString();
-    await writeRun(opts.workDir, run, opts.runId);
+    const resetRun = await transitionRunIfUnchanged(opts, run, (current) => ({
+      ...current,
+      phase: "awaiting-commit-approval",
+      approvedCommitTasks: [],
+      approvedCommitManifest: null,
+      approvedCommitManifestHash: null,
+      updatedAt: new Date().toISOString(),
+    }), "commit approval reset");
+    Object.assign(run, resetRun);
     fail(opts, "COMMIT_MANIFEST_REQUIRED", "approve-commit must bind an immutable commit manifest before commit", {}, 2);
   }
   if (!opts.waiveApprovals && currentApproval.hash !== run.approvedCommitManifestHash) {
     const expectedManifestHash = run.approvedCommitManifestHash;
-    run.phase = "awaiting-commit-approval";
-    run.approvedCommitTasks = [];
-    run.approvedCommitManifest = null;
-    run.approvedCommitManifestHash = null;
-    run.updatedAt = new Date().toISOString();
-    await writeRun(opts.workDir, run, opts.runId);
+    const resetRun = await transitionRunIfUnchanged(opts, run, (current) => ({
+      ...current,
+      phase: "awaiting-commit-approval",
+      approvedCommitTasks: [],
+      approvedCommitManifest: null,
+      approvedCommitManifestHash: null,
+      updatedAt: new Date().toISOString(),
+    }), "stale commit approval reset");
+    Object.assign(run, resetRun);
     fail(opts, "COMMIT_CONTEXT_STALE", "approved files or base HEAD changed after commit approval", {
       expected: expectedManifestHash,
       current: currentApproval.hash,
@@ -1944,6 +2491,17 @@ async function orchestrateCommit(opts) {
     let worktreeMerge;
     try {
       const lockedCommit = await withSerializedCommit(opts, async () => {
+        const latestRun = readRun(opts.workDir, opts.runId);
+        if (hasHaltDirective(readDirectives(opts.workDir, opts.runId))
+            || isTerminalRunPhase(latestRun?.phase)
+            || latestRun?.runId !== run.runId
+            || (!opts.waiveApprovals && latestRun.approvedCommitManifestHash !== run.approvedCommitManifestHash)) {
+          const error = /** @type {Error & { code: string }} */ (new Error(
+            "commit was superseded by a halt or newer approval state"
+          ));
+          error.code = "COMMIT_SUPERSEDED";
+          throw error;
+        }
         const lockedHead = computeGitHead(opts.workDir);
         if (expectedIntegrationHead && lockedHead && lockedHead !== expectedIntegrationHead) {
           const error = /** @type {Error & { code: string }} */ (new Error(
@@ -2003,13 +2561,23 @@ async function orchestrateCommit(opts) {
       worktreeMerge = lockedCommit.worktreeMerge;
       expectedIntegrationHead = computeGitHead(opts.workDir) || expectedIntegrationHead;
     } catch (error) {
+      if (error?.code === "COMMIT_SUPERSEDED") {
+        fail(opts, "COMMIT_SUPERSEDED", error.message, { taskId }, 2);
+      }
       if (error?.code === "COMMIT_CONTEXT_STALE") {
-        run.phase = "awaiting-commit-approval";
-        run.approvedCommitTasks = [];
-        run.approvedCommitManifest = null;
-        run.approvedCommitManifestHash = null;
-        run.updatedAt = new Date().toISOString();
-        await writeRun(opts.workDir, run, opts.runId);
+        const latest = await updateRunAtomic(opts.workDir, opts.runId, (current) => (
+          current?.runId === run.runId && !isTerminalRunPhase(current.phase)
+            ? {
+              ...current,
+              phase: "awaiting-commit-approval",
+              approvedCommitTasks: [],
+              approvedCommitManifest: null,
+              approvedCommitManifestHash: null,
+              updatedAt: new Date().toISOString(),
+            }
+            : null
+        ));
+        Object.assign(run, latest ?? run);
         fail(opts, "COMMIT_CONTEXT_STALE", error.message, { taskId }, 2);
       }
       fail(opts, "WORKTREE_MERGE_FAILED", `failed to squash merge ${taskId} worktree result`, {
@@ -2020,12 +2588,19 @@ async function orchestrateCommit(opts) {
     }
     commits.push({ taskId, ok: result.ok, details: result.details, hash: result.commitResult?.hash, worktreeMerge });
     if (!result.ok) {
-      run.phase = "awaiting-commit-approval";
-      run.approvedCommitTasks = [];
-      run.approvedCommitManifest = null;
-      run.approvedCommitManifestHash = null;
-      run.updatedAt = new Date().toISOString();
-      await writeRun(opts.workDir, run, opts.runId);
+      const latest = await updateRunAtomic(opts.workDir, opts.runId, (current) => (
+        current?.runId === run.runId && !isTerminalRunPhase(current.phase)
+          ? {
+            ...current,
+            phase: "awaiting-commit-approval",
+            approvedCommitTasks: [],
+            approvedCommitManifest: null,
+            approvedCommitManifestHash: null,
+            updatedAt: new Date().toISOString(),
+          }
+          : null
+      ));
+      Object.assign(run, latest ?? run);
       await refreshSnapshot(opts);
       return emitResult(opts, { ok: false, phase: run.phase, runId: run.runId, commits }, 1);
     }
@@ -2033,21 +2608,31 @@ async function orchestrateCommit(opts) {
 
   const failedCommits = commits.filter((commit) => commit.ok === false);
   if (failedCommits.length > 0) {
-    run.phase = "awaiting-commit-approval";
-    run.approvedCommitTasks = [];
-    run.approvedCommitManifest = null;
-    run.approvedCommitManifestHash = null;
-    run.updatedAt = new Date().toISOString();
-    await writeRun(opts.workDir, run, opts.runId);
+    const latest = await updateRunAtomic(opts.workDir, opts.runId, (current) => (
+      current?.runId === run.runId && !isTerminalRunPhase(current.phase)
+        ? {
+          ...current,
+          phase: "awaiting-commit-approval",
+          approvedCommitTasks: [],
+          approvedCommitManifest: null,
+          approvedCommitManifestHash: null,
+          updatedAt: new Date().toISOString(),
+        }
+        : null
+    ));
+    Object.assign(run, latest ?? run);
     await refreshSnapshot(opts);
     return emitResult(opts, { ok: false, phase: run.phase, runId: run.runId, commits }, 1);
   }
 
-  run.phase = "committed";
-  run.approvedCommitManifest = null;
-  run.approvedCommitManifestHash = null;
-  run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run, opts.runId);
+  const committedRun = await transitionRunIfUnchanged(opts, run, (current) => ({
+    ...current,
+    phase: "committed",
+    approvedCommitManifest: null,
+    approvedCommitManifestHash: null,
+    updatedAt: new Date().toISOString(),
+  }), "commit completion");
+  Object.assign(run, committedRun);
   await refreshSnapshot(opts);
 
   const payload = { ok: true, phase: run.phase, runId: run.runId, commits };
@@ -2072,10 +2657,13 @@ async function orchestrateJournal(opts) {
     opts
   );
 
-  run.cycle = Number(run.cycle ?? 0) + 1;
-  run.phase = "cycle-closed";
-  run.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, run, opts.runId);
+  const journaledRun = await transitionRunIfUnchanged(opts, run, (current) => ({
+    ...current,
+    cycle: Number(current.cycle ?? 0) + 1,
+    phase: "cycle-closed",
+    updatedAt: new Date().toISOString(),
+  }), "journal publication");
+  Object.assign(run, journaledRun);
   await appendGovernanceEvent(opts, run, "journal", {
     summary,
     cycle: run.cycle,
@@ -2161,10 +2749,12 @@ async function orchestrateRunUnattended(opts) {
     }
   }
 
-  const finalRun = readRun(opts.workDir, opts.runId);
-  finalRun.phase = "done";
-  finalRun.updatedAt = new Date().toISOString();
-  await writeRun(opts.workDir, finalRun, opts.runId);
+  const currentFinalRun = readRun(opts.workDir, opts.runId);
+  const finalRun = await transitionRunIfUnchanged(opts, currentFinalRun, (current) => ({
+    ...current,
+    phase: "done",
+    updatedAt: new Date().toISOString(),
+  }), "unattended run completion");
   await refreshSnapshot(opts);
   const paths = orchestrationPaths(opts.workDir, opts.runId);
   const finalCommit = await commitControlFiles(
@@ -2268,6 +2858,27 @@ export async function runOrchestrateCommand(subcommand, argv) {
     if (activeRunId) {
       opts.runId = activeRunId;
     }
+  }
+
+  const destructiveDefaultSelection = subcommand === "close"
+    || (subcommand === "recover" && opts.parsed.flags.has("apply"));
+  if (destructiveDefaultSelection
+      && !opts.parsed.options["run-id"]
+      && readActiveRuns(opts.workDir).length > 1) {
+    fail(opts, "RUN_ID_REQUIRED", `multiple active runs exist; orchestrate ${subcommand} requires an explicit --run-id`, {}, 2);
+  }
+
+  try {
+    if (subcommand === "init" || subcommand === "run-unattended") {
+      await recoverRunTracksTransaction(opts.workDir, "");
+      if (opts.runId) await recoverRunTracksTransaction(opts.workDir, opts.runId);
+    } else if (subcommand !== "list-runs") {
+      await recoverRunTracksTransaction(opts.workDir, opts.runId);
+    }
+  } catch (error) {
+    fail(opts, error?.code ?? "ORCHESTRATION_TRANSACTION_FAILED", error?.message ?? String(error), {
+      runId: opts.runId,
+    }, 2);
   }
 
   // Lease heartbeat: each orchestrate command (except init/list-runs, which manage

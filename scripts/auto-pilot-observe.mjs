@@ -16,6 +16,7 @@ import {
   readDirectives,
   readRun,
   readTracks,
+  recoverRunTracksTransaction,
   writeSnapshot,
 } from "./lib/orchestration-state.mjs";
 import { detectStopCondition, readSprintState } from "./auto-pilot-loop.mjs";
@@ -1334,12 +1335,14 @@ export function formatCockpitHuman(cockpit) {
 
 export async function runObserve(argv) {
   const opts = buildOrchestrationOpts(argv);
+  await recoverRunTracksTransaction(opts.workDir, opts.runId);
   const snapshot = await refreshSnapshot(opts);
   return emitResult(opts, { ok: true, snapshot });
 }
 
 export async function runCockpit(argv) {
   const opts = buildOrchestrationOpts(argv);
+  await recoverRunTracksTransaction(opts.workDir, opts.runId);
   const snapshot = await refreshSnapshot(opts);
   return emitResult(opts, {
     ok: true,

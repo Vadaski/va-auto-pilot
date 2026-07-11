@@ -32,7 +32,16 @@ function isEnabled(options) {
 }
 
 function emptyResult(durationMs, error) {
-  return { engineAvailable: false, constraints: [], blindSpots: [], durationMs, source: SKIPPED_SOURCE, ...(error ? { error } : {}) };
+  return {
+    engineAvailable: false,
+    constraints: [],
+    blindSpots: [],
+    suppressed: [],
+    diagnostics: [],
+    durationMs,
+    source: SKIPPED_SOURCE,
+    ...(error ? { error } : {}),
+  };
 }
 
 function resolveProjectRoot(configPath) {
@@ -78,6 +87,14 @@ function normalizeConstraintSet(document, filePath) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new Error(`${path.basename(filePath)} is missing a payload object`);
   }
+  const blindSpots = Array.isArray(payload.blindSpots)
+    ? payload.blindSpots.map((item) => String(item).trim()).filter(Boolean)
+    : [];
+  const legacyLearnedRule = blindSpots.some((item) => item.toLowerCase() === "auto-generated-from-pitfall");
+  const rawGovernance = document.governance && typeof document.governance === "object"
+    ? document.governance
+    : {};
+  const status = String(rawGovernance.status ?? (legacyLearnedRule ? "probation" : "active")).toLowerCase();
   return {
     id: String(document.id ?? "").trim(),
     type: "auto-pilot-constraint-set",
@@ -86,7 +103,15 @@ function normalizeConstraintSet(document, filePath) {
       tags: Array.isArray(payload.tags) ? payload.tags.map((item) => String(item).trim()).filter(Boolean) : [],
       synthesis: typeof payload.synthesis === "string" ? payload.synthesis.trim() : "",
       constraints: (Array.isArray(payload.constraints) ? payload.constraints : []).map(normalizeConstraint).filter(Boolean),
-      blindSpots: Array.isArray(payload.blindSpots) ? payload.blindSpots.map((item) => String(item).trim()).filter(Boolean) : [],
+      blindSpots,
+    },
+    governance: {
+      origin: String(rawGovernance.origin ?? (legacyLearnedRule ? "pitfall" : "curated")),
+      status,
+      learnedAt: String(rawGovernance.learnedAt ?? ""),
+      halfLifeDays: Number.isFinite(Number(rawGovernance.halfLifeDays))
+        ? Number(rawGovernance.halfLifeDays)
+        : null,
     },
     raw: document,
   };
@@ -109,19 +134,32 @@ function loadConstraintSets(constraintsDir) {
   return { loaded, errors };
 }
 
-function queryKeywords(query) {
-  return [...new Set(String(query ?? "").toLowerCase().split(/\s+/).map((item) => item.trim()).filter(Boolean))];
+const QUERY_STOP_WORDS = new Set([
+  "add", "build", "change", "create", "fix", "implement", "improve", "make", "task", "update", "use",
+]);
+const WORD_SEGMENTER = new Intl.Segmenter("und", { granularity: "word" });
+
+/** @returns {string[]} */
+function textTokens(value) {
+  const tokens = Array.from(WORD_SEGMENTER.segment(String(value ?? "").toLowerCase()))
+    .filter((entry) => entry.isWordLike)
+    .map((entry) => entry.segment);
+  return [...new Set(tokens.filter((token) => token.length > 1 && !QUERY_STOP_WORDS.has(token)))];
 }
 
-function matchesKeywords(setRecord, keywords) {
-  if (keywords.length === 0) return false;
-  const haystacks = [
+function matchesQuery(setRecord, queryTokens) {
+  if (queryTokens.length === 0) return false;
+  const query = new Set(queryTokens);
+  const identityTokens = textTokens([
     setRecord.id,
     setRecord.payload.domain,
     ...setRecord.payload.tags,
-    ...setRecord.payload.constraints.map((item) => item.statement),
-  ].map((item) => String(item ?? "").toLowerCase());
-  return keywords.some((keyword) => haystacks.some((value) => value.includes(keyword)));
+  ].join(" "));
+  if (identityTokens.some((token) => query.has(token))) return true;
+  return setRecord.payload.constraints.some((constraint) => {
+    const overlap = textTokens(constraint.statement).filter((token) => query.has(token));
+    return new Set(overlap).size >= 2;
+  });
 }
 
 function compareConstraints(left, right) {
@@ -143,7 +181,7 @@ function dedupeConstraints(sets, maxFactors) {
   return [...deduped.values()].sort(compareConstraints).slice(0, maxFactors);
 }
 
-function mergeBlindSpots(sets) {
+function mergeBlindSpots(sets, maxBlindSpots) {
   const seen = new Set();
   const blindSpots = [];
   for (const setRecord of sets) {
@@ -154,7 +192,7 @@ function mergeBlindSpots(sets) {
       blindSpots.push(blindSpot);
     }
   }
-  return blindSpots;
+  return blindSpots.slice(0, maxBlindSpots);
 }
 
 /**
@@ -168,7 +206,17 @@ function mergeBlindSpots(sets) {
 /**
  * @param {string} query
  * @param {{ maxFactors?: number, signal?: AbortSignal, configEnabled?: boolean, configPath?: string, constraintsDir?: string, includeAllWhenUnmatched?: boolean }} [options]
- * @returns {Promise<{ engineAvailable: boolean, constraints: TypedConstraint[], blindSpots: string[], synthesis?: string, durationMs: number, error?: string, source: "yaml"|"skipped" }>}
+ * @returns {Promise<{
+ *   engineAvailable: boolean,
+ *   constraints: TypedConstraint[],
+ *   blindSpots: string[],
+ *   suppressed: Array<{ id: string, reason: string, origin: string }>,
+ *   diagnostics: string[],
+ *   synthesis?: string,
+ *   durationMs: number,
+ *   error?: string,
+ *   source: "yaml"|"skipped"
+ * }>}
  */
 export async function collectConstraints(query, options = {}) {
   if (!isEnabled(options)) return emptyResult(0);
@@ -181,13 +229,23 @@ export async function collectConstraints(query, options = {}) {
       if (reason) process.stderr.write(`[constraint-bridge] skipped: ${reason}\n`);
       return emptyResult(Date.now() - startedAt, reason);
     }
-    const matched = loaded.filter((setRecord) => matchesKeywords(setRecord, queryKeywords(query)));
+    const matched = loaded.filter((setRecord) => matchesQuery(setRecord, textTokens(query)));
     const selected = matched.length > 0 ? matched : (options.includeAllWhenUnmatched ? [loaded[0]] : []);
+    const active = selected.filter((setRecord) => setRecord.governance.status === "active");
+    const suppressed = selected
+      .filter((setRecord) => setRecord.governance.status !== "active")
+      .map((setRecord) => ({
+        id: setRecord.id,
+        reason: `constraint set status is ${setRecord.governance.status || "unknown"}`,
+        origin: setRecord.governance.origin,
+      }));
     return {
       engineAvailable: true,
-      constraints: dedupeConstraints(selected, maxFactors),
-      blindSpots: mergeBlindSpots(selected),
-      synthesis: selected.find((setRecord) => setRecord.payload.synthesis)?.payload.synthesis ?? "",
+      constraints: dedupeConstraints(active, maxFactors),
+      blindSpots: mergeBlindSpots(active, maxFactors),
+      suppressed,
+      diagnostics: suppressed.map((item) => `${item.id}: ${item.reason}`),
+      synthesis: active.find((setRecord) => setRecord.payload.synthesis)?.payload.synthesis ?? "",
       durationMs: Date.now() - startedAt,
       source: YAML_SOURCE,
     };

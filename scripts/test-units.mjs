@@ -285,6 +285,59 @@ test("collectConstraints loads YAML and filters matches on tag, domain, and id",
   });
 });
 
+test("collectConstraints avoids substring false matches and quarantines learned rules on probation", async () => {
+  const { constraintsDir } = withTempConstraintRepo({
+    "auto-pilot-learned.yaml": [
+      "id: auto-pilot-learned",
+      "type: auto-pilot-constraint-set",
+      "payload:",
+      "  domain: orchestration",
+      "  tags: [auto-pilot, state-race]",
+      "  synthesis: Learned from one historical failure.",
+      "  constraints:",
+      "    - type: invariant",
+      "      statement: Preserve auto-pilot state during implementation",
+      "      confidence: 0.72",
+      "  blindSpots: [auto-generated-from-pitfall]",
+    ].join("\n") + "\n",
+    "zh-curated.yaml": [
+      "id: zh-curated",
+      "type: auto-pilot-constraint-set",
+      "payload:",
+      "  domain: reliability-engine",
+      "  tags: [durability]",
+      "  constraints:",
+      "    - type: invariant",
+      "      statement: 并发状态恢复必须保持事务一致性",
+      "      confidence: 0.95",
+      "  blindSpots: []",
+    ].join("\n") + "\n",
+  });
+
+  await withEnv({ VA_AUTO_PILOT_CONSTRAINTS: "on" }, async () => {
+    const unrelated = await collectConstraints("Implement Stripe billing webhook", {
+      constraintsDir,
+    });
+    assert.deepEqual(unrelated.constraints, []);
+    assert.deepEqual(unrelated.suppressed, []);
+
+    const related = await collectConstraints("repair orchestration state race", {
+      constraintsDir,
+    });
+    assert.deepEqual(related.constraints, []);
+    assert.deepEqual(related.blindSpots, []);
+    assert.equal(related.suppressed.length, 1);
+    assert.equal(related.suppressed[0].id, "auto-pilot-learned");
+    assert.match(related.diagnostics[0], /probation/);
+
+    const chinese = await collectConstraints("修复并发状态恢复期间的数据覆盖", {
+      constraintsDir,
+    });
+    assert.equal(chinese.constraints.length, 1);
+    assert.match(chinese.constraints[0].statement, /事务一致性/);
+  });
+});
+
 test("collectConstraints returns engineAvailable false for an empty constraints directory", async () => {
   const { constraintsDir } = withTempConstraintRepo();
   await withEnv({ VA_AUTO_PILOT_CONSTRAINTS: "on" }, async () => {
@@ -1106,6 +1159,76 @@ test("orchestration recovery plan identifies stale checkpoints and dead running 
   assert.ok(plan.mutations.some((mutation) => mutation.type === "return-to-plan-approval"));
   assert.ok(plan.mutations.some((mutation) => mutation.type === "clear-executor-lock"));
   assert.ok(plan.mutations.some((mutation) => mutation.type === "requeue-track"));
+});
+
+test("orchestration recovery never requeues a live worker and prefers its last heartbeat", () => {
+  const nowMs = Date.parse("2026-06-26T00:20:00.000Z");
+  const baseInput = {
+    run: {
+      runId: "run-live",
+      phase: "running",
+      locks: { executorPid: process.pid },
+    },
+    state: {
+      tasks: [
+        { id: "AP-102", state: "In Progress" },
+      ],
+    },
+    checkpointStatus: { stale: false, reason: "" },
+    nowMs,
+    trackTimeoutMs: 1_000,
+  };
+
+  const livePidPlan = buildRecoveryPlan({
+    ...baseInput,
+    tracksDoc: {
+      tracks: [
+        {
+          taskId: "AP-102",
+          state: "running",
+          pid: process.pid,
+          startedAt: "2026-06-26T00:00:00.000Z",
+          lastHeartbeat: "2026-06-26T00:00:00.000Z",
+        },
+      ],
+    },
+  });
+  assert.equal(livePidPlan.mutations.some((mutation) => mutation.type === "requeue-track"), false);
+  assert.equal(livePidPlan.issues.some((issue) => issue.code === "STALE_RUNNING_TRACK"), false);
+
+  const freshHeartbeatPlan = buildRecoveryPlan({
+    ...baseInput,
+    tracksDoc: {
+      tracks: [
+        {
+          taskId: "AP-102",
+          state: "running",
+          pid: null,
+          startedAt: "2026-06-26T00:00:00.000Z",
+          lastHeartbeat: "2026-06-26T00:19:59.500Z",
+        },
+      ],
+    },
+  });
+  assert.equal(freshHeartbeatPlan.mutations.some((mutation) => mutation.type === "requeue-track"), false);
+  assert.equal(freshHeartbeatPlan.issues.some((issue) => issue.code === "STALE_RUNNING_TRACK"), false);
+
+  const preSpawnPidPlan = buildRecoveryPlan({
+    ...baseInput,
+    tracksDoc: {
+      tracks: [
+        {
+          taskId: "AP-102",
+          state: "running",
+          pid: null,
+          startedAt: "2026-06-26T00:00:00.000Z",
+          lastHeartbeat: "2026-06-26T00:00:00.000Z",
+        },
+      ],
+    },
+  });
+  assert.equal(preSpawnPidPlan.mutations.some((mutation) => mutation.type === "requeue-track"), false);
+  assert.equal(preSpawnPidPlan.issues.some((issue) => issue.code === "STALE_RUNNING_TRACK"), false);
 });
 
 test("mcp-readonly-resources: lists read-only resource descriptors", () => {
@@ -3080,6 +3203,8 @@ test("pitfall --resolve appends suggested adaptive gate and journals it", () => 
   assert.match(updatedConstraint, /type: auto-pilot-constraint-set/);
   assert.match(updatedConstraint, /sourceFactorIds:/);
   assert.match(updatedConstraint, /- PF-201/);
+  assert.match(updatedConstraint, /origin: pitfall/);
+  assert.match(updatedConstraint, /status: probation/);
   assert.match(updatedJournal, /Resolved pitfall PF-201\. Suggested gate appended:/);
   assert.match(updatedJournal, /adaptive-gate-trigger:PF-201/);
   assert.match(result.stdout, /Constraint file: .*\.va-auto-pilot\/constraints\/pf-201\.yaml/);
@@ -5796,6 +5921,9 @@ test("ColonyBridge: dispatchViaSpawn runs child process in workDir", async () =>
   assert.equal(result.success, true, `expected success but got exit ${result.exitCode}`);
   const logContent = fs.readFileSync(logFile, "utf8");
   assert.ok(logContent.includes(fs.realpathSync(workDir)), `cwd mismatch: log=${logContent}`);
+  assert.equal(fs.existsSync(path.join(workDir, ".va-auto-pilot", "orchestration")), false);
+  await bridge.shutdown();
+  assert.equal(fs.existsSync(bridge.lifecycleDir), false);
 });
 
 test("ColonyBridge: dispatchViaSpawn fails fast for empty commands", async () => {

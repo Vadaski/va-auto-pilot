@@ -166,7 +166,7 @@ Unattended only: `node scripts/auto-pilot-loop.mjs --max-cycles 50` or `orchestr
 - Severity mapped: transient/fixable/critical
 - Recovery strategy selected: retry-immediately, retry-with-fix, escalate-model, create-fix-task, stop
 - Classification is journaled on every failure
-- `orchestrate recover --json` diagnoses interrupted runs; `--apply` only performs conservative state repair (clear dead locks, settle stale tracks, return stale checkpoints to plan approval, close no-pending-work runs)
+- `orchestrate recover --json` diagnoses interrupted runs; `--apply` only performs conservative state repair (clear dead locks, settle tracks with no live worker, return stale checkpoints to plan approval, close no-pending-work runs). Spawn workers cross a READY→persist→GO barrier, own their deadline independently of the manager, and persist run/tracks through a hash-checked transaction intent. Corrupt or ambiguous identity fails closed; orchestrated `await-workers` currently forces this spawn lifecycle instead of Colony routing.
 
 ### Structured Review Pipeline
 - Review output parsed for CRITICAL/BUG/P0/P1/P2/WARNING/STYLE findings
@@ -201,7 +201,7 @@ Modes: `legacy` (off) / `mixed` (configured roots strict, rest free) / `managed`
 When DocStore is active, do NOT hand-edit files under `.docstore/*` or `INDEX.json` — use the CLI or SDK.
 
 ### Constraint Library
-Typed YAML constraints under `.va-auto-pilot/constraints/` (dispatch, review-gate, adopt, mode-enforcement, state-race, ...). Constraint-bridge loads them at loop start and injects relevant entries into delegation prompts under **Hard constraints**. Resolving a pitfall via `sprint-board.mjs pitfall --resolve` can auto-synthesize a new constraint YAML capturing the root cause.
+Typed YAML constraints under `.va-auto-pilot/constraints/` (dispatch, review-gate, adopt, mode-enforcement, state-race, ...). Constraint-bridge loads active relevant entries at loop start and injects them under **Hard constraints**. Resolving a pitfall can auto-synthesize a YAML rule, but learned rules enter `probation` and stay out of hard prompts until explicitly curated or promoted.
 
 ## Quality Gate Protocol
 

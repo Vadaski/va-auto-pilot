@@ -43,10 +43,14 @@ export function clearPlanReview(workDir, runId = "") {
   }
 }
 
+function splitReviewLines(text) {
+  return String(text ?? "").split(/\r\n|[\n\r\u2028\u2029]/u);
+}
+
 /** Parse reviewer stdout into structured findings (line-based CRITICAL/WARNING/SUGGESTION). */
 export function parseReviewFindings(text) {
   const findings = { critical: [], warning: [], suggestion: [] };
-  const lines = String(text ?? "").split("\n");
+  const lines = splitReviewLines(text);
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -70,8 +74,7 @@ export function parseReviewFindings(text) {
 }
 
 export function parsePlanReviewStatus(text) {
-  const lines = String(text ?? "")
-    .split(/\r?\n/)
+  const lines = splitReviewLines(text)
     .map((line) => line.trim())
     .filter(Boolean);
   const exactPattern = /^PLAN REVIEW STATUS:\s*(PASS|FAIL)$/i;
@@ -83,6 +86,12 @@ export function parsePlanReviewStatus(text) {
     return null;
   }
   return finalStatus;
+}
+
+function collectPlanReviewStatusMarkers(text) {
+  return splitReviewLines(text)
+    .map((line) => line.trim().match(/^PLAN REVIEW STATUS:\s*(PASS|FAIL)$/iu)?.[1]?.toUpperCase() ?? null)
+    .filter(Boolean);
 }
 
 export function validatePlanReviewForApprove({ review, candidatePlan, runId }) {
@@ -185,7 +194,20 @@ export async function runPlanReviewCommand({ workDir, candidatePlan, runId, revi
 
   const combinedOutput = `${stdout}\n${stderr}`;
   const findings = parseReviewFindings(combinedOutput);
-  const status = parsePlanReviewStatus(combinedOutput);
+  // Codex writes the model response to stdout and transport diagnostics (for
+  // example token usage) to stderr. Keep the strict final-line contract on the
+  // response stream instead of letting a later diagnostic line erase a valid
+  // verdict. Custom reviewers that emit only to stderr remain supported, while
+  // conflicting explicit verdicts across streams still fail closed.
+  const stdoutStatus = parsePlanReviewStatus(stdout);
+  const stderrStatus = parsePlanReviewStatus(stderr);
+  const stdoutMarkers = collectPlanReviewStatusMarkers(stdout);
+  const stderrMarkers = collectPlanReviewStatusMarkers(stderr);
+  const allStatuses = new Set([...stdoutMarkers, ...stderrMarkers]);
+  let status = stdoutMarkers.length > 0 ? stdoutStatus : stderrStatus;
+  if (allStatuses.size !== 1) {
+    status = null;
+  }
   const hasStructuredOutput = status !== null;
   const passed = exitCode === 0
     && status === "PASS"
@@ -204,5 +226,6 @@ export async function runPlanReviewCommand({ workDir, candidatePlan, runId, revi
     hasStructuredOutput,
     passed,
     stdoutPreview: stdout.slice(0, 4000),
+    stderrPreview: stderr.slice(0, 4000),
   };
 }

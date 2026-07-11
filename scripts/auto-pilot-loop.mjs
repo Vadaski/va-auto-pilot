@@ -1283,6 +1283,7 @@ async function dispatchTask(task, bridge, pitfallContext, humanBoardBlock, opts)
   const scope = await computeTaskScope(opts);
   const track = {
     taskId: task.id,
+    dispatchId: opts.dispatchIds?.get(task.id) ?? "",
     command: template,
     title,
     priority: task.priority,
@@ -1583,6 +1584,10 @@ function splitLines(raw) {
     .filter(Boolean);
 }
 
+function splitNul(raw) {
+  return String(raw ?? "").split("\0").filter(Boolean);
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1623,15 +1628,35 @@ async function git(args, opts) {
   });
 }
 
+async function readGitHeadStrict(opts) {
+  try {
+    return (await git(["rev-parse", "--verify", "--quiet", "HEAD"], opts)).stdout.trim();
+  } catch (cause) {
+    const stdout = String(cause?.stdout ?? "").trim();
+    if (/^[0-9a-f]{40,64}$/u.test(stdout)) {
+      return stdout;
+    }
+    if (Number(cause?.code) === 1 && !stdout) {
+      return ""; // the one explicit unborn-HEAD result
+    }
+    const error = /** @type {Error & { code: string, cause?: unknown }} */ (new Error(
+      `failed to read Git HEAD safely: ${String(cause?.message ?? cause)}`
+    ));
+    error.code = "GIT_HEAD_UNREADABLE";
+    error.cause = cause;
+    throw error;
+  }
+}
+
 async function listChangedFiles(opts) {
   const [tracked, untracked] = await Promise.all([
-    git(["diff", "--name-only", "--relative", "HEAD", "--"], opts),
-    git(["ls-files", "--others", "--exclude-standard"], opts)
+    git(["diff", "--name-only", "--relative", "-z", "HEAD", "--"], opts),
+    git(["ls-files", "--others", "--exclude-standard", "-z"], opts)
   ]);
 
   return new Set([
-    ...splitLines(tracked.stdout),
-    ...splitLines(untracked.stdout)
+    ...splitNul(tracked.stdout),
+    ...splitNul(untracked.stdout)
   ]);
 }
 
@@ -1696,8 +1721,8 @@ async function stagePaths(files, opts) {
   }
 
   await git(["add", "--all", "--force", "--", ...files], opts);
-  const staged = await git(["diff", "--cached", "--name-only", "--relative", "--", ...files], opts);
-  return splitLines(staged.stdout);
+  const staged = await git(["diff", "--cached", "--name-only", "--relative", "-z", "--", ...files], opts);
+  return splitNul(staged.stdout);
 }
 
 async function hashStagedFile(file, opts) {
@@ -1766,20 +1791,103 @@ function resolveCommitLockPath(opts) {
   );
 }
 
-async function acquireGitIndexLock(indexPath, timeoutMs) {
+function fileIdentity(filePath) {
+  try {
+    const stat = fs.lstatSync(filePath, { bigint: true });
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.ino <= 0n) return null;
+    return { dev: stat.dev, ino: stat.ino };
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function filesShareIdentity(leftPath, rightPath) {
+  const left = fileIdentity(leftPath);
+  const right = fileIdentity(rightPath);
+  return Boolean(left && right && left.dev === right.dev && left.ino === right.ino);
+}
+
+function filesHaveEqualBytes(leftPath, rightPath) {
+  try {
+    if (!fileIdentity(leftPath) || !fileIdentity(rightPath)) return false;
+    return fs.readFileSync(leftPath).equals(fs.readFileSync(rightPath));
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function fsyncDirectoryBestEffort(directory) {
+  let fd;
+  try {
+    fd = fs.openSync(directory, "r");
+    fs.fsyncSync(fd);
+  } catch (error) {
+    if (!["EINVAL", "ENOTSUP", "EISDIR", "EPERM"].includes(error?.code)) throw error;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+function writeBufferFullySync(fd, buffer, writeChunk = fs.writeSync) {
+  let offset = 0;
+  while (offset < buffer.length) {
+    const written = writeChunk(fd, buffer, offset, buffer.length - offset, offset);
+    if (!Number.isInteger(written) || written <= 0 || written > buffer.length - offset) {
+      const error = /** @type {Error & { code: string }} */ (new Error(
+        `failed to write complete Git index candidate at offset ${offset}: wrote ${String(written)}`
+      ));
+      error.code = "INDEX_CANDIDATE_WRITE_FAILED";
+      throw error;
+    }
+    offset += written;
+  }
+}
+
+/**
+ * Acquire Git's index lock through a unique hard-link owner marker. Creating
+ * the recovery inode first and linking it to index.lock atomically removes the
+ * crash window where a pilot-owned lock exists without durable ownership
+ * proof. Byte equality is deliberately insufficient: another Git process can
+ * produce an identical candidate index on a different inode.
+ */
+async function acquireOwnedGitIndexLock(indexPath, recoveryFile, timeoutMs, syncDirectory = fsyncDirectoryBestEffort) {
   const lockPath = `${indexPath}.lock`;
+  const fd = fs.openSync(recoveryFile, "wx");
   const startedAt = Date.now();
   while (true) {
     try {
+      fs.linkSync(recoveryFile, lockPath);
+      if (!filesShareIdentity(recoveryFile, lockPath)) {
+        throw new Error(`Git index owner marker does not share an inode with ${lockPath}`);
+      }
+      const ownerStat = fs.lstatSync(recoveryFile, { bigint: true });
+      if (ownerStat.nlink < 2n) {
+        throw new Error(`Git index owner marker link count is invalid: ${ownerStat.nlink}`);
+      }
+      syncDirectory(path.dirname(indexPath));
       return {
-        fd: fs.openSync(lockPath, "wx"),
+        fd,
         lockPath,
+        recoveryFile,
       };
     } catch (error) {
       if (error?.code !== "EEXIST") {
+        if (fs.existsSync(lockPath) && filesShareIdentity(lockPath, recoveryFile)) {
+          fs.rmSync(lockPath, { force: true });
+        }
+        fs.closeSync(fd);
+        fs.rmSync(recoveryFile, { force: true });
         throw error;
       }
       if (Date.now() - startedAt >= timeoutMs) {
+        fs.closeSync(fd);
+        fs.rmSync(recoveryFile, { force: true });
         const timeoutError = /** @type {Error & { code: string }} */ (new Error(
           `git index remained locked for ${timeoutMs}ms: ${lockPath}`
         ));
@@ -1800,6 +1908,7 @@ async function resolveRealIndexPath(opts) {
 async function recoverPendingRealIndex(opts) {
   const indexPath = await resolveRealIndexPath(opts);
   const indexDir = path.dirname(indexPath);
+  const syncIndexDirectory = opts.fsyncIndexDirectory ?? fsyncDirectoryBestEffort;
   if (!fs.existsSync(indexDir)) {
     return { recovered: false, recoveryFile: "" };
   }
@@ -1819,58 +1928,174 @@ async function recoverPendingRealIndex(opts) {
   }
 
   const recoveryFile = recoveryFiles[0];
-  const expectedHead = path.basename(recoveryFile).slice(prefix.length);
-  const currentHead = await git(["rev-parse", "--verify", "HEAD"], opts)
-    .then((result) => result.stdout.trim())
-    .catch(() => "");
-  if (!expectedHead || currentHead !== expectedHead) {
-    const error = /** @type {Error & { code: string }} */ (new Error(
-      `pending Git index recovery snapshot targets ${expectedHead || "an unknown commit"}, current HEAD is ${currentHead || "unborn"}`
-    ));
+  const recoveryName = path.basename(recoveryFile).slice(prefix.length);
+  const recoveryMatch = recoveryName.match(/^([0-9a-f]{64}|[0-9a-f]{40})(?:-([0-9a-f-]{8,}))?$/u);
+  const expectedHead = recoveryMatch?.[1] ?? "";
+  const hasOwnerMarker = Boolean(recoveryMatch?.[2]);
+  const recoveryError = (message, cause = undefined) => {
+    const error = /** @type {Error & { code: string, cause?: unknown }} */ (new Error(message));
     error.code = "INDEX_RECOVERY_REQUIRED";
-    throw error;
+    if (cause !== undefined) {
+      error.cause = cause;
+    }
+    return error;
+  };
+  const readCurrentHead = () => readGitHeadStrict(opts).catch((cause) => {
+    throw recoveryError("failed to determine HEAD during Git index recovery", cause);
+  });
+  if (!/^[0-9a-f]{40,64}$/u.test(expectedHead)) {
+    throw recoveryError(`pending Git index recovery snapshot has an invalid commit id: ${expectedHead || "empty"}`);
   }
 
-  const acquired = await acquireGitIndexLock(
-    indexPath,
-    opts.commitIndexLockTimeoutMs ?? DEFAULT_COMMIT_INDEX_LOCK_TIMEOUT_MS
-  );
-  let fdOpen = true;
+  let commitRecord;
   try {
-    const candidate = fs.readFileSync(recoveryFile);
-    fs.ftruncateSync(acquired.fd, 0);
-    fs.writeSync(acquired.fd, candidate, 0, candidate.length, 0);
-    fs.fsyncSync(acquired.fd);
-    fs.closeSync(acquired.fd);
-    fdOpen = false;
-    fs.renameSync(acquired.lockPath, indexPath);
-    fs.rmSync(recoveryFile, { force: true });
-    return { recovered: true, recoveryFile };
+    commitRecord = (await git(["rev-list", "--parents", "-n", "1", expectedHead], opts)).stdout.trim();
   } catch (cause) {
-    if (fdOpen) {
-      fs.closeSync(acquired.fd);
-    }
-    fs.rmSync(acquired.lockPath, { force: true });
-    const error = /** @type {Error & { code: string, cause?: unknown }} */ (new Error(
-      `failed to publish pending Git index recovery snapshot ${recoveryFile}: ${String(cause?.message ?? cause)}`
-    ));
-    error.code = "INDEX_RECOVERY_REQUIRED";
-    error.cause = cause;
-    throw error;
+    throw recoveryError(`pending Git index recovery snapshot targets missing commit ${expectedHead}`, cause);
   }
+  const commitParts = commitRecord.split(/\s+/u).filter(Boolean);
+  if (commitParts[0] !== expectedHead || commitParts.length > 2) {
+    throw recoveryError(`pending Git index recovery snapshot does not describe a single-parent pilot commit: ${expectedHead}`);
+  }
+  const expectedParent = commitParts[1] ?? "";
+  let currentHead = await readCurrentHead();
+  const indexLockPath = `${indexPath}.lock`;
+  const candidateMatchesCommit = async () => {
+    const candidateOpts = {
+      ...opts,
+      env: { ...process.env, ...(opts.env ?? {}), GIT_INDEX_FILE: recoveryFile },
+    };
+    try {
+      await git(["ls-files", "--stage", "-z"], candidateOpts);
+      const changed = expectedParent
+        ? await git(["diff", "--name-only", "-z", expectedParent, expectedHead, "--"], opts)
+        : await git(["diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "-z", expectedHead], opts);
+      const paths = splitNul(changed.stdout);
+      if (paths.length === 0) return false;
+      const mismatch = await git([
+        "diff", "--cached", "--name-only", "-z", expectedHead, "--", ...paths,
+      ], candidateOpts);
+      return splitNul(mismatch.stdout).length === 0;
+    } catch {
+      return false;
+    }
+  };
+
+  // A hard crash before update-ref leaves the candidate index and recovery
+  // snapshot behind while HEAD still names the expected parent. A complete,
+  // owned candidate may already have a delayed update-ref child in flight, so
+  // recovery finishes that approved commit with its own CAS instead of deleting
+  // evidence in a read→unlink race. Partial pre-ref candidates are safe to drop.
+  if (currentHead === expectedParent || (!currentHead && !expectedParent)) {
+    const lockExists = fs.existsSync(indexLockPath);
+    const ownsLock = lockExists && hasOwnerMarker && filesShareIdentity(indexLockPath, recoveryFile);
+    if (lockExists && !ownsLock) {
+      throw recoveryError(
+        `pending Git recovery for unpublished commit ${expectedHead} found an unrecognized index lock: ${indexLockPath}`
+      );
+    }
+    const candidateReady = await candidateMatchesCommit();
+    if (candidateReady && ownsLock) {
+      let forwardError = null;
+      try {
+        await git([
+          "update-ref", "HEAD", expectedHead,
+          expectedParent || "0".repeat(expectedHead.length),
+        ], opts);
+      } catch (cause) {
+        forwardError = cause;
+      }
+      currentHead = await readCurrentHead();
+      if (currentHead !== expectedHead) {
+        throw recoveryError(
+          `could not finish pending Git commit ${expectedHead}; HEAD is ${currentHead || "unborn"}`,
+          forwardError
+        );
+      }
+    } else if (candidateReady) {
+      throw recoveryError(
+        `complete pending Git commit ${expectedHead} has no verifiable owned index lock; refusing destructive cleanup`
+      );
+    } else {
+      const finalHead = await readCurrentHead();
+      if (finalHead === expectedHead) {
+        currentHead = finalHead;
+      } else if (finalHead === expectedParent || (!finalHead && !expectedParent)) {
+        if (lockExists) {
+          if (!filesShareIdentity(indexLockPath, recoveryFile)) {
+            throw recoveryError(`pending Git recovery lock identity changed before cleanup: ${indexLockPath}`);
+          }
+          fs.rmSync(indexLockPath, { force: true });
+        }
+        syncIndexDirectory(indexDir);
+        fs.rmSync(recoveryFile, { force: true });
+        return { recovered: false, discarded: true, recoveryFile };
+      } else {
+        throw recoveryError(
+          `HEAD changed before partial Git recovery cleanup from ${expectedParent || "unborn"} to ${finalHead || "unborn"}`
+        );
+      }
+    }
+  }
+
+  if (currentHead !== expectedHead) {
+    throw recoveryError(
+      `pending Git index recovery snapshot targets ${expectedHead}, current HEAD is ${currentHead || "unborn"}`
+    );
+  }
+
+  // A hard crash after update-ref but before finalize leaves our complete
+  // candidate at two hard-linked names. Inode identity with the unique owner
+  // marker proves this is the pilot lock; equal bytes alone never do.
+  if (fs.existsSync(indexLockPath)) {
+    if (!hasOwnerMarker || !filesShareIdentity(indexLockPath, recoveryFile)) {
+      throw recoveryError(`pending Git recovery found an unrecognized index lock: ${indexLockPath}`);
+    }
+    const latestHead = await readCurrentHead();
+    if (latestHead !== expectedHead) {
+      throw recoveryError(`HEAD changed during Git index recovery from ${expectedHead} to ${latestHead || "unborn"}`);
+    }
+    try {
+      if (!filesShareIdentity(indexLockPath, recoveryFile)) {
+        throw recoveryError(`pending Git recovery lock identity changed before publish: ${indexLockPath}`);
+      }
+      fs.renameSync(indexLockPath, indexPath);
+      syncIndexDirectory(indexDir);
+      fs.rmSync(recoveryFile, { force: true });
+      return { recovered: true, discarded: false, recoveryFile };
+    } catch (cause) {
+      throw recoveryError(`failed to publish pending Git index recovery snapshot ${recoveryFile}: ${String(cause?.message ?? cause)}`, cause);
+    }
+  }
+
+  // No lock can mean finalize already renamed our inode and crashed before
+  // cleanup. Only an index with the same inode (new protocol) or exact bytes
+  // (legacy snapshot) is safe to accept. Any other index may contain user
+  // staging created after the pilot commit, so fail closed without overwriting.
+  if (filesShareIdentity(indexPath, recoveryFile) || filesHaveEqualBytes(indexPath, recoveryFile)) {
+    syncIndexDirectory(indexDir);
+    fs.rmSync(recoveryFile, { force: true });
+    return { recovered: true, discarded: false, recoveryFile };
+  }
+  throw recoveryError(
+    `pending Git index recovery snapshot ${recoveryFile} cannot be applied automatically because the real index changed after commit ${expectedHead}`
+  );
 }
 
 async function prepareRealIndexUpdate(commitHash, files, opts, tempDir) {
   const indexPath = await resolveRealIndexPath(opts);
   fs.mkdirSync(path.dirname(indexPath), { recursive: true });
-  const acquired = await acquireGitIndexLock(
-    indexPath,
-    opts.commitIndexLockTimeoutMs ?? DEFAULT_COMMIT_INDEX_LOCK_TIMEOUT_MS
-  );
   const candidateIndex = path.join(tempDir, "real-index-candidate");
   const recoveryFile = path.join(
     path.dirname(indexPath),
-    `va-auto-pilot-index-recovery-${commitHash}`
+    `va-auto-pilot-index-recovery-${commitHash}-${crypto.randomUUID()}`
+  );
+  const syncIndexDirectory = opts.fsyncIndexDirectory ?? fsyncDirectoryBestEffort;
+  const acquired = await acquireOwnedGitIndexLock(
+    indexPath,
+    recoveryFile,
+    opts.commitIndexLockTimeoutMs ?? DEFAULT_COMMIT_INDEX_LOCK_TIMEOUT_MS,
+    syncIndexDirectory
   );
   let fdOpen = true;
   const cleanupLock = () => {
@@ -1878,7 +2103,10 @@ async function prepareRealIndexUpdate(commitHash, files, opts, tempDir) {
       fs.closeSync(acquired.fd);
       fdOpen = false;
     }
-    fs.rmSync(acquired.lockPath, { force: true });
+    if (fs.existsSync(acquired.lockPath) && filesShareIdentity(acquired.lockPath, recoveryFile)) {
+      fs.rmSync(acquired.lockPath, { force: true });
+    }
+    fs.rmSync(recoveryFile, { force: true });
   };
 
   try {
@@ -1898,32 +2126,58 @@ async function prepareRealIndexUpdate(commitHash, files, opts, tempDir) {
     await git(["reset", "-q", commitHash, "--", ...files], candidateOpts);
     const candidate = fs.readFileSync(candidateIndex);
     fs.ftruncateSync(acquired.fd, 0);
-    fs.writeSync(acquired.fd, candidate, 0, candidate.length, 0);
+    writeBufferFullySync(acquired.fd, candidate, opts.writeIndexChunk ?? fs.writeSync);
     fs.fsyncSync(acquired.fd);
+    const writtenStat = fs.fstatSync(acquired.fd);
+    if (writtenStat.size !== candidate.length || !fs.readFileSync(recoveryFile).equals(candidate)) {
+      const error = /** @type {Error & { code: string }} */ (new Error(
+        `Git index candidate verification failed: expected ${candidate.length} bytes, found ${writtenStat.size}`
+      ));
+      error.code = "INDEX_CANDIDATE_WRITE_FAILED";
+      throw error;
+    }
     fs.closeSync(acquired.fd);
     fdOpen = false;
-    // Persist the candidate before HEAD advances. If publishing index.lock
-    // later fails, the next pilot commit can repair the real index first.
-    fs.copyFileSync(candidateIndex, recoveryFile, fs.constants.COPYFILE_EXCL);
   } catch (error) {
     cleanupLock();
-    fs.rmSync(recoveryFile, { force: true });
     throw error;
   }
 
   return {
     rollback() {
       cleanupLock();
-      fs.rmSync(recoveryFile, { force: true });
     },
     finalize() {
       try {
+        if (!filesShareIdentity(acquired.lockPath, recoveryFile)) {
+          throw new Error(`Git index lock identity changed before publish: ${acquired.lockPath}`);
+        }
         const renameIndexFile = opts.renameIndexFile ?? fs.renameSync;
         renameIndexFile(acquired.lockPath, indexPath);
+      } catch (error) {
+        // A wrapper can throw after the underlying rename succeeded. The hard
+        // link proves the published index is our candidate; directory syncing
+        // still has to succeed before recovery evidence may be removed.
+        if (!fs.existsSync(acquired.lockPath) && filesShareIdentity(indexPath, recoveryFile)) {
+          // The rename completed before the wrapper reported its error.
+        } else {
+          // Otherwise preserve both the owner marker and index.lock. The next
+          // pilot invocation can verify their inode identity and recover; Git is
+          // intentionally blocked from staging into an inconsistent index.
+          return {
+            ok: false,
+            recoveryFile,
+            error: String(error?.message ?? error),
+          };
+        }
+      }
+      try {
+        syncIndexDirectory(path.dirname(indexPath));
         fs.rmSync(recoveryFile, { force: true });
         return { ok: true, recoveryFile: "", error: "" };
       } catch (error) {
-        fs.rmSync(acquired.lockPath, { force: true });
+        // The recovery hardlink remains as durable evidence when directory
+        // persistence fails after rename.
         return {
           ok: false,
           recoveryFile,
@@ -1950,10 +2204,10 @@ async function commitPathsUnlocked(header, files, opts) {
     const recoveredIndex = await recoverPendingRealIndex(opts);
     if (recoveredIndex.recovered) {
       log(opts, `  recovered pending Git index snapshot ${recoveredIndex.recoveryFile}`);
+    } else if (recoveredIndex.discarded) {
+      log(opts, `  discarded unpublished Git index snapshot ${recoveredIndex.recoveryFile}`);
     }
-    const parent = await git(["rev-parse", "--verify", "HEAD"], opts)
-      .then((result) => result.stdout.trim())
-      .catch(() => "");
+    const parent = await readGitHeadStrict(opts);
     await git(parent ? ["read-tree", parent] : ["read-tree", "--empty"], isolatedOpts);
 
     const stagedFiles = await stagePaths(files, isolatedOpts);
@@ -1971,8 +2225,8 @@ async function commitPathsUnlocked(header, files, opts) {
     await runGitHookIfPresent("prepare-commit-msg", [messageFile, "message"], isolatedOpts);
     await runGitHookIfPresent("commit-msg", [messageFile], isolatedOpts);
 
-    const finalStaged = splitLines((await git([
-      "diff", "--cached", "--name-only", "--relative"
+    const finalStaged = splitNul((await git([
+      "diff", "--cached", "--name-only", "--relative", "-z"
     ], isolatedOpts)).stdout).sort();
     if (JSON.stringify(finalStaged) !== JSON.stringify([...stagedFiles].sort())) {
       const error = /** @type {Error & { code: string }} */ (new Error(
@@ -1990,13 +2244,36 @@ async function commitPathsUnlocked(header, files, opts) {
     }
     commitArgs.push("-F", messageFile);
     const commitHash = (await git(commitArgs, isolatedOpts)).stdout.trim();
-    const expectedOld = parent || "0000000000000000000000000000000000000000";
+    const expectedOld = parent || "0".repeat(commitHash.length);
     const realIndexUpdate = await prepareRealIndexUpdate(commitHash, finalStaged, opts, tempDir);
+    let updateRefError = null;
     try {
       await git(["update-ref", "HEAD", commitHash, expectedOld], opts);
     } catch (error) {
-      realIndexUpdate.rollback();
-      error.code = "COMMIT_CONTEXT_STALE";
+      updateRefError = error;
+    }
+    const headAfterUpdate = await readGitHeadStrict(opts).catch((cause) => {
+      const error = /** @type {Error & { code: string, cause?: unknown }} */ (new Error(
+        `Git update-ref result is ambiguous and HEAD cannot be verified; recovery artifacts were preserved: ${cause.message}`
+      ));
+      error.code = "INDEX_RECOVERY_REQUIRED";
+      error.cause = cause;
+      throw error;
+    });
+    if (headAfterUpdate !== commitHash) {
+      if (headAfterUpdate === parent || (!headAfterUpdate && !parent)) {
+        realIndexUpdate.rollback();
+        const error = updateRefError ?? new Error(
+          `Git HEAD did not advance to ${commitHash}; current HEAD is ${headAfterUpdate || "unborn"}`
+        );
+        error.code = "COMMIT_CONTEXT_STALE";
+        throw error;
+      }
+      const error = /** @type {Error & { code: string, cause?: unknown }} */ (new Error(
+        `Git HEAD changed to ${headAfterUpdate}; expected ${commitHash}. Recovery artifacts were preserved for manual inspection.`
+      ));
+      error.code = "INDEX_RECOVERY_REQUIRED";
+      error.cause = updateRefError;
       throw error;
     }
 
@@ -2091,8 +2368,8 @@ async function listTaskDeltaFiles(task, opts) {
       .then((result) => result.stdout.trim())
       .catch(() => "");
     if (currentHead && currentHead !== baseline.head) {
-      const committedDelta = await git(["diff", "--name-only", "--relative", `${baseline.head}..${currentHead}`, "--"], opts)
-        .then((result) => splitLines(result.stdout))
+      const committedDelta = await git(["diff", "--name-only", "--relative", "-z", `${baseline.head}..${currentHead}`, "--"], opts)
+        .then((result) => splitNul(result.stdout))
         .catch(() => []);
       for (const file of committedDelta) {
         if (!isAutoPilotControlFile(file, opts)) {
@@ -3042,10 +3319,10 @@ async function collectSprintDiff(opts) {
 
   const diffRange = baseCommit ? `${baseCommit}..HEAD` : "";
   const committedFiles = baseCommit
-    ? splitLines((await git(["diff", "--name-only", diffRange], opts)).stdout)
+    ? splitNul((await git(["diff", "--name-only", "-z", diffRange], opts)).stdout)
     : [];
-  const workingTreeFiles = splitLines((await git(["diff", "--name-only", "HEAD"], opts)).stdout);
-  const untrackedFiles = splitLines((await git(["ls-files", "--others", "--exclude-standard"], opts)).stdout);
+  const workingTreeFiles = splitNul((await git(["diff", "--name-only", "-z", "HEAD"], opts)).stdout);
+  const untrackedFiles = splitNul((await git(["ls-files", "--others", "--exclude-standard", "-z"], opts)).stdout);
   const changedFiles = [...new Set([...committedFiles, ...workingTreeFiles, ...untrackedFiles])];
 
   const committedDiff = baseCommit

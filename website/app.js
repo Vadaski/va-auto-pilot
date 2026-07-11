@@ -299,7 +299,7 @@ const DEMO_LINES = {
     "[pitfall-check] PF-003: p95 degradation under parallel load — injected as hard constraint",
     "[gate] Sprint Completion Gate: adversarial reviewer (diff only) ... PASS",
     "[state] AP-017 -> Done",
-    "[pitfall] resolved: PF-003 — constraint prevented recurrence",
+    "[pitfall] resolved: PF-003 — learned constraint enters probation before promotion",
     "[loop] Next highest priority task ..."
   ],
   zh: [
@@ -328,7 +328,7 @@ const DEMO_LINES = {
     "[\u9677\u9631\u68C0\u67E5] PF-003\uFF1A\u5E76\u53D1\u8D1F\u8F7D\u4E0B p95 \u964D\u7EA7\u2014\u2014\u5DF2\u4F5C\u4E3A\u786C\u6027\u7EA6\u675F\u6CE8\u5165",
     "[\u95E8\u7981] \u51B2\u523A\u6536\u5C3E\u95E8\u7981\uFF1A\u5BF9\u6297\u6027\u5BA1\u67E5\uFF08\u4EC5 diff\uFF09... PASS",
     "[\u72B6\u6001] AP-017 -> Done",
-    "[\u9677\u9631] \u5DF2\u89E3\u51B3\uFF1APF-003\u2014\u2014\u7EA6\u675F\u9632\u6B62\u4E86\u518D\u6B21\u53D1\u751F",
+    "[\u9677\u9631] \u5DF2\u89E3\u51B3\uFF1APF-003\u2014\u2014\u5B66\u4E60\u7EA6\u675F\u5728\u664B\u5347\u524D\u8FDB\u5165\u89C2\u5BDF\u671F",
     "[\u5FAA\u73AF] \u4E0B\u4E00\u4E2A\u6700\u9AD8\u4F18\u5148\u7EA7\u4EFB\u52A1 ..."
   ]
 };

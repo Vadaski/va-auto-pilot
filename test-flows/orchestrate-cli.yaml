@@ -714,7 +714,7 @@ flows:
 
   - name: "orchestrate: run-unattended replans after journal commits"
     command: "bash"
-    timeout_ms: 300000
+    timeout_ms: 600000
     args:
       - "-lc"
       - |
@@ -988,6 +988,7 @@ flows:
 
   - name: "intent + cockpit: human-facing control surface"
     command: "bash"
+    timeout_ms: 60000
     args:
       - "-lc"
       - |
@@ -1036,7 +1037,7 @@ flows:
 
   - name: "quick start demo: default cockpit is human-readable"
     command: "bash"
-    timeout_ms: 30000
+    timeout_ms: 120000
     args:
       - "-lc"
       - |

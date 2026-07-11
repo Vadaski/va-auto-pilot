@@ -88,6 +88,24 @@ node scripts/auto-pilot.mjs orchestrate close
 
 Between steps the manager may run `intervene` (writes `directives.json`) or capture durable intent with `node scripts/auto-pilot.mjs intent ...`. If checkpoint is stale after intent changes, run `approve-plan` again before `dispatch`.
 
+### Recovery / Resume
+
+After a crash or ambiguous worker state, diagnose before continuing:
+
+```bash
+node scripts/auto-pilot.mjs orchestrate recover --json
+```
+
+Use `--apply` only after inspecting the conservative mutation plan. Spawn workers
+cross a READY→persist→GO barrier and own their deadline independently of the
+manager. `run.json` + `tracks.json` use a durable hash-checked transaction intent;
+corrupt control files and post-GO PID ambiguity fail closed. Active PID/token
+identity is cleared only after verified exit. Orchestrated `await-workers` uses
+this crash-safe spawn lifecycle rather than Colony routing.
+
+Process-group cleanup is best effort, not a sandbox: worker commands must not
+daemonize or create a detached POSIX session.
+
 ### Unattended mode (CI / overnight only)
 
 ```bash
@@ -140,6 +158,10 @@ At the start of each cycle:
 3. Check `Codebase Signals` first.
 4. Reuse existing signals before inventing new conventions.
 5. Append one execution entry at the end of each cycle.
+
+Constraint YAML synthesized from a resolved pitfall is marked `probation` and
+reported for governance, but it is not injected as a hard rule until explicitly
+promoted. Curated constraint sets remain active.
 
 ---
 

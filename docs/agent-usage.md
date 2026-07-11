@@ -295,6 +295,8 @@ node scripts/va-parallel-runner.mjs spawn \
 
 ColonyBridge integrates with `va-agent-protocol` Colony for intelligent agent routing instead of raw subprocess spawn.
 
+> Scope note: this section describes `va-parallel-runner --use-colony` and direct/legacy ColonyBridge use. Orchestrated `auto-pilot.mjs orchestrate await-workers` currently forces the crash-safe spawn lifecycle so it can persist PID/token identity and enforce deadlines across manager crashes; it does not route through Colony.
+
 ```bash
 # Enable Colony dispatch (optional: npm install va-agent-protocol, set
 # VA_AGENT_PROTOCOL_PATH, or keep a built sibling checkout at ../va-agent-protocol/)

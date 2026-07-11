@@ -4,10 +4,15 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 
 import { readHumanBoardInstructions, resolveHumanBoardPath } from "./human-board.mjs";
-import { withPilotFileLock, writeJsonFileAtomicSync } from "./pilot-state.mjs";
+import {
+  removeFileDurableSync,
+  withPilotFileLock,
+  writeJsonFileAtomicSync,
+  writeJsonFileDurableAtomicSync,
+} from "./pilot-state.mjs";
 import { observabilityPaths, OBSERVABILITY_SCHEMA_VERSION } from "./observability.mjs";
 import { DEFAULT_TRACK_TIMEOUT_MS } from "./constants.mjs";
-import { assertSafeRunId } from "./identifiers.mjs";
+import { assertSafeRunId, assertSafeTaskId } from "./identifiers.mjs";
 
 export const ORCHESTRATION_SCHEMA_VERSION = 1;
 export const GOVERNANCE_SCHEMA_VERSION = 1;
@@ -15,7 +20,7 @@ export const GOVERNANCE_SCHEMA_VERSION = 1;
 export { assertSafeRunId } from "./identifiers.mjs";
 
 /** Phases where plan/dispatch/await must not run without a fresh init. */
-export const TERMINAL_RUN_PHASES = new Set(["done", "error", "halted"]);
+export const TERMINAL_RUN_PHASES = new Set(["done", "error", "halted", "migrated"]);
 
 export function resolveOrchestrationDir(workDir = process.cwd(), runId = "") {
   const rootDir = path.resolve(workDir, ".va-auto-pilot", "orchestration");
@@ -41,6 +46,7 @@ export function orchestrationPaths(workDir = process.cwd(), runId = "") {
     candidateBacklog: path.join(dir, "candidate-backlog.json"),
     candidatePlan: path.join(dir, "candidate-plan.json"),
     planReview: path.join(dir, "plan-review.json"),
+    transaction: path.join(dir, "state-transaction.json"),
   };
 }
 
@@ -53,6 +59,28 @@ function readJsonFile(filePath, fallback) {
     return parsed && typeof parsed === "object" ? parsed : fallback;
   } catch {
     return fallback;
+  }
+}
+
+function stateCorrupt(filePath, cause) {
+  const error = /** @type {Error & { code: string, cause?: unknown }} */ (new Error(
+    `orchestration state is unreadable or invalid: ${filePath}`
+  ));
+  error.code = "ORCHESTRATION_STATE_CORRUPT";
+  error.cause = cause;
+  return error;
+}
+
+function readJsonFileStrict(filePath, fallback) {
+  if (!fs.existsSync(filePath)) return fallback;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("expected a JSON object");
+    }
+    return parsed;
+  } catch (cause) {
+    throw stateCorrupt(filePath, cause);
   }
 }
 
@@ -69,7 +97,7 @@ const ACTIVE_SCHEMA_VERSION = 1;
 
 function readActiveIndex(workDir) {
   const { active } = orchestrationPaths(workDir);
-  const raw = readJsonFile(active, null);
+  const raw = readJsonFileStrict(active, null);
   if (!raw) {
     return { schemaVersion: ACTIVE_SCHEMA_VERSION, runs: [] };
   }
@@ -83,7 +111,7 @@ function readActiveIndex(workDir) {
       runs: [{ runId: raw.runId, startedAt: raw.startedAt ?? "", heartbeatAt: raw.heartbeatAt ?? raw.startedAt ?? "" }],
     };
   }
-  return { schemaVersion: ACTIVE_SCHEMA_VERSION, runs: [] };
+  throw stateCorrupt(active, new Error("active index must contain runs[] or a legacy runId"));
 }
 
 export function readActiveRun(workDir = process.cwd()) {
@@ -109,12 +137,14 @@ export function resolveActiveRunId(workDir = process.cwd()) {
 
 export function readRun(workDir, runId = "") {
   const { run } = orchestrationPaths(workDir, runId);
-  return readJsonFile(run, null);
+  return readJsonFileStrict(run, null);
 }
 
 export function readTracks(workDir, runId = "") {
   const { tracks } = orchestrationPaths(workDir, runId);
-  return readJsonFile(tracks, { tracks: [] });
+  const value = readJsonFileStrict(tracks, { tracks: [] });
+  if (!Array.isArray(value.tracks)) throw stateCorrupt(tracks, new Error("tracks must be an array"));
+  return value;
 }
 
 export function readCheckpoint(workDir, runId = "") {
@@ -129,7 +159,9 @@ export function readCandidateBacklog(workDir, runId = "") {
 
 export function readDirectives(workDir, runId = "") {
   const { directives } = orchestrationPaths(workDir, runId);
-  return readJsonFile(directives, { schemaVersion: ORCHESTRATION_SCHEMA_VERSION, directives: [] });
+  const value = readJsonFileStrict(directives, { schemaVersion: ORCHESTRATION_SCHEMA_VERSION, directives: [] });
+  if (!Array.isArray(value.directives)) throw stateCorrupt(directives, new Error("directives must be an array"));
+  return value;
 }
 
 function ensureOrchestrationDir(workDir, runId = "") {
@@ -200,6 +232,360 @@ export async function writeTracks(workDir, value, runId = "") {
   await withPilotFileLock(tracks, async () => {
     writeJsonFileAtomicSync(tracks, value);
   });
+}
+
+export function resolveWorkerLifecycleDir(workDir, runId = "") {
+  return path.join(resolveOrchestrationDir(workDir, runId), "workers");
+}
+
+export function resolveWorkerHeartbeatPath(workDir, runId, workerToken) {
+  if (!/^[0-9a-f-]{36}$/u.test(String(workerToken ?? ""))) {
+    throw new Error(`invalid worker token: ${String(workerToken ?? "")}`);
+  }
+  return path.join(resolveWorkerLifecycleDir(workDir, runId), `${workerToken}.json`);
+}
+
+export function readTrackWorkerHeartbeat(workDir, runId, track) {
+  if (!track?.workerToken) return null;
+  return readJsonFileStrict(resolveWorkerHeartbeatPath(workDir, runId, track.workerToken), null);
+}
+
+export function isTrackWorkerAlive(workDir, runId, track) {
+  const pid = Number(track?.pid);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  if (!track?.workerToken) {
+    return isProcessTreeAlive(pid) || isProcessAlive(pid); // backward-compatible pre-token runtime state
+  }
+  const heartbeat = readTrackWorkerHeartbeat(workDir, runId, track);
+  const durablePidAlive = isProcessTreeAlive(pid) || isProcessAlive(pid);
+  if (!heartbeat) return durablePidAlive;
+  if (heartbeat.token !== track.workerToken
+      || Number(heartbeat.launcherPid) !== pid
+      || !["ready", "launching", "running", "stopping", "terminal"].includes(heartbeat.state)) {
+    return durablePidAlive;
+  }
+  const launcherTreeAlive = isProcessTreeAlive(pid);
+  const childPid = Number(heartbeat.childPid);
+  const childAlive = Number.isInteger(childPid)
+    && childPid > 0
+    && (process.platform === "win32" ? isProcessAlive(childPid) : isProcessTreeAlive(childPid));
+  // A live process tree with the matching durable token is authoritative even
+  // when the launcher itself died and can no longer refresh the heartbeat.
+  // False-blocking on a reused process group is safer than duplicate dispatch.
+  if (heartbeat.state === "terminal") return childAlive;
+  // No process observation can distinguish "died before spawn" from "spawned
+  // and died before persisting childPid". Preserve the identity fail-closed.
+  if (heartbeat.state === "launching" && !(Number.isInteger(childPid) && childPid > 0)) return true;
+  return launcherTreeAlive || childAlive;
+}
+
+/**
+ * Durable process identity, rather than the advisory track state, decides
+ * whether destructive orchestration operations are safe. A halt can leave a
+ * track in `halted` while retaining PID/token evidence when that identity is
+ * too stale to signal safely; callers must still treat that worker as live.
+ */
+export function findLiveTrackedWorker(workDir, runId = "", tracksDoc = undefined) {
+  const tracks = Array.isArray(tracksDoc?.tracks)
+    ? tracksDoc.tracks
+    : readTracks(workDir, runId).tracks ?? [];
+  return tracks.find((track) => isTrackWorkerAlive(workDir, runId, track)) ?? null;
+}
+
+export function isTrackWorkerSignalSafe(workDir, runId, track, maxHeartbeatAgeMs = 30_000) {
+  if (!isTrackWorkerAlive(workDir, runId, track)) return false;
+  if (!track?.workerToken) return isProcessAlive(Number(track?.pid));
+  const heartbeat = readTrackWorkerHeartbeat(workDir, runId, track);
+  const pid = Number(track?.pid);
+  const updatedMs = Date.parse(heartbeat?.updatedAt ?? "");
+  return heartbeat?.token === track.workerToken
+    && Number(heartbeat.launcherPid) === pid
+    && ["ready", "launching", "running", "stopping"].includes(heartbeat.state)
+    && (isProcessTreeAlive(pid) || isProcessAlive(pid))
+    && Number.isFinite(updatedMs)
+    && Date.now() - updatedMs <= maxHeartbeatAgeMs;
+}
+
+export async function updateRunAtomic(workDir, runId, update) {
+  if (runId) assertSafeRunId(runId);
+  ensureOrchestrationDir(workDir, runId);
+  const { run } = orchestrationPaths(workDir, runId);
+  return withPilotFileLock(run, async () => {
+    const current = readJsonFileStrict(run, null);
+    const next = await update(current);
+    if (next !== undefined && next !== null) {
+      writeJsonFileAtomicSync(run, next);
+      return next;
+    }
+    return current;
+  });
+}
+
+export async function updateTrackAtomic(workDir, runId, taskId, update) {
+  if (runId) assertSafeRunId(runId);
+  assertSafeTaskId(taskId);
+  ensureOrchestrationDir(workDir, runId);
+  const { tracks } = orchestrationPaths(workDir, runId);
+  return withPilotFileLock(tracks, async () => {
+    const tracksDoc = readJsonFileStrict(tracks, { schemaVersion: ORCHESTRATION_SCHEMA_VERSION, runId, tracks: [] });
+    if (!Array.isArray(tracksDoc.tracks)) throw stateCorrupt(tracks, new Error("tracks must be an array"));
+    const index = (tracksDoc.tracks ?? []).findIndex((item) => item?.taskId === taskId);
+    if (index < 0) {
+      return { updated: false, state: "missing", track: null, tracksDoc };
+    }
+    const current = tracksDoc.tracks[index];
+    const next = await update(current, tracksDoc);
+    if (next === undefined || next === null) {
+      return { updated: false, state: current.state, track: current, tracksDoc };
+    }
+    tracksDoc.tracks[index] = next;
+    writeJsonFileAtomicSync(tracks, tracksDoc);
+    return { updated: true, state: next.state, track: next, tracksDoc };
+  });
+}
+
+function stateHash(value) {
+  return crypto.createHash("sha256").update(JSON.stringify(value ?? null), "utf8").digest("hex");
+}
+
+function readTransactionStrict(filePath) {
+  try {
+    const value = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!value || value.schemaVersion !== 1 || value.kind !== "run-tracks") {
+      throw new Error("unsupported transaction record");
+    }
+    for (const key of ["beforeRunHash", "beforeTracksHash", "afterRunHash", "afterTracksHash"]) {
+      if (!/^[a-f0-9]{64}$/u.test(String(value[key] ?? ""))) {
+        throw new Error(`invalid ${key}`);
+      }
+    }
+    if (!("beforeRun" in value) || !("beforeTracks" in value) || !value.afterRun || !value.afterTracks
+        || stateHash(value.beforeRun) !== value.beforeRunHash
+        || stateHash(value.beforeTracks) !== value.beforeTracksHash
+        || stateHash(value.afterRun) !== value.afterRunHash
+        || stateHash(value.afterTracks) !== value.afterTracksHash) {
+      throw new Error("transaction payload hash mismatch");
+    }
+    return value;
+  } catch (cause) {
+    const error = /** @type {Error & { code: string, cause?: unknown }} */ (new Error(
+      `orchestration transaction is unreadable: ${filePath}`
+    ));
+    error.code = "ORCHESTRATION_TRANSACTION_CORRUPT";
+    error.cause = cause;
+    throw error;
+  }
+}
+
+function recoverRunTracksTransactionLocked(workDir, runId, paths) {
+  if (!fs.existsSync(paths.transaction)) return { recovered: false, superseded: false };
+  const intent = readTransactionStrict(paths.transaction);
+  if (intent.runId !== runId) {
+    const error = /** @type {Error & { code: string }} */ (new Error(
+      `orchestration transaction belongs to ${intent.runId || "legacy-root"}, not ${runId || "legacy-root"}`
+    ));
+    error.code = "ORCHESTRATION_TRANSACTION_CONFLICT";
+    throw error;
+  }
+  const currentRun = readJsonFileStrict(paths.run, null);
+  const currentTracks = readJsonFileStrict(paths.tracks, { tracks: [] });
+  if (!Array.isArray(currentTracks.tracks)) throw stateCorrupt(paths.tracks, new Error("tracks must be an array"));
+  const runHash = stateHash(currentRun);
+  const tracksHash = stateHash(currentTracks);
+  const runKnown = [intent.beforeRunHash, intent.afterRunHash].includes(runHash);
+  let tracksKnown = [intent.beforeTracksHash, intent.afterTracksHash].includes(tracksHash);
+  let recoveredTracks = intent.afterTracks;
+
+  // halt-track can win immediately after a writer crash: it intentionally
+  // changes only one matching dispatch while run.json remains at a known side
+  // of the transaction. Preserve those authoritative cancellations and replay
+  // the rest of the committed intent instead of wedging forever.
+  if (!tracksKnown) {
+    const beforeByTask = new Map((intent.beforeTracks?.tracks ?? []).map((track) => [track.taskId, track]));
+    const afterByTask = new Map((intent.afterTracks?.tracks ?? []).map((track) => [track.taskId, track]));
+    const current = currentTracks.tracks ?? [];
+    const currentIds = current.map((track) => track.taskId).sort();
+    const afterIds = [...afterByTask.keys()].sort();
+    if (JSON.stringify(currentIds) === JSON.stringify(afterIds)) {
+      let mergeable = true;
+      const merged = current.map((track) => {
+        const before = beforeByTask.get(track.taskId);
+        const after = afterByTask.get(track.taskId);
+        if (!after) {
+          mergeable = false;
+          return track;
+        }
+        if (stateHash(track) === stateHash(before) || stateHash(track) === stateHash(after)) {
+          return after;
+        }
+        const dispatchMatches = !track.dispatchId
+          || track.dispatchId === before?.dispatchId
+          || track.dispatchId === after?.dispatchId;
+        if (track.state === "halted" && track.cancelRequestedAt && dispatchMatches) {
+          return track;
+        }
+        mergeable = false;
+        return track;
+      });
+      if (mergeable) {
+        tracksKnown = true;
+        recoveredTracks = { ...intent.afterTracks, tracks: merged };
+      }
+    }
+  }
+
+  // A durable close intent is the commit point. If a concurrent halt-track
+  // changed the pre-close document after the crash, replaying the empty terminal
+  // track set is safe only when no durable worker identity is live.
+  if (!tracksKnown
+      && runKnown
+      && intent.afterRun?.phase === "done"
+      && (intent.afterTracks?.tracks ?? []).length === 0
+      && !findLiveTrackedWorker(workDir, runId, currentTracks)) {
+    tracksKnown = true;
+    recoveredTracks = intent.afterTracks;
+  }
+
+  // A halt that won after the writer crashed must never be overwritten by
+  // replaying an older dispatch/close intent. Its terminal run state supersedes
+  // the incomplete transaction; track-level halt settlement remains authoritative.
+  if (!runKnown && isTerminalRunPhase(currentRun?.phase)) {
+    removeFileDurableSync(paths.transaction);
+    return { recovered: false, superseded: true, run: currentRun, tracksDoc: currentTracks };
+  }
+  if (!runKnown || !tracksKnown) {
+    const error = /** @type {Error & { code: string }} */ (new Error(
+      `orchestration transaction conflicts with newer run/track state: ${paths.transaction}`
+    ));
+    error.code = "ORCHESTRATION_TRANSACTION_CONFLICT";
+    throw error;
+  }
+
+  writeJsonFileDurableAtomicSync(paths.tracks, recoveredTracks);
+  writeJsonFileDurableAtomicSync(paths.run, intent.afterRun);
+  removeFileDurableSync(paths.transaction);
+  return { recovered: true, superseded: false, run: intent.afterRun, tracksDoc: recoveredTracks };
+}
+
+/**
+ * Replay a crash-interrupted run/tracks publication. The durable intent is
+ * written before either state file and removed only after both directory-sync.
+ */
+export async function recoverRunTracksTransaction(workDir, runId = "") {
+  if (runId) assertSafeRunId(runId);
+  ensureOrchestrationDir(workDir, runId);
+  const paths = orchestrationPaths(workDir, runId);
+  return withPilotFileLock(paths.transaction, () => (
+    withPilotFileLock(paths.run, () => (
+      withPilotFileLock(paths.tracks, () => recoverRunTracksTransactionLocked(workDir, runId, paths))
+    ))
+  ));
+}
+
+/**
+ * Publish run.json and tracks.json as one recoverable logical transaction.
+ * The callback executes while both state locks are held and may return null to
+ * reject a stale compare-and-swap without changing either file.
+ */
+export async function updateRunAndTracksAtomic(workDir, runId, update) {
+  if (runId) assertSafeRunId(runId);
+  ensureOrchestrationDir(workDir, runId);
+  const paths = orchestrationPaths(workDir, runId);
+  return withPilotFileLock(paths.transaction, () => (
+    withPilotFileLock(paths.run, () => (
+      withPilotFileLock(paths.tracks, async () => {
+        recoverRunTracksTransactionLocked(workDir, runId, paths);
+        const currentRun = readJsonFileStrict(paths.run, null);
+        const currentTracks = readJsonFileStrict(paths.tracks, {
+          schemaVersion: ORCHESTRATION_SCHEMA_VERSION,
+          runId: currentRun?.runId ?? runId,
+          tracks: [],
+        });
+        if (!Array.isArray(currentTracks.tracks)) throw stateCorrupt(paths.tracks, new Error("tracks must be an array"));
+        const next = await update(currentRun, currentTracks);
+        if (!next?.run || !next?.tracksDoc) {
+          return { updated: false, run: currentRun, tracksDoc: currentTracks };
+        }
+        const intent = {
+          schemaVersion: 1,
+          kind: "run-tracks",
+          transactionId: crypto.randomUUID(),
+          runId,
+          createdAt: new Date().toISOString(),
+          beforeRunHash: stateHash(currentRun),
+          beforeTracksHash: stateHash(currentTracks),
+          afterRunHash: stateHash(next.run),
+          afterTracksHash: stateHash(next.tracksDoc),
+          beforeRun: currentRun,
+          beforeTracks: currentTracks,
+          afterRun: next.run,
+          afterTracks: next.tracksDoc,
+        };
+        writeJsonFileDurableAtomicSync(paths.transaction, intent);
+        writeJsonFileDurableAtomicSync(paths.tracks, next.tracksDoc);
+        writeJsonFileDurableAtomicSync(paths.run, next.run);
+        removeFileDurableSync(paths.transaction);
+        return { updated: true, run: next.run, tracksDoc: next.tracksDoc };
+      })
+    ))
+  ));
+}
+
+export async function appendDirectiveAtomic(workDir, runId, directive) {
+  if (runId) assertSafeRunId(runId);
+  ensureOrchestrationDir(workDir, runId);
+  const { directives } = orchestrationPaths(workDir, runId);
+  return withPilotFileLock(directives, async () => {
+    const current = readJsonFileStrict(directives, {
+      schemaVersion: ORCHESTRATION_SCHEMA_VERSION,
+      runId,
+      directives: [],
+    });
+    if (!Array.isArray(current.directives)) throw stateCorrupt(directives, new Error("directives must be an array"));
+    current.directives = [...current.directives, directive];
+    writeJsonFileAtomicSync(directives, current);
+    return current;
+  });
+}
+
+/**
+ * Persist spawn liveness without overwriting concurrent track transitions.
+ * The state check and targeted update happen under the tracks-file lock, so a
+ * concurrent halt/recovery cannot be silently reverted by an older in-memory
+ * tracks document.
+ */
+export async function updateRunningTrackLiveness(workDir, runId, taskId, value = {}) {
+  // Empty runId is the supported legacy-root selector. Non-empty selectors
+  // address run-scoped state and must still pass the strict path boundary.
+  if (runId) {
+    assertSafeRunId(runId);
+  }
+  assertSafeTaskId(taskId);
+  const pid = Number(value.pid);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error(`worker process pid must be a positive integer: ${String(value.pid ?? "")}`);
+  }
+  const workerToken = String(value.workerToken ?? "");
+  if (workerToken) resolveWorkerHeartbeatPath(workDir, runId, workerToken);
+  return updateTrackAtomic(workDir, runId, taskId, (track) => {
+    if (track.state !== "running") return null;
+    if (value.dispatchId && track.dispatchId && value.dispatchId !== track.dispatchId) return null;
+    const heartbeatAt = value.heartbeatAt ?? new Date().toISOString();
+    return {
+      ...track,
+      pid,
+      dispatchId: value.dispatchId || track.dispatchId || "",
+      workerToken,
+      heartbeatFile: workerToken ? resolveWorkerHeartbeatPath(workDir, runId, workerToken) : "",
+      lastHeartbeat: heartbeatAt,
+    };
+  }).then((result) => ({
+    ...result,
+    pid: result.track?.pid ?? null,
+    lastHeartbeat: result.track?.lastHeartbeat ?? null,
+  }));
 }
 
 export async function writeCheckpoint(workDir, value, runId = "") {
@@ -485,6 +871,17 @@ export function isProcessAlive(pid) {
   }
 }
 
+export function isProcessTreeAlive(pid) {
+  if (!pid || pid <= 0) return false;
+  if (process.platform === "win32") return isProcessAlive(pid);
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
 export function assertActiveRun(run, runId) {
   if (!run) {
     const error = /** @type {Error & { code: string }} */ (
@@ -519,6 +916,8 @@ function command(label, argv, reason) {
  *   state?: { tasks?: any[] },
  *   checkpointStatus?: { stale: boolean, reason: string },
  *   halt?: boolean,
+ *   workDir?: string,
+ *   runSelector?: string,
  *   nowMs?: number,
  *   trackTimeoutMs?: number,
  * }} input
@@ -534,7 +933,6 @@ export function buildRecoveryPlan(input = {}) {
   const issues = [];
   const mutations = [];
   const nextCommands = [];
-
   if (!run) {
     issues.push({ code: "NO_ACTIVE_RUN", severity: pendingTasks > 0 ? "warning" : "info", message: "No active orchestration run exists." });
     nextCommands.push(command("Start run", ["node", "scripts/auto-pilot.mjs", "orchestrate", "init"], "Create an orchestration run before planning."));
@@ -552,25 +950,51 @@ export function buildRecoveryPlan(input = {}) {
     nextCommands.push(command("Inspect halt", ["node", "scripts/auto-pilot.mjs", "observe", "--json"], "Clear or supersede the halt directive before continuing."));
   }
 
-  if (run.locks?.executorPid && !isProcessAlive(run.locks.executorPid)) {
+  const executorAlive = Boolean(run.locks?.executorPid && isProcessAlive(run.locks.executorPid));
+  const liveTrackedWorker = input.workDir
+    ? findLiveTrackedWorker(input.workDir, input.runSelector ?? "", input.tracksDoc)
+    : tracks.find((track) => Boolean(track?.pid && isProcessAlive(track.pid))) ?? null;
+  const hasLiveOrphanWorker = Boolean(liveTrackedWorker && !executorAlive);
+  if (run.locks?.executorPid && !executorAlive) {
     issues.push({ code: "DEAD_EXECUTOR_LOCK", severity: "warning", message: `Executor pid ${run.locks.executorPid} is not alive.` });
     mutations.push({ type: "clear-executor-lock" });
   }
 
   if (input.checkpointStatus?.stale && ["plan-approved", "dispatch-queued", "running"].includes(run.phase)) {
     issues.push({ code: "STALE_CHECKPOINT", severity: "critical", message: input.checkpointStatus.reason || "checkpoint is stale" });
-    mutations.push({ type: "return-to-plan-approval", reason: input.checkpointStatus.reason || "checkpoint is stale" });
-    nextCommands.push(command("Review plan", ["node", "scripts/auto-pilot.mjs", "orchestrate", "review-plan"], "Plan context changed; review before approving again."));
+    if (executorAlive || liveTrackedWorker) {
+      nextCommands.push(command(
+        "Inspect live execution",
+        ["node", "scripts/auto-pilot.mjs", "observe", "--json"],
+        "Checkpoint context changed while a durable worker identity is still live; await or halt it before replanning."
+      ));
+    } else {
+      mutations.push({ type: "return-to-plan-approval", reason: input.checkpointStatus.reason || "checkpoint is stale" });
+      nextCommands.push(command("Review plan", ["node", "scripts/auto-pilot.mjs", "orchestrate", "review-plan"], "Plan context changed; review before approving again."));
+    }
   }
 
   for (const track of tracks) {
     if (track?.state !== "running") {
       continue;
     }
-    const startedMs = Date.parse(track.startedAt || track.lastHeartbeat || "");
-    const heartbeatAgeMs = Number.isFinite(startedMs) ? nowMs - startedMs : null;
-    const pidDead = track.pid ? !isProcessAlive(track.pid) : false;
-    const heartbeatExpired = heartbeatAgeMs !== null && heartbeatAgeMs > trackTimeoutMs;
+    // The live await-workers executor owns every running track in this run.
+    // Let it settle or cancel them instead of racing recovery against active
+    // dispatch before an individual child PID has reached durable state.
+    if (executorAlive) {
+      continue;
+    }
+    // A live worker process is authoritative liveness evidence. Recovery must
+    // never requeue it merely because the manager stopped refreshing the
+    // heartbeat; doing so would allow a sibling run to dispatch the same task
+    // while the original worker is still changing its worktree.
+    const heartbeatMs = Date.parse(track.lastHeartbeat || track.startedAt || "");
+    const heartbeatAgeMs = Number.isFinite(heartbeatMs) ? nowMs - heartbeatMs : null;
+    const pidAlive = input.workDir
+      ? isTrackWorkerAlive(input.workDir, input.runSelector ?? "", track)
+      : Boolean(track.pid && isProcessAlive(track.pid));
+    const pidDead = track.pid ? !pidAlive : false;
+    const heartbeatExpired = !pidAlive && heartbeatAgeMs !== null && heartbeatAgeMs > trackTimeoutMs;
     const sprintTask = taskById.get(track.taskId);
     if (pidDead || heartbeatExpired || ["Done", "Failed"].includes(sprintTask?.state)) {
       const reason = pidDead
@@ -581,8 +1005,20 @@ export function buildRecoveryPlan(input = {}) {
       issues.push({ code: "STALE_RUNNING_TRACK", severity: "warning", taskId: track.taskId, message: reason });
       mutations.push(
         !["Done", "Failed"].includes(sprintTask?.state) && (pidDead || heartbeatExpired)
-          ? { type: "requeue-track", taskId: track.taskId, resultAction: "recovered-stale-track", reason }
-          : { type: "settle-track", taskId: track.taskId, resultAction: "recovered-stale-track", reason }
+          ? {
+            type: "requeue-track",
+            taskId: track.taskId,
+            expectedDispatchId: track.dispatchId ?? "",
+            resultAction: "recovered-stale-track",
+            reason,
+          }
+          : {
+            type: "settle-track",
+            taskId: track.taskId,
+            expectedDispatchId: track.dispatchId ?? "",
+            resultAction: "recovered-stale-track",
+            reason,
+          }
       );
     }
   }
@@ -612,8 +1048,12 @@ export function buildRecoveryPlan(input = {}) {
         nextCommands.push(command("Dispatch", ["node", "scripts/auto-pilot.mjs", "orchestrate", "dispatch"], "Approved plan is ready to dispatch."));
         break;
       case "dispatch-queued":
-      case "running":
         nextCommands.push(command("Await workers", ["node", "scripts/auto-pilot.mjs", "orchestrate", "await-workers"], "Queued or running tracks need synchronization."));
+        break;
+      case "running":
+        nextCommands.push(hasLiveOrphanWorker || executorAlive
+          ? command("Observe workers", ["node", "scripts/auto-pilot.mjs", "observe", "--json"], "A worker or executor is still live; observe or halt it before recovery.")
+          : command("Recover workers", ["node", "scripts/auto-pilot.mjs", "orchestrate", "recover", "--apply"], "The executor is gone; recover stale tracks before awaiting again."));
         break;
       case "awaiting-commit-approval":
         nextCommands.push(command("Approve commit", ["node", "scripts/auto-pilot.mjs", "orchestrate", "approve-commit", "--tasks", "<ids>"], "Completed tasks need commit approval."));

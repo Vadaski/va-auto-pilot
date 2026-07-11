@@ -30,7 +30,11 @@ import {
   resolveEvalHistoryFile,
   summarizeEvalHistory,
 } from "./lib/eval-history.mjs";
-import { DEFAULT_SPRINT_BOARD_TIMEOUT_MS, DEFAULT_TASK_CLAIM_TTL_MS } from "./lib/constants.mjs";
+import {
+  DEFAULT_LEARNED_CONSTRAINT_HALF_LIFE_DAYS,
+  DEFAULT_SPRINT_BOARD_TIMEOUT_MS,
+  DEFAULT_TASK_CLAIM_TTL_MS,
+} from "./lib/constants.mjs";
 import {
   VALID_STATES,
   PRIORITY_WEIGHT,
@@ -1238,6 +1242,12 @@ function buildSynthesizedConstraintDocument(entry, task, resolution) {
   return {
     id: [slugify(task.id), slugify(entry.id), slugify(domain)].filter(Boolean).join("-"),
     type: "auto-pilot-constraint-set",
+    governance: {
+      origin: "pitfall",
+      status: "probation",
+      learnedAt: String(entry.resolvedAt ?? entry.createdAt ?? ""),
+      halfLifeDays: DEFAULT_LEARNED_CONSTRAINT_HALF_LIFE_DAYS,
+    },
     payload: {
       domain,
       tags: [...new Set(tags)],
@@ -2309,7 +2319,14 @@ async function main() {
     }
 
     // default: add a new pitfall entry
-    const entry = addPitfall(pitfallsFile, parsed.options);
+    /** @type {PitfallRecord | null} */
+    let entry = null;
+    await withPilotFileLock(pitfallsFile, async () => {
+      entry = addPitfall(pitfallsFile, parsed.options);
+    });
+    if (!entry) {
+      throw new Error("Pitfall add did not produce an entry.");
+    }
     console.log(`Pitfall recorded: ${entry.id}`);
     console.log(`Pitfalls file: ${path.relative(process.cwd(), pitfallsFile)}`);
     return;

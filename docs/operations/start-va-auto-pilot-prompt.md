@@ -71,7 +71,9 @@ node scripts/auto-pilot.mjs orchestrate recover --json
 ```
 
 Apply only conservative recovery mutations with `--apply` after inspecting the
-plan.
+plan. Spawn workers cross a READY→persist→GO barrier; `run.json` and
+`tracks.json` publish through a durable hash-checked transaction intent, while
+corrupt state or ambiguous worker identity fails closed.
 
 Tactical changes: `node scripts/auto-pilot.mjs intervene ...` → `.va-auto-pilot/orchestration/directives.json` (not human-board).
 

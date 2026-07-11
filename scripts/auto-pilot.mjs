@@ -157,7 +157,8 @@ function isMainModule() {
 
 if (isMainModule()) {
   main().catch((error) => {
-    console.error(`auto-pilot error: ${error.message}`);
+    const code = error?.code ? ` [${error.code}]` : "";
+    console.error(`auto-pilot error${code}: ${error.message}`);
     process.exit(1);
   });
 }

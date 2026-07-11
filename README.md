@@ -66,7 +66,7 @@ That is the bet.
 ### Guarding against weaknesses
 
 - **Evidence gates prevent hallucination** — CLI commands produce objective pass/fail signals that the model cannot argue around. "I think it's done" is not the same as "it is done." The gates catch obvious placeholder cheating and force observable evidence; they do not cryptographically prove that a test is meaningful.
-- **Pitfall compounding prevents repeated mistakes** — Structured failure metadata from past runs is injected into future delegations as hard constraints. The system gets harder to fool over time.
+- **Pitfall compounding prevents repeated mistakes** — Unresolved failures are injected into relevant delegations. Rules synthesized from a resolved pitfall enter probation first, so one noisy resolution cannot silently become a permanent hard constraint.
 - **Adversarial review breaks self-validation loops** — A fresh-context reviewer sees only the diff, never the intent. This structurally prevents the most common autonomous loop failure: growing confidence in growing errors.
 
 > **One sentence:** Trust the model's reasoning power; use deterministic mechanisms to catch its blind spots.
@@ -79,7 +79,9 @@ VA Auto-Pilot is a **sprint execution engine** — it runs the autonomous engine
 
 VA Auto-Pilot can run standalone. It can also operate as a reference engine / managed agent for va-agent-protocol. The protocol is the task contract; Auto-Pilot is one execution engine that satisfies it.
 
-The event-driven Colony dispatcher in `scripts/lib/colony-bridge.mjs` optionally uses `va-agent-protocol` when it can be resolved — in priority order: the `VA_AGENT_PROTOCOL_PATH` env var, an installed `va-agent-protocol` npm package, or a local sibling checkout. If none resolves, Auto-Pilot falls back to raw agent spawn, so the loop runs with zero extra install and no monorepo layout required.
+The event-driven Colony dispatcher in `scripts/lib/colony-bridge.mjs` optionally uses `va-agent-protocol` when it can be resolved — in priority order: the `VA_AGENT_PROTOCOL_PATH` env var, an installed `va-agent-protocol` npm package, or a local sibling checkout. Legacy/direct Colony surfaces retain that routing. Orchestrated `await-workers` currently forces the crash-safe spawn lifecycle so it can persist a real PID/token before GO, own the worker deadline, and recover without duplicate execution; Colony routing is not silently used on that surface.
+
+Long-running orchestration publishes `run.json` and `tracks.json` through a durable, hash-checked transaction intent. Corrupt control files and ambiguous post-GO launches fail closed. Spawn containment covers the launcher/worker process groups and Windows process trees, but a hostile command can deliberately create a new POSIX session (`setsid`/detached daemon) and escape that best-effort boundary; worker commands must not daemonize.
 
 MCP and A2A are complementary connection layers. VA Auto-Pilot sits above connection and messaging: it governs how long-running engineering work is decomposed, executed, reviewed, recovered, and accepted.
 
@@ -126,7 +128,7 @@ Every sprint ends with a fresh-context adversarial reviewer who has seen only th
 
 ### 6. Failure knowledge compounds
 
-The pitfall guide captures structured failure metadata — not just error strings, but hypotheses and missing context. Future delegations inject relevant pitfalls as hard constraints. The system gets harder to fool over time.
+The pitfall guide captures structured failure metadata — not just error strings, but hypotheses and missing context. Relevant unresolved pitfalls become hard constraints; rules learned from resolved pitfalls enter probation and require explicit promotion. The system compounds validated knowledge without turning every historical failure into permanent prompt debt.
 
 ---
 

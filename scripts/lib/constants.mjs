@@ -38,6 +38,9 @@ export const DEFAULT_COMMIT_INDEX_LOCK_TIMEOUT_MS = 5_000;
 /** Default number of parallel tracks dispatched by the orchestrator. */
 export const DEFAULT_MAX_PARALLEL = 3;
 
+/** Metadata default reserved for a future learned-constraint decay policy. */
+export const DEFAULT_LEARNED_CONSTRAINT_HALF_LIFE_DAYS = 90;
+
 // ---------------------------------------------------------------------------
 // Task scope / routing thresholds
 // ---------------------------------------------------------------------------

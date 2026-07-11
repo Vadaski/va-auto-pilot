@@ -2,15 +2,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { autoCommitTask } from "../scripts/auto-pilot-loop.mjs";
 import {
   assertCleanIntegrationTree,
   buildCommitApprovalManifest,
   collectEvidenceBundleFiles,
+  persistSettledWorkerTrack,
   recoverDeadRunClaims,
   selectCommitReadyTasks,
   settleWorkerTrackOutcome,
@@ -21,9 +22,14 @@ import { ColonyBridge } from "../scripts/lib/colony-bridge.mjs";
 import { acquireLock, releaseLock } from "../scripts/lib/doc-store/locking.mjs";
 import {
   buildCheckpoint,
+  buildRecoveryPlan,
   isCheckpointStale,
+  isTrackWorkerSignalSafe,
+  orchestrationPaths,
   readActiveRuns,
   resolveOrchestrationDir,
+  resolveWorkerHeartbeatPath,
+  updateRunningTrackLiveness,
   writeActiveRun,
   writeDirectives,
   writeRun,
@@ -45,6 +51,30 @@ function runNode(cwd, script, args) {
   return spawnSync(process.execPath, [script, ...args], { cwd, encoding: "utf8" });
 }
 
+function runNodeAsync(cwd, script, args) {
+  const child = spawn(process.execPath, [script, ...args], {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    child.on("close", (status, signal) => resolve({ status, signal, stdout, stderr }));
+  });
+}
+
+async function waitForCondition(predicate, timeoutMs = 30_000) {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`condition was not met within ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 function writeState(root, tasks) {
   const stateFile = path.join(root, ".va-auto-pilot", "sprint-state.json");
   fs.mkdirSync(path.dirname(stateFile), { recursive: true });
@@ -58,6 +88,189 @@ test("run and task identifiers cannot escape their managed roots", () => {
   assert.throws(() => taskEvidenceBundleDir(root, "run-safe", "/tmp/escaped-task"), /Invalid task ID/);
   assert.equal(normalizeTask({ id: "历史:任务/一", title: "legacy" }).id, "历史:任务/一");
   assert.throws(() => taskEvidenceBundleDir(root, "run-safe", "AP..001"), /Invalid task ID/);
+});
+
+test("worker liveness persists for the supported legacy-root run selector", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-root-run-liveness-"));
+  await writeTracks(root, {
+    runId: "generated-root-run",
+    tracks: [{ taskId: "AP-001", state: "running", pid: null, lastHeartbeat: null }],
+  });
+
+  const heartbeatAt = "2026-07-09T00:00:00.000Z";
+  const result = await updateRunningTrackLiveness(root, "", "AP-001", {
+    pid: process.pid,
+    heartbeatAt,
+  });
+  assert.equal(result.updated, true);
+
+  const stored = JSON.parse(fs.readFileSync(
+    path.join(root, ".va-auto-pilot", "orchestration", "tracks.json"),
+    "utf8"
+  ));
+  assert.equal(stored.tracks[0].pid, process.pid);
+  assert.equal(stored.tracks[0].lastHeartbeat, heartbeatAt);
+
+  await writeTracks(root, {
+    runId: "generated-root-run",
+    tracks: [{ taskId: "AP-001", dispatchId: "new-attempt", state: "running", pid: null }],
+  });
+  const stale = await updateRunningTrackLiveness(root, "", "AP-001", {
+    pid: process.pid,
+    dispatchId: "old-attempt",
+    heartbeatAt,
+  });
+  assert.equal(stale.updated, false);
+  const afterStale = JSON.parse(fs.readFileSync(
+    path.join(root, ".va-auto-pilot", "orchestration", "tracks.json"),
+    "utf8"
+  ));
+  assert.equal(afterStale.tracks[0].pid, null);
+});
+
+test("fresh mismatched worker heartbeat never authorizes process signalling", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-worker-signal-identity-"));
+  const runId = "run-signal-identity";
+  const workerToken = "11111111-1111-4111-8111-111111111111";
+  const heartbeatFile = resolveWorkerHeartbeatPath(root, runId, workerToken);
+  fs.mkdirSync(path.dirname(heartbeatFile), { recursive: true });
+  fs.writeFileSync(heartbeatFile, `${JSON.stringify({
+    token: "22222222-2222-4222-8222-222222222222",
+    launcherPid: process.pid,
+    state: "running",
+    updatedAt: new Date().toISOString(),
+  }, null, 2)}\n`);
+
+  assert.equal(isTrackWorkerSignalSafe(root, runId, {
+    pid: process.pid,
+    workerToken,
+  }), false);
+});
+
+test("halt-run retries termination for a halted track with durable live identity", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("the regression uses POSIX process groups");
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-halt-retry-"));
+  const runId = "run-halt-retry";
+  const workerToken = "33333333-3333-4333-8333-333333333333";
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    cwd: root,
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  t.after(() => {
+    try { process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ }
+  });
+  await waitForCondition(() => {
+    try { process.kill(child.pid, 0); return true; } catch { return false; }
+  });
+
+  writeState(root, [{
+    id: "AP-001",
+    title: "halt retry",
+    priority: "P1",
+    state: "Backlog",
+    claimedBy: runId,
+    claimedAt: new Date().toISOString(),
+    claimExpiresAt: "2099-01-01T00:00:00.000Z",
+    dependsOn: [],
+  }]);
+  await writeRun(root, {
+    schemaVersion: 1,
+    runId,
+    phase: "halted",
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }, runId);
+  const heartbeatFile = resolveWorkerHeartbeatPath(root, runId, workerToken);
+  fs.mkdirSync(path.dirname(heartbeatFile), { recursive: true });
+  fs.writeFileSync(heartbeatFile, `${JSON.stringify({
+    token: workerToken,
+    launcherPid: child.pid,
+    childPid: null,
+    state: "running",
+    updatedAt: new Date().toISOString(),
+  }, null, 2)}\n`);
+  await writeTracks(root, {
+    schemaVersion: 1,
+    runId,
+    tracks: [{
+      taskId: "AP-001",
+      dispatchId: "dispatch-halt-retry",
+      state: "halted",
+      cancelRequestedAt: new Date().toISOString(),
+      pid: child.pid,
+      workerToken,
+      heartbeatFile,
+      resultStatus: "cancelled",
+      resultAction: "halted",
+      approvalFiles: [],
+    }],
+  }, runId);
+  await writeDirectives(root, {
+    schemaVersion: 1,
+    runId,
+    directives: [{ type: "halt-run", halt: true, at: new Date().toISOString() }],
+  }, runId);
+
+  const retry = await runNodeAsync(root, AUTO_PILOT, [
+    "intervene", "halt-run", "--run-id", runId, "--json",
+  ]);
+  assert.equal(retry.status, 0, retry.stderr);
+  const payload = JSON.parse(retry.stdout);
+  assert.equal(payload.claimReleaseDeferred, false);
+  assert.equal(payload.claimsReleased, true);
+  await waitForCondition(() => {
+    try { process.kill(child.pid, 0); return false; } catch { return true; }
+  });
+  const storedTrack = JSON.parse(fs.readFileSync(orchestrationPaths(root, runId).tracks, "utf8")).tracks[0];
+  assert.equal(storedTrack.pid, null);
+  assert.equal(storedTrack.workerToken, "");
+  assert.equal(JSON.parse(fs.readFileSync(
+    path.join(root, ".va-auto-pilot", "sprint-state.json"),
+    "utf8"
+  )).tasks[0].claimedBy, "");
+});
+
+test("worker settlement preserves a concurrent halt and clears active PID identity", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-halt-settlement-"));
+  const runId = "run-halt-settlement";
+  await writeTracks(root, {
+    runId,
+    tracks: [{
+      taskId: "AP-001",
+      dispatchId: "dispatch-1",
+      state: "halted",
+      cancelRequestedAt: "2026-07-09T00:00:00.000Z",
+      pid: 12345,
+      workerToken: "11111111-1111-4111-8111-111111111111",
+      approvalFiles: [],
+    }],
+  }, runId);
+
+  const persisted = await persistSettledWorkerTrack({ workDir: root, runId }, {
+    taskId: "AP-001",
+    dispatchId: "dispatch-1",
+    state: "settled",
+    pid: null,
+    workerToken: "",
+    heartbeatFile: "",
+    lastWorker: { pid: 12345, dispatchId: "dispatch-1" },
+    resultStatus: "succeeded",
+    resultAction: "awaiting-commit-approval",
+    approvalFiles: ["AP-001.txt"],
+    lastHeartbeat: "2026-07-09T00:00:01.000Z",
+  });
+
+  assert.equal(persisted.state, "halted");
+  assert.equal(persisted.pid, null);
+  assert.equal(persisted.workerToken, "");
+  assert.equal(persisted.resultStatus, "cancelled");
+  assert.deepEqual(persisted.approvalFiles, []);
+  assert.equal(persisted.lastWorker.pid, 12345);
 });
 
 test("permission heuristics cannot allow destructive variants before opt-in", () => {
@@ -107,6 +320,31 @@ test("plan review requires one unambiguous final PASS marker", async () => {
   const passed = await runReviewer("console.log('WARNING: non-blocking\\nPLAN REVIEW STATUS: PASS');\n");
   assert.equal(passed.status, "PASS");
   assert.equal(passed.passed, true);
+
+  const stdoutPassWithDiagnostics = await runReviewer([
+    "console.log('PLAN REVIEW STATUS: PASS');",
+    "console.error('tokens used\\n9,195');",
+    "",
+  ].join("\n"));
+  assert.equal(stdoutPassWithDiagnostics.status, "PASS");
+  assert.equal(stdoutPassWithDiagnostics.passed, true);
+
+  const conflictingStreams = await runReviewer([
+    "console.log('PLAN REVIEW STATUS: PASS');",
+    "console.error('PLAN REVIEW STATUS: FAIL\\ntokens used: 9,195');",
+    "",
+  ].join("\n"));
+  assert.equal(conflictingStreams.status, null);
+  assert.equal(conflictingStreams.passed, false);
+
+  const conflictingCarriageReturn = await runReviewer([
+    "console.log('PLAN REVIEW STATUS: PASS');",
+    "process.stderr.write('PLAN REVIEW STATUS: FAIL\\rdiagnostic');",
+    "",
+  ].join("\n"));
+  assert.equal(conflictingCarriageReturn.status, null);
+  assert.equal(conflictingCarriageReturn.passed, false);
+
   assert.equal(validatePlanReviewForApprove({
     review: { ...passed, status: undefined },
     candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
@@ -179,6 +417,87 @@ test("a zero-config root run is promoted before a scoped sibling is created", ()
   );
 });
 
+test("legacy-root promotion cannot snapshot a live root executor", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-root-promotion-busy-"));
+  const first = runNode(root, AUTO_PILOT, ["orchestrate", "init", "--json"]);
+  assert.equal(first.status, 0, first.stderr);
+  const firstRun = JSON.parse(first.stdout).run;
+  const lockTarget = `${orchestrationPaths(root).run}.executor`;
+
+  await withPilotFileLock(lockTarget, async () => {
+    const blocked = runNode(root, AUTO_PILOT, [
+      "orchestrate", "init", "--workspace", "default", "--json",
+    ]);
+    assert.notEqual(blocked.status, 0);
+    assert.equal(fs.existsSync(path.join(
+      root,
+      ".va-auto-pilot",
+      "orchestration",
+      "runs",
+      firstRun.runId,
+      "run.json"
+    )), false);
+  });
+
+  const promoted = runNode(root, AUTO_PILOT, [
+    "orchestrate", "init", "--workspace", "default", "--json",
+  ]);
+  assert.equal(promoted.status, 0, promoted.stderr);
+  const tombstone = JSON.parse(fs.readFileSync(orchestrationPaths(root).run, "utf8"));
+  assert.equal(tombstone.phase, "migrated");
+  assert.equal(tombstone.migratedTo, firstRun.runId);
+});
+
+test("legacy-root promotion rejects an orphan worker whose launcher is still alive", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-root-promotion-worker-"));
+  const first = runNode(root, AUTO_PILOT, ["orchestrate", "init", "--json"]);
+  assert.equal(first.status, 0, first.stderr);
+  const firstRun = JSON.parse(first.stdout).run;
+  await writeTracks(root, {
+    runId: firstRun.runId,
+    tracks: [{ taskId: "AP-001", state: "running", pid: process.pid, lastHeartbeat: new Date().toISOString() }],
+  });
+
+  const blocked = runNode(root, AUTO_PILOT, [
+    "orchestrate", "init", "--workspace", "default", "--json",
+  ]);
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.stderr, /LEGACY_RUN_BUSY/);
+  assert.equal(fs.existsSync(path.join(
+    root,
+    ".va-auto-pilot",
+    "orchestration",
+    "runs",
+    firstRun.runId,
+    "run.json"
+  )), false);
+
+  await writeTracks(root, { runId: firstRun.runId, tracks: [] });
+  const promoted = runNode(root, AUTO_PILOT, [
+    "orchestrate", "init", "--workspace", "default", "--json",
+  ]);
+  assert.equal(promoted.status, 0, promoted.stderr);
+});
+
+test("legacy-root promotion repairs a partial scoped copy before tombstoning root", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-root-promotion-partial-"));
+  const first = runNode(root, AUTO_PILOT, ["orchestrate", "init", "--json"]);
+  assert.equal(first.status, 0, first.stderr);
+  const firstRun = JSON.parse(first.stdout).run;
+  const scoped = orchestrationPaths(root, firstRun.runId);
+  fs.mkdirSync(scoped.dir, { recursive: true });
+  fs.writeFileSync(scoped.run, JSON.stringify({ runId: firstRun.runId, phase: "partial" }));
+
+  const promoted = runNode(root, AUTO_PILOT, [
+    "orchestrate", "init", "--workspace", "default", "--json",
+  ]);
+  assert.equal(promoted.status, 0, promoted.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(scoped.run, "utf8")).phase, firstRun.phase);
+  assert.equal(fs.existsSync(scoped.tracks), true);
+  assert.equal(fs.existsSync(path.join(scoped.dir, "legacy-promotion-complete.json")), true);
+  assert.equal(JSON.parse(fs.readFileSync(orchestrationPaths(root).run, "utf8")).phase, "migrated");
+});
+
 test("run-scoped commands rebind to the workspace persisted by init", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-workspace-rebind-"));
   const init = runNode(root, AUTO_PILOT, [
@@ -198,6 +517,64 @@ test("run-scoped commands rebind to the workspace persisted by init", () => {
   assert.equal(JSON.parse(plan.stdout).candidatePlan.primaryTaskId, "AP-001");
   const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   assert.equal(state.tasks[0].claimedBy, "run-feature");
+});
+
+test("a plan losing publication to halt compensates its late task claim", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-plan-halt-claim-race-"));
+  const runId = "run-plan-halt-race";
+  const stateFile = writeState(root, [{
+    id: "AP-001",
+    title: "late plan claim",
+    priority: "P1",
+    state: "Backlog",
+    dependsOn: [],
+  }]);
+  const init = runNode(root, AUTO_PILOT, [
+    "orchestrate", "init", "--run-id", runId, "--json",
+  ]);
+  assert.equal(init.status, 0, init.stderr);
+  const paths = orchestrationPaths(root, runId);
+  const activePath = orchestrationPaths(root).active;
+  const initialHeartbeat = JSON.parse(fs.readFileSync(activePath, "utf8")).runs
+    .find((entry) => entry.runId === runId)?.heartbeatAt;
+  let planCompletion;
+  let stateLock = await acquireLock(`${path.resolve(stateFile)}.lock`);
+
+  try {
+    planCompletion = runNodeAsync(root, AUTO_PILOT, [
+      "orchestrate", "plan", "--run-id", runId, "--json",
+    ]);
+    await waitForCondition(() => {
+      const active = JSON.parse(fs.readFileSync(activePath, "utf8"));
+      return active.runs.find((entry) => entry.runId === runId)?.heartbeatAt !== initialHeartbeat;
+    });
+    await withPilotFileLock(paths.run, async () => {
+      await releaseLock(stateLock);
+      stateLock = null;
+      await waitForCondition(() => {
+        const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+        return state.tasks[0].claimedBy === runId;
+      });
+      const current = JSON.parse(fs.readFileSync(paths.run, "utf8"));
+      fs.writeFileSync(paths.run, `${JSON.stringify({
+        ...current,
+        phase: "halted",
+        updatedAt: new Date().toISOString(),
+      }, null, 2)}\n`);
+      await writeDirectives(root, {
+        schemaVersion: 1,
+        runId,
+        directives: [{ type: "halt-run", halt: true, at: new Date().toISOString() }],
+      }, runId);
+    });
+  } finally {
+    if (stateLock) await releaseLock(stateLock);
+  }
+
+  const result = await planCompletion;
+  assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(JSON.parse(result.stderr).error.code, "RUN_STATE_CHANGED");
+  assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).tasks[0].claimedBy, "");
 });
 
 test("dead-run recovery releases claims from each run's persisted workspace", async () => {
@@ -569,6 +946,311 @@ test("recovery requeues a stale pending worker into an awaitable phase", () => {
   assert.equal(recoveredRun.phase, "dispatch-queued");
   assert.equal(tracks.tracks[0].state, "queued");
   assert.equal(tracks.tracks[0].pid, null);
+});
+
+test("recover --apply cannot race an active await-workers executor", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-recover-executor-lock-"));
+  const runId = "run-recover-busy";
+  writeState(root, []);
+  fs.mkdirSync(path.join(root, "docs", "todo"), { recursive: true });
+  fs.writeFileSync(path.join(root, "docs", "todo", "human-board.md"), "# Human Board\n\n## Instructions\n\n");
+  fs.writeFileSync(path.join(root, "docs", "todo", "run-journal.md"), "# Run Journal\n\n");
+  await writeRun(root, {
+    schemaVersion: 1,
+    runId,
+    phase: "running",
+    locks: { executorPid: process.pid },
+    workspace: { name: "default", type: "shared", executionTree: "shared" },
+  }, runId);
+  await writeTracks(root, { runId, tracks: [] }, runId);
+
+  const lockTarget = `${orchestrationPaths(root, runId).run}.executor`;
+  await withPilotFileLock(lockTarget, async () => {
+    const result = runNode(root, AUTO_PILOT, [
+      "orchestrate", "recover", "--run-id", runId, "--apply", "--json",
+    ]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /RECOVERY_BUSY/);
+  });
+});
+
+test("await-workers persists a live child pid before settlement and recovery preserves its claim", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("the fixture's quality-gate commands use POSIX shell utilities");
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-live-worker-persistence-"));
+  const runId = "run-live-worker";
+  const readyFile = path.join(os.tmpdir(), `va-worker-ready-${process.pid}-${Date.now()}`);
+  const releaseFile = `${readyFile}.release`;
+  const worker = path.join(root, "worker.mjs");
+  fs.mkdirSync(path.join(root, ".va-auto-pilot"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs", "todo"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".gitignore"), [
+    ".va-auto-pilot/orchestration/",
+    ".va-auto-pilot/parallel-runs/",
+    ".va/worktrees/",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(path.join(root, ".va-auto-pilot", "config.yaml"), [
+    "version: 1",
+    "projectPrefix: AP",
+    "sprint:",
+    "  stateFile: .va-auto-pilot/sprint-state.json",
+    "  boardFile: docs/todo/sprint.md",
+    "  runJournalFile: docs/todo/run-journal.md",
+    "qualityGate:",
+    "  buildCommand: test -f AP-001.txt",
+    "  reviewCommand: /bin/echo REVIEW_STATUS_PASS",
+    "  acceptanceTestCommand: test -f AP-001.txt",
+    "  planReviewCommand: \"/bin/echo 'PLAN REVIEW STATUS: PASS'\"",
+    "",
+  ].join("\n"));
+  writeState(root, [{
+    id: "AP-001",
+    title: "persist live worker pid",
+    priority: "P1",
+    state: "Backlog",
+    owner: "",
+    source: "live-worker-regression",
+    createdAt: "2026-07-09",
+    failCount: 0,
+    verification: "AP-001.txt exists",
+    notes: "worker waits until the recovery assertions finish",
+    permissionPolicy: {
+      schemaVersion: 1,
+      fileScopes: [{ path: "AP-001.txt", access: "read-write", reason: "worker artifact" }],
+      commands: { allow: [], deny: [], destructiveRequiresOptIn: true, destructiveAllow: [] },
+      network: { mode: "none", allowlist: [] },
+      review: { warnOnOutOfScopeDiff: true },
+    },
+    review: {},
+    testing: {},
+    dependsOn: [],
+  }]);
+  fs.writeFileSync(path.join(root, "docs", "todo", "human-board.md"), "# Human Board\n\n## Instructions\n\n");
+  fs.writeFileSync(path.join(root, "docs", "todo", "run-journal.md"), "# Run Journal\n\n");
+  fs.writeFileSync(worker, [
+    "import fs from 'node:fs';",
+    `const ready = ${JSON.stringify(readyFile)};`,
+    `const release = ${JSON.stringify(releaseFile)};`,
+    "fs.writeFileSync(ready, String(process.pid));",
+    "while (!fs.existsSync(release)) await new Promise((resolve) => setTimeout(resolve, 20));",
+    "fs.writeFileSync('AP-001.txt', 'done\\n');",
+    "",
+  ].join("\n"));
+
+  const git = (args) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  assert.equal(runNode(root, SPRINT_BOARD, ["render"]).status, 0);
+  assert.equal(git(["init", "-q"]).status, 0);
+  assert.equal(git(["config", "user.email", "test@example.invalid"]).status, 0);
+  assert.equal(git(["config", "user.name", "Test"]).status, 0);
+  assert.equal(git(["add", "."]).status, 0);
+  assert.equal(git(["commit", "-qm", "seed"]).status, 0);
+
+  for (const args of [
+    ["orchestrate", "init", "--run-id", runId, "--shared-tree", "--json"],
+    ["orchestrate", "plan", "--run-id", runId, "--json"],
+    ["orchestrate", "review-plan", "--run-id", runId, "--json"],
+    ["orchestrate", "approve-plan", "--run-id", runId, "--json"],
+    ["orchestrate", "dispatch", "--run-id", runId, "--json"],
+  ]) {
+    const result = runNode(root, AUTO_PILOT, args);
+    assert.equal(result.status, 0, `${args.join(" ")}\n${result.stderr}`);
+  }
+
+  const awaitProcess = spawn(process.execPath, [
+    AUTO_PILOT,
+    "orchestrate", "await-workers",
+    "--run-id", runId,
+    "--no-colony",
+    "--agent-template", `node ${worker}`,
+    "--track-timeout", "60000",
+    "--json",
+  ], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+  let awaitStdout = "";
+  let awaitStderr = "";
+  awaitProcess.stdout.on("data", (chunk) => { awaitStdout += chunk.toString(); });
+  awaitProcess.stderr.on("data", (chunk) => { awaitStderr += chunk.toString(); });
+  const awaitCompletion = new Promise((resolve) => {
+    awaitProcess.on("close", (code, signal) => resolve({ code, signal }));
+  });
+
+  try {
+    const runFile = path.join(root, ".va-auto-pilot", "orchestration", "runs", runId, "run.json");
+    const tracksFile = path.join(root, ".va-auto-pilot", "orchestration", "runs", runId, "tracks.json");
+    await waitForCondition(() => {
+      if (!fs.existsSync(readyFile) || !fs.existsSync(tracksFile)) return false;
+      const tracksDoc = JSON.parse(fs.readFileSync(tracksFile, "utf8"));
+      return Number.isInteger(tracksDoc.tracks?.[0]?.pid) && tracksDoc.tracks[0].pid > 0;
+    });
+
+    const liveRun = JSON.parse(fs.readFileSync(runFile, "utf8"));
+    const liveTracks = JSON.parse(fs.readFileSync(tracksFile, "utf8"));
+    const persistedPid = liveTracks.tracks[0].pid;
+    assert.doesNotThrow(() => process.kill(persistedPid, 0));
+
+    const orphanRecovery = buildRecoveryPlan({
+      run: { ...liveRun, locks: { executorPid: 999_999_999 } },
+      tracksDoc: liveTracks,
+      state: JSON.parse(fs.readFileSync(path.join(root, ".va-auto-pilot", "sprint-state.json"), "utf8")),
+      checkpointStatus: { stale: false, reason: "" },
+      nowMs: Date.now() + 120_000,
+      trackTimeoutMs: 1,
+    });
+    assert.equal(orphanRecovery.mutations.some((mutation) => mutation.type === "requeue-track"), false);
+
+    const prePidTracks = JSON.parse(JSON.stringify(liveTracks));
+    prePidTracks.tracks[0].pid = null;
+    prePidTracks.tracks[0].lastHeartbeat = "2020-01-01T00:00:00.000Z";
+    const executorOwnedRecovery = buildRecoveryPlan({
+      run: liveRun,
+      tracksDoc: prePidTracks,
+      state: JSON.parse(fs.readFileSync(path.join(root, ".va-auto-pilot", "sprint-state.json"), "utf8")),
+      checkpointStatus: { stale: false, reason: "" },
+      nowMs: Date.now() + 120_000,
+      trackTimeoutMs: 1,
+    });
+    assert.equal(executorOwnedRecovery.mutations.some((mutation) => mutation.type === "requeue-track"), false);
+
+    await writeActiveRun(root, {
+      runId,
+      startedAt: "2020-01-01T00:00:00.000Z",
+      heartbeatAt: "2020-01-01T00:00:00.000Z",
+    });
+    const claimRecovery = await recoverDeadRunClaims({
+      workDir: root,
+      stateFile: path.join(root, ".va-auto-pilot", "sprint-state.json"),
+      boardFile: path.join(root, "docs", "todo", "sprint.md"),
+      journalFile: path.join(root, "docs", "todo", "run-journal.md"),
+      pitfallsFile: path.join(root, ".va-auto-pilot", "pitfalls.json"),
+      trackTimeout: 1,
+      sprintBoardLock: Promise.resolve(),
+    });
+    assert.deepEqual(claimRecovery.released, []);
+
+    const halt = runNode(root, AUTO_PILOT, [
+      "intervene", "halt-track", "--run-id", runId, "--task", "AP-001", "--json",
+    ]);
+    assert.equal(halt.status, 0, halt.stderr);
+    assert.equal(JSON.parse(halt.stdout).cancelled, true);
+  } finally {
+    fs.writeFileSync(releaseFile, "release\n");
+  }
+
+  let completionTimer;
+  const completion = await Promise.race([
+    awaitCompletion,
+    new Promise((_, reject) => {
+      completionTimer = setTimeout(() => reject(new Error("await-workers did not finish")), 60_000);
+    }),
+  ]);
+  clearTimeout(completionTimer);
+  assert.equal(completion.code, 0, `${awaitStdout}\n${awaitStderr}`);
+  const finalTracks = JSON.parse(fs.readFileSync(
+    path.join(root, ".va-auto-pilot", "orchestration", "runs", runId, "tracks.json"),
+    "utf8"
+  ));
+  assert.equal(finalTracks.tracks[0].state, "halted");
+  assert.equal(finalTracks.tracks[0].pid, null);
+  assert.equal(finalTracks.tracks[0].workerToken, "");
+  assert.equal(fs.existsSync(path.join(root, "AP-001.txt")), false);
+  fs.rmSync(readyFile, { force: true });
+  fs.rmSync(releaseFile, { force: true });
+});
+
+test("worker launcher never executes the agent when its manager dies before PID persistence", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("the regression uses SIGKILL to simulate a hard manager crash");
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-worker-barrier-crash-"));
+  const callbackFile = path.join(root, "callback.json");
+  const ranFile = path.join(root, "agent-ran.txt");
+  const agentFile = path.join(root, "agent.mjs");
+  const managerFile = path.join(root, "manager.mjs");
+  fs.writeFileSync(agentFile, [
+    "import fs from 'node:fs';",
+    `fs.writeFileSync(${JSON.stringify(ranFile)}, 'ran\\n');`,
+    "await new Promise((resolve) => setTimeout(resolve, 30_000));",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(managerFile, [
+    "import fs from 'node:fs';",
+    `import { ColonyBridge } from ${JSON.stringify(pathToFileURL(path.join(REPO_ROOT, "scripts", "lib", "colony-bridge.mjs")).href)};`,
+    `const bridge = new ColonyBridge({ workDir: ${JSON.stringify(root)}, useColony: false, lifecycleDir: ${JSON.stringify(path.join(root, "lifecycle"))}, onProcessStarted: async (event) => {`,
+    `  fs.writeFileSync(${JSON.stringify(callbackFile)}, JSON.stringify(event));`,
+    "  await new Promise(() => {});",
+    "} });",
+    `await bridge.dispatch({ taskId: 'AP-001', dispatchId: 'dispatch-crash', title: 'barrier', notes: '' }, ${JSON.stringify(`node ${agentFile}`)}, ${JSON.stringify(path.join(root, "worker.log"))}, 60_000);`,
+    "",
+  ].join("\n"));
+
+  const manager = spawn(process.execPath, [managerFile], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+  const managerClosed = new Promise((resolve) => manager.once("close", resolve));
+  let launcherPid = null;
+  try {
+    await waitForCondition(() => fs.existsSync(callbackFile), 30_000);
+    launcherPid = JSON.parse(fs.readFileSync(callbackFile, "utf8")).pid;
+    assert.doesNotThrow(() => process.kill(launcherPid, 0));
+    process.kill(manager.pid, "SIGKILL");
+    await managerClosed;
+    await waitForCondition(() => {
+      try {
+        process.kill(launcherPid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    }, 15_000);
+    assert.equal(fs.existsSync(ranFile), false);
+  } finally {
+    try { process.kill(manager.pid, "SIGKILL"); } catch { /* exited */ }
+    if (launcherPid) {
+      try { process.kill(-launcherPid, "SIGKILL"); } catch { /* exited */ }
+    }
+  }
+});
+
+test("halt-track never signals a PID retained on a terminal legacy track", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("the fixture cleans up a POSIX detached process group");
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-terminal-pid-halt-"));
+  fs.mkdirSync(path.join(root, ".va-auto-pilot"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs", "todo"), { recursive: true });
+  writeState(root, []);
+  fs.writeFileSync(path.join(root, "docs", "todo", "human-board.md"), "# Human Board\n\n## Instructions\n\n");
+  fs.writeFileSync(path.join(root, "docs", "todo", "run-journal.md"), "# Run Journal\n\n");
+  const sleeper = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    cwd: root,
+    detached: true,
+    stdio: "ignore",
+  });
+  try {
+    await writeRun(root, {
+      schemaVersion: 1,
+      runId: "run-terminal-pid",
+      phase: "running",
+      locks: { executorPid: null },
+      workspace: { name: "default", type: "shared", executionTree: "shared" },
+    });
+    await writeTracks(root, {
+      runId: "run-terminal-pid",
+      tracks: [{ taskId: "AP-001", state: "settled", pid: sleeper.pid, dispatchId: "old-dispatch" }],
+    });
+    const result = runNode(root, AUTO_PILOT, ["intervene", "halt-track", "--task", "AP-001", "--json"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotThrow(() => process.kill(sleeper.pid, 0));
+    const tracks = JSON.parse(fs.readFileSync(
+      path.join(root, ".va-auto-pilot", "orchestration", "tracks.json"),
+      "utf8"
+    ));
+    assert.equal(tracks.tracks[0].state, "settled");
+  } finally {
+    try { process.kill(-sleeper.pid, "SIGKILL"); } catch { /* exited */ }
+  }
 });
 
 test("rejected or mismatched worker tracks cannot enter a commit manifest", () => {

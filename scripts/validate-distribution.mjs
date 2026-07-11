@@ -5,6 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
 import { DEFAULT_VALIDATE_DISTRIBUTION_TIMEOUT_MS } from "./lib/constants.mjs";
+import { spawnBounded } from "./lib/bounded-spawn.mjs";
 
 const root = process.cwd();
 const packageJsonPath = path.join(root, "package.json");
@@ -33,6 +34,17 @@ function checkFile(relative) {
   return true;
 }
 
+function checkTextTokens(relative, tokens) {
+  if (!checkFile(relative)) return;
+  const content = fs.readFileSync(path.join(root, relative), "utf8").replace(/\s+/gu, " ");
+  for (const [token, label] of tokens) {
+    const alternatives = Array.isArray(token) ? token : [token];
+    if (!alternatives.some((value) => content.includes(String(value).replace(/\s+/gu, " ")))) {
+      fail(`${relative} missing ${label}: ${alternatives.join(" | ")}`);
+    }
+  }
+}
+
 function readJson(relative) {
   try {
     return JSON.parse(fs.readFileSync(path.join(root, relative), "utf8"));
@@ -42,15 +54,13 @@ function readJson(relative) {
   }
 }
 
-function validatePackContents() {
-  const result = spawnSync("npm", ["pack", "--dry-run", "--json"], {
-    cwd: root,
-    encoding: "utf8",
-    timeout: DEFAULT_VALIDATE_DISTRIBUTION_TIMEOUT_MS
+async function validatePackContents() {
+  const result = await spawnChecked("npm", ["pack", "--dry-run", "--json"], {
+    timeout: DEFAULT_VALIDATE_DISTRIBUTION_TIMEOUT_MS,
+    label: "npm pack --dry-run --json",
   });
 
-  if (result.status !== 0) {
-    fail(`npm pack --dry-run --json failed with exit ${result.status}: ${String(result.stderr ?? "").slice(0, 500)}`);
+  if (!result) {
     return;
   }
 
@@ -79,8 +89,10 @@ function validatePackContents() {
     "scripts/validate-mcp-resources.mjs",
     "scripts/validate-protocol-fixtures.mjs",
     "scripts/validate-runtime-proof.mjs",
+    "scripts/lib/bounded-spawn.mjs",
     "scripts/lib/sprint-utils.mjs",
     "scripts/lib/observability.mjs",
+    "scripts/lib/worker-launcher.mjs",
     "schemas/observability-event.schema.json",
     "schemas/evidence-bundle.schema.json",
     "schemas/protocol-fixture.schema.json",
@@ -146,23 +158,25 @@ function validatePackContents() {
   }
 }
 
-function spawnChecked(command, args, { cwd = root, timeout = DEFAULT_VALIDATE_DISTRIBUTION_TIMEOUT_MS, label = command } = {}) {
-  const result = spawnSync(command, args, {
+async function spawnChecked(command, args, { cwd = root, timeout = DEFAULT_VALIDATE_DISTRIBUTION_TIMEOUT_MS, label = command } = {}) {
+  const result = await spawnBounded(command, args, {
     cwd,
-    encoding: "utf8",
-    timeout,
+    timeoutMs: timeout,
+    terminateGraceMs: 2_000,
+    settleGraceMs: 250,
   });
-  if (result.status !== 0) {
-    fail(`${label} failed with exit ${result.status}: ${String(result.stderr || result.stdout || "").slice(0, 800)}`);
+  if (result.timedOut || result.status !== 0) {
+    const timeoutDetail = result.timedOut ? ` after ${timeout}ms` : "";
+    fail(`${label} failed with exit ${result.status}${timeoutDetail}: ${String(result.stderr || result.stdout || "").slice(0, 800)}`);
     return null;
   }
   return result;
 }
 
-function validatePackedQuickStart() {
+async function validatePackedQuickStart() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-packed-quick-start-"));
   try {
-    const pack = spawnChecked("npm", ["pack", "--json", "--pack-destination", tmpDir], {
+    const pack = await spawnChecked("npm", ["pack", "--json", "--pack-destination", tmpDir], {
       timeout: 60_000,
       label: "npm pack quick-start artifact",
     });
@@ -187,7 +201,7 @@ function validatePackedQuickStart() {
 
     const installDir = path.join(tmpDir, "installed");
     fs.mkdirSync(installDir, { recursive: true });
-    if (!spawnChecked("npm", ["install", "--prefix", installDir, "--ignore-scripts", "--no-audit", "--no-fund", tarball], {
+    if (!await spawnChecked("npm", ["install", "--prefix", installDir, "--ignore-scripts", "--no-audit", "--no-fund", tarball], {
       timeout: 120_000,
       label: "npm install packed artifact",
     })) {
@@ -230,19 +244,24 @@ function validatePackedQuickStart() {
     };
 
     const demoDir = path.join(tmpDir, "auto-pilot-demo");
-    if (!execVaAutoPilot(["init", demoDir, "--demo"])) {
+    if (!await execVaAutoPilot(["init", demoDir, "--demo"])) {
       return;
     }
-    if (!execVaAutoPilot(["goal", "--text", "Ship this project to a releasable state"], { cwd: demoDir })) {
+    const scaffoldedLauncher = path.join(demoDir, "scripts", "lib", "worker-launcher.mjs");
+    if (!fs.existsSync(scaffoldedLauncher)) {
+      fail("packed quick-start scaffold is missing scripts/lib/worker-launcher.mjs");
       return;
     }
-    const installedCockpit = execVaAutoPilot(["cockpit"], { cwd: demoDir });
+    if (!await execVaAutoPilot(["goal", "--text", "Ship this project to a releasable state"], { cwd: demoDir })) {
+      return;
+    }
+    const installedCockpit = await execVaAutoPilot(["cockpit"], { cwd: demoDir });
     if (!installedCockpit) {
       return;
     }
     assertHumanCockpit(installedCockpit, "packed quick-start cockpit");
 
-    if (!spawnChecked("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], {
+    if (!await spawnChecked("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], {
       cwd: demoDir,
       timeout: 120_000,
       label: "npm install scaffolded demo dependencies",
@@ -251,13 +270,13 @@ function validatePackedQuickStart() {
     }
 
     const localAutoPilot = path.join(demoDir, "scripts", "auto-pilot.mjs");
-    if (!spawnChecked(process.execPath, [localAutoPilot, "goal", "--text", "Ship this project to a releasable state"], {
+    if (!await spawnChecked(process.execPath, [localAutoPilot, "goal", "--text", "Ship this project to a releasable state"], {
       cwd: demoDir,
       label: "scaffolded auto-pilot goal",
     })) {
       return;
     }
-    const cockpit = spawnChecked(process.execPath, [localAutoPilot, "cockpit"], {
+    const cockpit = await spawnChecked(process.execPath, [localAutoPilot, "cockpit"], {
       cwd: demoDir,
       label: "scaffolded auto-pilot cockpit",
     });
@@ -266,7 +285,7 @@ function validatePackedQuickStart() {
     }
     assertHumanCockpit(cockpit, "scaffolded auto-pilot cockpit");
 
-    const cockpitJson = spawnChecked(process.execPath, [localAutoPilot, "cockpit", "--json"], {
+    const cockpitJson = await spawnChecked(process.execPath, [localAutoPilot, "cockpit", "--json"], {
       cwd: demoDir,
       label: "scaffolded auto-pilot cockpit --json",
     });
@@ -289,7 +308,7 @@ function validatePackedQuickStart() {
       fail("packed quick-start cockpit --json missing audit evidence summary fields");
     }
   } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    await fs.promises.rm(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
@@ -309,7 +328,9 @@ function validateProjectInstall() {
     "scripts/auto-pilot-progress-iterate.mjs",
     "scripts/auto-pilot-loop.mjs",
     "scripts/sprint-board.mjs",
+    "scripts/lib/bounded-spawn.mjs",
     "scripts/lib/sprint-utils.mjs",
+    "scripts/lib/worker-launcher.mjs",
     "package.json"
   ];
 
@@ -331,6 +352,24 @@ function validateProjectInstall() {
       fail(`package.json missing scaffold script: ${scriptName}`);
     }
   }
+  validateInstalledRecoveryContract();
+}
+
+function validateInstalledRecoveryContract() {
+  checkTextTokens("docs/operations/start-va-auto-pilot-prompt.md", [
+    ["orchestrate recover --json", "recovery command"],
+    ["READY→persist→GO", "worker publication barrier"],
+    [["fail closed", "fails closed"], "ambiguous-state policy"],
+  ]);
+  checkTextTokens("docs/operations/va-auto-pilot-protocol.md", [
+    ["orchestrate recover --json", "recovery command"],
+    ["READY→persist→GO", "worker publication barrier"],
+    ["durable hash-checked transaction intent", "run/tracks recovery transaction"],
+    [["Colony routing", "even when Colony is installed"], "orchestrated spawn routing rule"],
+    ["must not daemonize", "process-containment boundary"],
+    ["probation", "learned-constraint governance"],
+    ["not injected as a hard rule", "learned-constraint promotion boundary"],
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -355,9 +394,11 @@ if (!isSourcePackage) {
     "scripts/auto-pilot-orchestrate.mjs",
     "scripts/auto-pilot-observe.mjs",
     "scripts/auto-pilot-intervene.mjs",
+    "scripts/lib/bounded-spawn.mjs",
     "scripts/lib/orchestration-state.mjs",
     "scripts/lib/orchestration-cli.mjs",
     "scripts/lib/observability.mjs",
+    "scripts/lib/worker-launcher.mjs",
     "scripts/generate-observability-examples.mjs",
     "scripts/validate-observability.mjs",
     "scripts/validate-mcp-resources.mjs",
@@ -370,6 +411,9 @@ if (!isSourcePackage) {
     "schemas/protocol-fixture.schema.json",
     "schemas/permission-scope.schema.json",
     "docs/todo/run-journal.md",
+    "docs/operations/start-va-auto-pilot-prompt.md",
+    "templates/docs/operations/start-va-auto-pilot-prompt.md",
+    "templates/docs/operations/va-auto-pilot-protocol.md",
     "templates/.va-auto-pilot/sprint-state.json",
     "templates/.va-auto-pilot/pitfalls.json",
     "templates/docs/todo/run-journal.md",
@@ -380,6 +424,21 @@ if (!isSourcePackage) {
   for (const relative of requiredFiles) {
     checkFile(relative);
   }
+  validateInstalledRecoveryContract();
+  checkTextTokens("templates/docs/operations/start-va-auto-pilot-prompt.md", [
+    ["orchestrate recover --json", "recovery command"],
+    ["READY→persist→GO", "worker publication barrier"],
+    ["fail closed", "ambiguous-state policy"],
+  ]);
+  checkTextTokens("templates/docs/operations/va-auto-pilot-protocol.md", [
+    ["orchestrate recover --json", "recovery command"],
+    ["READY→persist→GO", "worker publication barrier"],
+    ["durable hash-checked transaction intent", "run/tracks recovery transaction"],
+    ["Colony routing", "orchestrated spawn routing rule"],
+    ["must not daemonize", "process-containment boundary"],
+    ["probation", "learned-constraint governance"],
+    ["not injected as a hard rule", "learned-constraint promotion boundary"],
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -488,8 +547,8 @@ if (fs.existsSync(sprintBoardPath)) {
 // ---------------------------------------------------------------------------
 
 if (isSourcePackage) {
-  validatePackContents();
-  validatePackedQuickStart();
+  await validatePackContents();
+  await validatePackedQuickStart();
 }
 
 // ---------------------------------------------------------------------------

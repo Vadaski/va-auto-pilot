@@ -64,7 +64,7 @@ VA Auto-Pilot 押的是反向的赌注。
 ### 防御弱点
 
 - **证据门禁防止幻觉** — CLI 命令产生客观的通过/失败信号，模型无法靠辩解绕开。"我觉得做完了"不等于"确实做完了"。门禁能拦截明显的占位符作弊并强制可观测证据，但它不能密码学级别地证明一条测试命令本身是有意义的。
-- **陷阱复利防止重蹈覆辙** — 过往运行中的结构化失败元数据作为硬约束注入后续委派。系统随时间越来越难被愚弄。
+- **陷阱复利防止重蹈覆辙** — 未解决失败会注入相关委派；由已解决 pitfall 自动合成的规则先进入 probation，避免一次带噪 resolution 静默升级成永久硬约束。
 - **对抗性审查打破自我验证闭环** — 全新上下文的审查员只看 diff，不看意图。这在结构上防止了自治循环最常见的失败模式：对越来越错的输出越来越有信心。
 
 > **一句话：** 信任模型的推理力，用确定性机制兜底盲区。
@@ -77,7 +77,9 @@ VA Auto-Pilot 是一个**冲刺执行引擎**——它运行自治工程闭环�
 
 VA Auto-Pilot 可以独立运行，也可以作为 va-agent-protocol 的 reference engine / managed agent。协议是任务契约，Auto-Pilot 是满足这个契约的一种执行引擎。
 
-`scripts/lib/colony-bridge.mjs` 中的事件驱动 Colony 派发器可选地使用 `va-agent-protocol`，解析顺序为：`VA_AGENT_PROTOCOL_PATH` 环境变量 → 已安装的 `va-agent-protocol` npm 包 → 本地兄弟仓库。三者都解析不到时，Auto-Pilot 优雅回退到原始 Agent spawn，因此零额外安装、无需 monorepo 布局即可跑通闭环。
+`scripts/lib/colony-bridge.mjs` 中的事件驱动 Colony 派发器可选地使用 `va-agent-protocol`，解析顺序为：`VA_AGENT_PROTOCOL_PATH` 环境变量 → 已安装的 `va-agent-protocol` npm 包 → 本地兄弟仓库。legacy/直接 Colony surface 保留智能路由；当前 orchestrated `await-workers` 为获得真实 PID/token 的 READY→persist→GO、worker 自持 deadline 与无重复恢复，强制使用 crash-safe spawn lifecycle，不会静默走 Colony 路由。
+
+长运行的 `run.json` 与 `tracks.json` 通过持久、带哈希校验的事务意图联合发布。控制文件损坏、GO 后 PID 尚未落盘的模糊窗口都会 fail closed。进程树控制覆盖 launcher/worker PGID 与 Windows 子进程树；但恶意命令仍可主动创建新的 POSIX session（`setsid`/detached daemon）逃逸这一 best-effort 边界，因此 worker 命令不得 daemonize。
 
 MCP 和 A2A 是互补的连接层。VA Auto-Pilot 位于连接和消息之上：它治理长链路工程任务如何被拆解、执行、审查、恢复和验收。
 
@@ -124,7 +126,7 @@ VA Auto-Pilot 采用不同的模型。在任何评审开始之前，管理 Agent
 
 ### 6. 失败知识会复利
 
-陷阱指南记录结构化的失败元数据——不只是错误字符串，还有假设和缺失的上下文。未来的委派会把相关陷阱作为硬约束注入。系统随时间越来越难被愚弄。
+陷阱指南记录结构化的失败元数据——不只是错误字符串，还有假设和缺失的上下文。相关的未解决 pitfall 会成为硬约束；从已解决 pitfall 学到的规则先进入 probation，只有显式提升后才会生效。系统复利的是经过治理的知识，而不是把每次历史失败都永久堆进 prompt。
 
 ---
 

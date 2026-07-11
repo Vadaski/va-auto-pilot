@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Judged quality runs require a one-to-one probe binding and derive aggregate scores from rubric dimensions instead of trusting a reported total
 - Primary evidence is secret-redacted before persistence; shareable bundles add path redaction and all managed evidence paths reject symlinked parents
 - Human intent updates and parallel state transitions now use locked atomic read-modify-write operations
+- Run/track transitions now use a durable hash-checked transaction intent; corrupt control state and ambiguous post-GO launches fail closed instead of being treated as empty or dead
+- Orchestrated `await-workers` now explicitly uses the crash-safe spawn lifecycle (not Colony routing), with durable logs and launcher-owned deadlines across manager crashes
+- Auto-generated pitfall constraints now enter probation, use exact multilingual token relevance, and stay out of hard prompts until curated; concurrent pitfall additions are serialized
 - `check:all` and CI now enforce lint across source, E2E, tests, and website JavaScript; package publication also runs deterministic checks and E2E
 - Coverage now includes focused and legacy unit suites, fails below the recorded 80/80/80/65 line/statement/function/branch floor, and runs in CI plus prepublish validation
 
@@ -29,10 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prevented run/task identifiers and DocStore artifact paths from escaping managed roots
 - Prevented `init` and `upgrade` from following destination or parent-directory symlinks outside the target project
 - Prevented stale or dirty task worktrees, unrelated working-tree changes, and squash recovery from silently entering approved commits
-- On POSIX, terminate spawned worker process groups on timeout instead of leaving descendants alive (Windows currently terminates the direct child)
+- Terminated spawned worker process trees on timeout/intervention (POSIX process groups; Windows `taskkill /T`) instead of leaving descendants alive
 - Preserved sibling active runs during shared/isolated workspace initialization and recovery
 - Preserved completed worker results through commit approval, commit, and journal recovery phases; missing or stale execution approval now returns the run to plan approval instead of dispatching
 - Prevented interrupted re-reviews from reusing an earlier PASS result and prevented checked items outside the Human Board Instructions section from satisfying intent reconciliation
+- Added a READY→persist→GO worker launcher barrier with token heartbeats, including zero-config legacy-root runs; recovery/claim cleanup now serializes with the executor, halt survives late settlement, PID/token identity clears only after verified exit, and stale/ambiguous identity blocks destructive cleanup
+- Recovered pilot-owned Git `index.lock` files across process crashes on either side of the atomic `HEAD` update using a hard-link/inode owner marker; byte-identical foreign locks and changed user indexes fail closed, while short writes and ambiguous `update-ref` results are verified before cleanup
+- Kept plan-review verdict parsing bound to the model response stream so Codex stderr diagnostics cannot invalidate a valid final PASS; conflicting explicit verdicts across stdout/stderr and CR/Unicode line separators still fail closed
+- Raised measured timeout budgets for multi-process cockpit and unattended CLI flows so loaded CI hosts do not report false regressions while still retaining bounded execution
 
 ## [0.2.1] - 2026-07-01
 

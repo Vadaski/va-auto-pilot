@@ -6,10 +6,11 @@
  * Falls back to raw spawn if va-agent-protocol is not available.
  */
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { DEFAULT_AGENT_TEMPLATE, nowIso } from "./sprint-utils.mjs";
@@ -23,6 +24,45 @@ import {
 } from "./constants.mjs";
 
 const execFileAsync = promisify(execFile);
+const WORKER_LAUNCHER = fileURLToPath(new URL("./worker-launcher.mjs", import.meta.url));
+
+function waitForLauncherReady(child, token, timeoutMs = 30_000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`worker launcher did not become ready within ${timeoutMs}ms`));
+    }, timeoutMs);
+    const onMessage = (message) => {
+      if (message?.type !== "ready" || message?.token !== token) return;
+      cleanup();
+      resolve(message);
+    };
+    const onClose = (code, signal) => {
+      cleanup();
+      reject(new Error(`worker launcher exited before ready (code=${code ?? -1}, signal=${signal ?? "-"})`));
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.off("message", onMessage);
+      child.off("close", onClose);
+    };
+    child.on("message", onMessage);
+    child.on("close", onClose);
+  });
+}
+
+function releaseWorkerLauncher(child, token, target, deadlineAt = null) {
+  return new Promise((resolve, reject) => {
+    if (!child.connected) {
+      reject(new Error("worker launcher IPC channel closed before GO"));
+      return;
+    }
+    child.send({ type: "go", token, target, deadlineAt }, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
 
 // Dynamic import of va-agent-protocol — an OPTIONAL Colony enhancement.
 // Resolution order keeps the package standalone with zero install:
@@ -314,15 +354,25 @@ const ADAPTER_CONFIGS = [
   { Adapter: () => KimiAdapter, bin: "kimi", optKey: "kimiPath" },
 ];
 
-export function signalProcessTree(child, signal = "SIGTERM") {
-  if (!child?.pid) {
+export function signalProcessTreeByPid(pid, signal = "SIGTERM") {
+  if (!pid) {
     return false;
   }
   try {
     if (process.platform === "win32") {
-      return child.kill(signal);
+      const args = ["/PID", String(pid), "/T"];
+      if (signal === "SIGKILL") args.push("/F");
+      execFile("taskkill.exe", args, () => {});
+      return true;
     }
-    process.kill(-child.pid, signal);
+    try {
+      process.kill(-pid, signal);
+    } catch (error) {
+      // Legacy pre-token workers were not guaranteed to be process-group
+      // leaders. Preserve their direct-PID cancellation compatibility.
+      if (error?.code !== "ESRCH") throw error;
+      process.kill(pid, signal);
+    }
     return true;
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ESRCH") {
@@ -332,9 +382,42 @@ export function signalProcessTree(child, signal = "SIGTERM") {
   }
 }
 
+export function signalProcessTree(child, signal = "SIGTERM") {
+  return signalProcessTreeByPid(child?.pid, signal);
+}
+
+function signalResidualWorker(child, heartbeatFile, signal = "SIGKILL") {
+  let signalled = false;
+  try { signalled = signalProcessTree(child, signal) || signalled; } catch { /* leader exited */ }
+  if (heartbeatFile) {
+    try {
+      const heartbeat = JSON.parse(fs.readFileSync(heartbeatFile, "utf8"));
+      const childPid = Number(heartbeat.childPid);
+      if (Number.isInteger(childPid) && childPid > 0) {
+        signalled = signalProcessTreeByPid(childPid, signal) || signalled;
+      }
+    } catch { /* no durable child pid */ }
+  }
+  return signalled;
+}
+
 export class ColonyBridge {
   constructor(options = {}) {
     this.workDir = options.workDir || process.cwd();
+    const explicitLifecycleDir = typeof options.lifecycleDir === "string" && options.lifecycleDir.trim()
+      ? options.lifecycleDir
+      : "";
+    const workDirKey = crypto.createHash("sha256").update(path.resolve(this.workDir)).digest("hex").slice(0, 16);
+    this._ephemeralLifecycleDir = !explicitLifecycleDir;
+    this.lifecycleDir = path.resolve(explicitLifecycleDir || path.join(
+      os.tmpdir(),
+      "va-auto-pilot-workers",
+      workDirKey,
+      `${process.pid}-${crypto.randomUUID().slice(0, 8)}`
+    ));
+    this.onProcessStarted = typeof options.onProcessStarted === "function"
+      ? options.onProcessStarted
+      : null;
     this.colony = null;
     this.useColony = !!Colony && options.useColony !== false;
     this.registeredAdapters = [];
@@ -545,23 +628,47 @@ export class ColonyBridge {
       ? { file: "bash", args: ["-lc", command] }
       : { file: expandTilde(argv[0]), args: argv.slice(1).map(expandTilde) };
 
-    return new Promise((resolve) => {
-      const child = spawn(spawnTarget.file, spawnTarget.args, {
+    const workerToken = crypto.randomUUID();
+    fs.mkdirSync(this.lifecycleDir, { recursive: true });
+    const heartbeatFile = path.join(this.lifecycleDir, `${workerToken}.json`);
+    fs.mkdirSync(path.dirname(logFile), { recursive: true });
+    const logFd = fs.openSync(logFile, "a");
+    let child;
+    try {
+      child = spawn(process.execPath, [
+        WORKER_LAUNCHER,
+        "--token", workerToken,
+        "--heartbeat", heartbeatFile,
+      ], {
         cwd: this.workDir,
         shell: false,
         detached: process.platform !== "win32",
+        // The launcher and its target inherit a durable O_APPEND descriptor.
+        // Worker output therefore survives manager death instead of receiving
+        // EPIPE through manager-owned stdout/stderr pipes.
+        stdio: ["ignore", logFd, logFd, "ipc"],
         env: {
           ...process.env,
           VA_TASK_ID: track.taskId,
           VA_TASK_NOTES: track.notes ?? ""
         },
       });
-      this._spawnChildren.set(track.taskId, child);
+    } finally {
+      fs.closeSync(logFd);
+    }
+    this._spawnChildren.set(track.taskId, child);
+
+    let goAttempted = false;
+    let childSettled = false;
+    /** @type {(deadlineAt: number | null) => void} */
+    let armManagerTimeout = () => {};
+    const childResult = new Promise((resolve, reject) => {
       let timedOut = false;
       let killTimer = null;
       let forceKillTimer = null;
 
-      if (timeoutMs > 0) {
+      armManagerTimeout = (deadlineAt) => {
+        if (!(deadlineAt > 0) || childSettled || killTimer) return;
         killTimer = setTimeout(() => {
           timedOut = true;
           appendLog(logFile, `\n[${nowIso()}] timeout after ${timeoutMs}ms — sending SIGTERM\n`);
@@ -569,20 +676,19 @@ export class ColonyBridge {
           forceKillTimer = setTimeout(() => {
             try { signalProcessTree(child, "SIGKILL"); } catch { /* exited */ }
           }, 5_000);
-        }, timeoutMs);
-      }
-
-      child.stdout.on("data", (chunk) => appendLog(logFile, chunk.toString()));
-      child.stderr.on("data", (chunk) => appendLog(logFile, chunk.toString()));
+        }, Math.max(0, deadlineAt - Date.now()));
+      };
 
       // Missing executable / spawn failure: without this listener Node rethrows
       // the 'error' event and crashes the whole loop. Resolve as a failed track
       // so the sprint can classify and recover (mirrors the old `bash -lc`
       // exit-127 path when a CLI binary is unavailable).
       child.on("error", (err) => {
+        childSettled = true;
         if (killTimer) clearTimeout(killTimer);
         if (forceKillTimer) clearTimeout(forceKillTimer);
         this._spawnChildren.delete(track.taskId);
+        signalResidualWorker(child, heartbeatFile, "SIGKILL");
         const durationMs = Date.now() - startedAt;
         appendLog(logFile, `\n[${nowIso()}] spawn error: ${err.message}\n`);
         resolve({
@@ -595,28 +701,116 @@ export class ColonyBridge {
           timedOut: false,
           logFile,
           pid: child.pid ?? null,
+          workerToken,
+          heartbeatFile,
         });
       });
 
       child.on("close", (code, signal) => {
+        childSettled = true;
         if (killTimer) clearTimeout(killTimer);
         if (forceKillTimer) clearTimeout(forceKillTimer);
         this._spawnChildren.delete(track.taskId);
+        // A successful CLI is not allowed to leave daemonized descendants.
+        signalResidualWorker(child, heartbeatFile, "SIGKILL");
+        if (code === 124) timedOut = true;
         const durationMs = Date.now() - startedAt;
+        let ambiguousLaunch = false;
+        if (goAttempted) {
+          try {
+            const heartbeat = JSON.parse(fs.readFileSync(heartbeatFile, "utf8"));
+            const childPid = Number(heartbeat.childPid);
+            ambiguousLaunch = ["ready", "launching"].includes(heartbeat.state)
+              && !(Number.isInteger(childPid) && childPid > 0);
+          } catch {
+            ambiguousLaunch = true;
+          }
+        }
         appendLog(logFile,
           `\n---\n[${nowIso()}] exit code=${code ?? -1} signal=${signal ?? "-"} durationMs=${durationMs}${timedOut ? " (TIMEOUT)" : ""}\n`
         );
+        if (ambiguousLaunch) {
+          const error = /** @type {Error & { code: string }} */ (new Error(
+            "worker launcher exited during the ambiguous post-GO launch window; PID identity is retained for manual recovery"
+          ));
+          error.code = "WORKER_LAUNCH_AMBIGUOUS";
+          reject(error);
+          return;
+        }
         resolve({
           taskId: track.taskId, command,
           success: code === 0 && !timedOut,
           exitCode: code ?? -1, signal: signal ?? "",
           durationMs, timedOut, logFile, pid: child.pid ?? null,
+          workerToken, heartbeatFile,
         });
       });
     });
+
+    try {
+      await waitForLauncherReady(child, workerToken);
+    } catch (cause) {
+      appendLog(logFile, `\n[${nowIso()}] worker launcher failed before READY: ${String(cause?.message ?? cause)}\n`);
+      try { signalProcessTree(child, "SIGTERM"); } catch { /* best-effort */ }
+      return childResult;
+    }
+
+    if (child.pid && this.onProcessStarted) {
+      try {
+        await this.onProcessStarted({
+          taskId: track.taskId,
+          pid: child.pid,
+          dispatchId: track.dispatchId ?? "",
+          workerToken,
+          heartbeatFile,
+          startedAt: new Date().toISOString(),
+        });
+      } catch (cause) {
+        appendLog(logFile, `\n[${nowIso()}] failed to persist worker process liveness: ${String(cause?.message ?? cause)}\n`);
+        try { signalProcessTree(child, "SIGTERM"); } catch { /* best-effort */ }
+        const forceKill = setTimeout(() => {
+          try { signalProcessTree(child, "SIGKILL"); } catch { /* exited */ }
+        }, 5_000);
+        await childResult;
+        clearTimeout(forceKill);
+        const error = /** @type {Error & { code: string, cause?: unknown }} */ (new Error(
+          `failed to persist worker process liveness for ${track.taskId}`
+        ));
+        error.code = "WORKER_LIVENESS_PERSIST_FAILED";
+        error.cause = cause;
+        throw error;
+      }
+    }
+
+    try {
+      goAttempted = true;
+      // Task budget starts only after READY and durable PID/token publication;
+      // launcher bootstrap overhead must not consume an 80ms worker timeout.
+      const deadlineAt = timeoutMs > 0 ? Date.now() + timeoutMs : null;
+      armManagerTimeout(deadlineAt);
+      await releaseWorkerLauncher(
+        child,
+        workerToken,
+        spawnTarget,
+        deadlineAt
+      );
+    } catch (cause) {
+      appendLog(logFile, `\n[${nowIso()}] failed to release worker launcher: ${String(cause?.message ?? cause)}\n`);
+      try { signalProcessTree(child, "SIGTERM"); } catch { /* best-effort */ }
+      await childResult;
+      const error = /** @type {Error & { code: string, cause?: unknown }} */ (new Error(
+        `failed to release worker launcher for ${track.taskId}`
+      ));
+      error.code = "WORKER_LAUNCH_RELEASE_FAILED";
+      error.cause = cause;
+      throw error;
+    }
+
+    return childResult;
   }
 
   async shutdown() {
+    const hadActiveSpawns = this._spawnChildren.size > 0;
     for (const child of this._spawnChildren.values()) {
       try { signalProcessTree(child, "SIGTERM"); } catch { /* best-effort */ }
     }
@@ -636,6 +830,9 @@ export class ColonyBridge {
         await this.colony.shutdown();
       } catch { /* best-effort */ }
       this.colony = null;
+    }
+    if (this._ephemeralLifecycleDir && !hadActiveSpawns) {
+      fs.rmSync(this.lifecycleDir, { recursive: true, force: true });
     }
   }
 }

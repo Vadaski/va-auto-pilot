@@ -57,6 +57,16 @@ node scripts/auto-pilot.mjs orchestrate commit
 node scripts/auto-pilot.mjs orchestrate journal
 ```
 
+After a crash or ambiguous worker state, diagnose first:
+
+```bash
+node scripts/auto-pilot.mjs orchestrate recover --json
+```
+
+Apply `--apply` only after inspecting its conservative plan. Spawn workers use a
+READY→persist→GO barrier; corrupt control state and ambiguous worker identity
+fail closed rather than permitting duplicate dispatch.
+
 Tactical changes: `node scripts/auto-pilot.mjs intervene ...` → `.va-auto-pilot/orchestration/directives.json` (not human-board).
 
 Strategic intent: `node scripts/auto-pilot.mjs intent ...` → `docs/todo/human-board.md`.
@@ -70,6 +80,7 @@ Strategic intent: `node scripts/auto-pilot.mjs intent ...` → `docs/todo/human-
 - Never skip quality gates on real commits.
 - Do not prescribe implementation steps to workers — objective + constraints + gates only.
 - Read memory via `node scripts/sprint-board.mjs journal --view`.
+- Use `orchestrate recover --json` before resuming an interrupted run.
 
 ## Unattended (CI only)
 

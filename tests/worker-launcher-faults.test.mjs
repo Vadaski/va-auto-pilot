@@ -142,3 +142,46 @@ test("launcher enforces its deadline after manager IPC disconnect", async (t) =>
     try { process.kill(-launcher.pid, "SIGKILL"); } catch { /* already gone */ }
   }
 });
+
+test("launcher terminal transition rejects a late GO without running the target", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("the fixture uses SIGTERM process semantics");
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-launch-late-go-"));
+  const token = crypto.randomUUID();
+  const heartbeatFile = path.join(root, "workers", `${token}.json`);
+  const targetMarker = path.join(root, "target-ran.txt");
+  const launcher = spawn(process.execPath, [
+    LAUNCHER,
+    "--token", token,
+    "--heartbeat", heartbeatFile,
+  ], {
+    cwd: root,
+    detached: true,
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+  });
+  try {
+    await waitReady(launcher, token);
+    const launcherExit = new Promise((resolve) => launcher.once("exit", resolve));
+    process.kill(launcher.pid, "SIGTERM");
+    await waitFor(() => {
+      if (!fs.existsSync(heartbeatFile)) return false;
+      return JSON.parse(fs.readFileSync(heartbeatFile, "utf8")).state === "terminal";
+    });
+    try {
+      await sendGo(launcher, token, {
+        file: process.execPath,
+        args: ["-e", `require('node:fs').writeFileSync(${JSON.stringify(targetMarker)}, 'ran')`],
+      });
+    } catch {
+      // Expected when the terminal transition already closed IPC.
+    }
+    await launcherExit;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(fs.existsSync(targetMarker), false);
+  } finally {
+    try { process.kill(-launcher.pid, "SIGKILL"); } catch { /* already gone */ }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

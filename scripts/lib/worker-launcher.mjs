@@ -111,7 +111,9 @@ export async function main(argv = process.argv.slice(2)) {
   process.on("message", async (message) => {
     if (!message || typeof message !== "object" || Array.isArray(message)) return;
     const payload = /** @type {any} */ (message);
-    if (released || payload.type !== "go" || payload.token !== token) return;
+    // A signal/READY timeout may finish the launcher while an IPC GO message is
+    // already queued. Terminal state is irreversible: never spawn afterward.
+    if (finished || released || payload.type !== "go" || payload.token !== token) return;
     const file = String(payload.target?.file ?? "");
     const args = Array.isArray(payload.target?.args) ? payload.target.args.map(String) : [];
     const requestedDeadline = Number(payload.deadlineAt);

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Evidence-backed pitfall rule promotion, effectiveness feedback, confidence decay, retirement, and deterministic conflict quarantine
 - Regression coverage for multi-run workspace routing, cross-process human-board writes, commit approval manifests, stale locks, process-tree timeouts, DocStore path containment, scaffold symlink safety, and fail-closed quality/E2E gates
 - `--min-score` support for judged quality runs; `--no-judge` is now an explicit collection-only mode
 

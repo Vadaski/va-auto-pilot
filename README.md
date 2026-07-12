@@ -128,7 +128,7 @@ Every sprint ends with a fresh-context adversarial reviewer who has seen only th
 
 ### 6. Failure knowledge compounds
 
-The pitfall guide captures structured failure metadata — not just error strings, but hypotheses and missing context. Relevant unresolved pitfalls become hard constraints; rules learned from resolved pitfalls enter probation and require explicit promotion. The system compounds validated knowledge without turning every historical failure into permanent prompt debt.
+The pitfall guide captures structured failure metadata — not just error strings, but hypotheses and missing context. Relevant unresolved pitfalls become hard constraints; rules learned from resolved pitfalls enter probation and require evidence-backed promotion. Active learned rules lose confidence over their configured half-life, effective feedback refreshes them, ineffective feedback retires them, and declared conflicts quarantine both otherwise-injectable relevant rules. The system compounds validated knowledge without turning every historical failure into permanent prompt debt.
 
 ---
 

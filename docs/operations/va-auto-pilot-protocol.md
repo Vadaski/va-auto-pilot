@@ -494,7 +494,17 @@ resolved weak placeholders to advisory. Unresolved weak gates remain risk
 signals until the pitfall is resolved or a real command is configured.
 Constraint YAML synthesized from a resolved pitfall is marked `probation` and is
 reported but not injected as a hard rule. Curated constraint sets remain active;
-promotion or retirement of a learned rule is an explicit governance decision.
+promotion or retirement of a learned rule is an explicit, evidence-backed
+governance decision. Promote with `pitfall --promote PF-NNN --evidence "..."`,
+refresh or retire it with `pitfall --feedback PF-NNN --outcome
+effective|ineffective --evidence "..."`, and record a deterministic conflict with
+`pitfall --conflict PF-NNN --with PF-MMM --evidence "..."`. Active pitfall-learned
+rules decay exponentially from `lastValidatedAt` (falling back to `learnedAt`)
+using `halfLifeDays`; rules below the runtime confidence floor are suppressed.
+When two otherwise injectable active rules have a declared conflict, both are
+suppressed. A probation, retired, or decayed peer is already non-injectable and
+does not suppress the remaining active rule. Curated rules are not subject to
+learned-rule decay.
 
 #### Example: TypeScript Project (default)
 

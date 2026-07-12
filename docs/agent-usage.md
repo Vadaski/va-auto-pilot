@@ -816,6 +816,9 @@ qualityGate:
 | `journal --task ID --summary S` | Append journal entry |
 | `pitfall --task ID --failure-type T --attempted A --hypothesis H` | Record failure |
 | `pitfall --resolve PF-ID --resolution R` | Resolve a pitfall |
+| `pitfall --promote PF-ID --evidence E` | Promote a learned rule with validation evidence |
+| `pitfall --feedback PF-ID --outcome effective\|ineffective --evidence E` | Refresh or retire a learned rule |
+| `pitfall --conflict PF-ID --with PF-ID --evidence E` | Declare and quarantine a contextual rule conflict |
 | `pitfall --list [--unresolved] [--json]` | List pitfall entries |
 
 ### va-parallel-runner.mjs 完整参数表

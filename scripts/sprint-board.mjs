@@ -127,6 +127,9 @@ Usage:
   node scripts/sprint-board.mjs journal --view [--journal-file <path>]
   node scripts/sprint-board.mjs pitfall --task <TASK-ID> --failure-type <gate|acceptance|review> --attempted <text> --hypothesis <text> [--missing-context <text>]
   node scripts/sprint-board.mjs pitfall --resolve <PF-ID> --resolution <text>
+  node scripts/sprint-board.mjs pitfall --promote <PF-ID> --evidence <text>
+  node scripts/sprint-board.mjs pitfall --feedback <PF-ID> --outcome <effective|ineffective> --evidence <text>
+  node scripts/sprint-board.mjs pitfall --conflict <PF-ID> --with <PF-ID> --evidence <text>
   node scripts/sprint-board.mjs pitfall --list [--unresolved] [--json]
   node scripts/sprint-board.mjs eval-compare [--gate <name>] [--limit <n>] [--json]
   node scripts/sprint-board.mjs review [--pitfalls-file <path>]
@@ -176,6 +179,12 @@ Options (pitfall):
   --missing-context <text>  Missing context (optional)
   --resolve <PF-ID>         Resolve an existing pitfall entry
   --resolution <text>       Resolution text (used with --resolve)
+  --promote <PF-ID>         Promote a learned rule from probation to active
+  --feedback <PF-ID>        Record effective or ineffective rule feedback
+  --outcome <value>         effective | ineffective (used with --feedback)
+  --conflict <PF-ID>        Declare an evidence-backed conflict with --with
+  --with <PF-ID>            Other pitfall rule in a conflict declaration
+  --evidence <text>         Required evidence for lifecycle mutations
   --list                    List pitfall entries
   --unresolved              Filter --list to unresolved entries only
 
@@ -1569,11 +1578,8 @@ function addPitfall(pitfallsFile, options) {
  * @returns {Promise<{ id: string, entry: PitfallRecord, skipped: boolean, reason?: string, constraintFile: string, suggestionResult: { added: boolean, gate: { name: string, command: string, required: boolean, description: string, triggeredBy: string } }, journalAdded: boolean, constraintWritten: boolean, commitResult: { attempted: boolean, skipped: boolean, reason: string, hash: string, header: string, files: string[] } }>}
  */
 async function resolvePitfall(pitfallsFile, options, runtime = {}) {
-  const pfId = requireOption(options, "resolve");
+  const pfId = requirePitfallId(requireOption(options, "resolve"), "resolve");
   const resolution = requireOption(options, "resolution");
-  if (!/^PF-\d+$/i.test(pfId)) {
-    throw new VAPilotError("CONFIG_ERROR", `Invalid pitfall id '${pfId}'. Expected PF-<number>.`, { pitfallId: pfId });
-  }
   if (String(resolution).trim() === "") {
     throw new VAPilotError("CONFIG_ERROR", "Resolution must not be empty", { pitfallId: pfId });
   }
@@ -1605,11 +1611,13 @@ async function resolvePitfall(pitfallsFile, options, runtime = {}) {
     resolution,
     resolvedAt: nextResolvedAt
   };
-  const constraintDocument = buildSynthesizedConstraintDocument(resolvedEntry, task, resolvedEntry.resolution);
-  validateSynthesizedConstraintDocument(constraintDocument);
   const constraintsDir = resolveConstraintsDir(pitfallsFile, runtime);
   fs.mkdirSync(constraintsDir, { recursive: true });
   const constraintFile = constraintFilePathForPitfall(constraintsDir, entry);
+  const constraintDocument = alreadyResolved && fs.existsSync(constraintFile)
+    ? readLearnedConstraintForPitfall(pitfallsFile, pfId, runtime).document
+    : buildSynthesizedConstraintDocument(resolvedEntry, task, resolvedEntry.resolution);
+  validateSynthesizedConstraintDocument(constraintDocument);
   const projectDir = resolveProjectDirFromPilotArtifact(pitfallsFile);
   const commitBaseline = await captureConstraintCommitBaseline(
     [
@@ -1673,6 +1681,177 @@ async function resolvePitfall(pitfallsFile, options, runtime = {}) {
     journalAdded,
     constraintWritten,
     commitResult
+  };
+}
+
+function requirePitfallId(value, optionName) {
+  const pitfallId = String(value ?? "").trim().toUpperCase();
+  if (!/^PF-\d+$/.test(pitfallId)) {
+    throw new VAPilotError("CONFIG_ERROR", `Invalid --${optionName} pitfall id '${value ?? ""}'. Expected PF-<number>.`);
+  }
+  return pitfallId;
+}
+
+function readLearnedConstraintForPitfall(pitfallsFile, pitfallId, runtime = {}) {
+  const data = readPitfalls(pitfallsFile);
+  const entry = data.entries.find((item) => String(item.id).toUpperCase() === pitfallId);
+  if (!entry) {
+    throw new VAPilotError("CONFIG_ERROR", `Pitfall not found: ${pitfallId}`, { pitfallId });
+  }
+  if (!entry.resolvedAt) {
+    throw new VAPilotError("CONFIG_ERROR", `Pitfall ${pitfallId} must be resolved before governing its learned rule`, { pitfallId });
+  }
+  const constraintFile = constraintFilePathForPitfall(resolveConstraintsDir(pitfallsFile, runtime), entry);
+  if (!fs.existsSync(constraintFile)) {
+    throw new VAPilotError("CONFIG_ERROR", `Learned constraint not found for ${pitfallId}`, { pitfallId, constraintFile });
+  }
+  let document;
+  try {
+    document = parseYaml(fs.readFileSync(constraintFile, "utf8"));
+  } catch (error) {
+    throw new VAPilotError("PARSE_ERROR", `Cannot parse learned constraint for ${pitfallId}: ${error.message}`, {
+      pitfallId,
+      constraintFile,
+    });
+  }
+  validateSynthesizedConstraintDocument(document);
+  const sourceFactorIds = document.payload.constraints.flatMap((constraint) => (
+    Array.isArray(constraint.sourceFactorIds)
+      ? constraint.sourceFactorIds.map((value) => String(value).trim().toUpperCase())
+      : []
+  ));
+  if (!sourceFactorIds.includes(pitfallId)) {
+    throw new VAPilotError("CONFIG_ERROR", `Learned constraint is not bound to ${pitfallId}`, {
+      pitfallId,
+      constraintFile,
+    });
+  }
+  const governance = document.governance && typeof document.governance === "object"
+    ? document.governance
+    : {};
+  if (governance.origin && governance.origin !== "pitfall") {
+    throw new VAPilotError("CONFIG_ERROR", `Constraint for ${pitfallId} is not pitfall-governed`, {
+      pitfallId,
+      constraintFile,
+    });
+  }
+  document.governance = {
+    ...governance,
+    origin: "pitfall",
+    status: String(governance.status ?? "probation").toLowerCase(),
+    learnedAt: String(governance.learnedAt ?? entry.resolvedAt ?? entry.createdAt ?? ""),
+    halfLifeDays: Number.isFinite(Number(governance.halfLifeDays))
+      ? Number(governance.halfLifeDays)
+      : DEFAULT_LEARNED_CONSTRAINT_HALF_LIFE_DAYS,
+  };
+  return { entry, constraintFile, document };
+}
+
+function normalizeConstraintFeedback(governance) {
+  const feedback = governance.feedback && typeof governance.feedback === "object"
+    ? governance.feedback
+    : {};
+  return {
+    effectiveCount: Math.max(0, Number.parseInt(String(feedback.effectiveCount ?? "0"), 10) || 0),
+    ineffectiveCount: Math.max(0, Number.parseInt(String(feedback.ineffectiveCount ?? "0"), 10) || 0),
+    lastOutcome: String(feedback.lastOutcome ?? ""),
+    lastEvidence: String(feedback.lastEvidence ?? ""),
+    lastRecordedAt: String(feedback.lastRecordedAt ?? ""),
+  };
+}
+
+function recordConstraintLifecycle(pitfallsFile, options, runtime = {}) {
+  const evidence = requireOption(options, "evidence").trim();
+  if (!evidence) {
+    throw new VAPilotError("CONFIG_ERROR", "Lifecycle evidence must not be empty");
+  }
+  const requestedActions = ["promote", "feedback", "conflict"].filter((key) => options[key]);
+  if (requestedActions.length !== 1) {
+    throw new VAPilotError("CONFIG_ERROR", "Choose exactly one of --promote, --feedback, or --conflict");
+  }
+  const action = requestedActions[0];
+  const pitfallId = requirePitfallId(options[action], action);
+  const primary = readLearnedConstraintForPitfall(pitfallsFile, pitfallId, runtime);
+  const now = nowIso();
+  const governance = primary.document.governance;
+  const feedback = normalizeConstraintFeedback(governance);
+
+  if (action === "promote") {
+    if (governance.status !== "probation") {
+      throw new VAPilotError(
+        "CONFIG_ERROR",
+        `Pitfall rule ${pitfallId} is ${governance.status}; only probation rules can be promoted`,
+        { pitfallId, status: governance.status }
+      );
+    }
+    governance.status = "active";
+    governance.lastValidatedAt = now;
+    governance.feedback = {
+      ...feedback,
+      effectiveCount: feedback.effectiveCount + 1,
+      lastOutcome: "promoted",
+      lastEvidence: evidence,
+      lastRecordedAt: now,
+    };
+  } else if (action === "feedback") {
+    const outcome = requireOption(options, "outcome").trim().toLowerCase();
+    if (!["effective", "ineffective"].includes(outcome)) {
+      throw new VAPilotError("CONFIG_ERROR", `Invalid --outcome '${outcome}'. Expected effective or ineffective.`);
+    }
+    governance.feedback = {
+      ...feedback,
+      effectiveCount: feedback.effectiveCount + (outcome === "effective" ? 1 : 0),
+      ineffectiveCount: feedback.ineffectiveCount + (outcome === "ineffective" ? 1 : 0),
+      lastOutcome: outcome,
+      lastEvidence: evidence,
+      lastRecordedAt: now,
+    };
+    if (outcome === "effective") {
+      governance.lastValidatedAt = now;
+    } else {
+      governance.status = "retired";
+    }
+  } else {
+    const otherPitfallId = requirePitfallId(requireOption(options, "with"), "with");
+    if (otherPitfallId === pitfallId) {
+      throw new VAPilotError("CONFIG_ERROR", "A learned rule cannot conflict with itself", { pitfallId });
+    }
+    const other = readLearnedConstraintForPitfall(pitfallsFile, otherPitfallId, runtime);
+    const owner = [primary, other].sort((left, right) => (
+      left.entry.id.localeCompare(right.entry.id, undefined, { numeric: true })
+    ))[0];
+    const targetId = owner.entry.id === primary.entry.id ? otherPitfallId : pitfallId;
+    const ownerGovernance = owner.document.governance;
+    ownerGovernance.conflictsWith = [...new Set([
+      ...(Array.isArray(ownerGovernance.conflictsWith) ? ownerGovernance.conflictsWith.map(String) : []),
+      targetId,
+    ])].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+    const conflictEvidence = ownerGovernance.conflictEvidence && typeof ownerGovernance.conflictEvidence === "object"
+      ? ownerGovernance.conflictEvidence
+      : {};
+    ownerGovernance.conflictEvidence = {
+      ...conflictEvidence,
+      [targetId]: { evidence, recordedAt: now },
+    };
+    const changed = writeTextFileIfChanged(owner.constraintFile, normalizeConstraintYamlContent(owner.document));
+    return {
+      action,
+      pitfallId,
+      with: otherPitfallId,
+      constraintFile: owner.constraintFile,
+      status: "conflict-declared",
+      changed,
+    };
+  }
+
+  const changed = writeTextFileIfChanged(primary.constraintFile, normalizeConstraintYamlContent(primary.document));
+  return {
+    action,
+    pitfallId,
+    constraintFile: primary.constraintFile,
+    status: governance.status,
+    feedback: governance.feedback,
+    changed,
   };
 }
 
@@ -2262,6 +2441,35 @@ async function main() {
   }
 
   if (parsed.command === "pitfall") {
+    if (parsed.options.promote || parsed.options.feedback || parsed.options.conflict) {
+      if (parsed.options.resolve || parsed.flags.has("list") || parsed.options.task) {
+        throw new VAPilotError(
+          "CONFIG_ERROR",
+          "Pitfall lifecycle actions cannot be combined with --resolve, --list, or --task"
+        );
+      }
+      /** @type {ReturnType<typeof recordConstraintLifecycle> | null} */
+      let result = null;
+      await withPilotFileLock(pitfallsFile, async () => {
+        result = recordConstraintLifecycle(pitfallsFile, parsed.options, {
+          workDir: resolveProjectDirFromPilotArtifact(pitfallsFile),
+        });
+      });
+      if (!result) {
+        throw new Error("Pitfall lifecycle mutation did not produce a result.");
+      }
+      if (parsed.flags.has("json")) {
+        console.log(JSON.stringify(result, null, 2));
+      } else if (result.action === "conflict") {
+        console.log(`Pitfall rule conflict recorded: ${result.pitfallId} <-> ${result.with}`);
+        console.log(`Constraint file: ${path.relative(process.cwd(), result.constraintFile)}`);
+      } else {
+        console.log(`Pitfall rule ${result.action}: ${result.pitfallId} -> ${result.status}`);
+        console.log(`Constraint file: ${path.relative(process.cwd(), result.constraintFile)}`);
+      }
+      return;
+    }
+
     // --resolve: mark an existing entry resolved
     if (parsed.options.resolve) {
       /** @type {Awaited<ReturnType<typeof resolvePitfall>> | null} */

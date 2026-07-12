@@ -201,7 +201,7 @@ Modes: `legacy` (off) / `mixed` (configured roots strict, rest free) / `managed`
 When DocStore is active, do NOT hand-edit files under `.docstore/*` or `INDEX.json` — use the CLI or SDK.
 
 ### Constraint Library
-Typed YAML constraints under `.va-auto-pilot/constraints/` (dispatch, review-gate, adopt, mode-enforcement, state-race, ...). Constraint-bridge loads active relevant entries at loop start and injects them under **Hard constraints**. Resolving a pitfall can auto-synthesize a YAML rule, but learned rules enter `probation` and stay out of hard prompts until explicitly curated or promoted.
+Typed YAML constraints under `.va-auto-pilot/constraints/` (dispatch, review-gate, adopt, mode-enforcement, state-race, ...). Constraint-bridge loads active relevant entries at loop start and injects them under **Hard constraints**. Resolving a pitfall can auto-synthesize a YAML rule, but learned rules enter `probation` and stay out of hard prompts until explicitly promoted with evidence. Active learned rules decay from their last validation; effective feedback refreshes them, ineffective feedback retires them, and an explicit conflict declaration quarantines both rules when both would otherwise be injectable. Curated rules do not decay.
 
 ## Quality Gate Protocol
 
@@ -235,6 +235,9 @@ node scripts/sprint-board.mjs journal --task AP-001 --summary "..."
 node scripts/sprint-board.mjs pitfall --task AP-001 --failure-type gate --attempted "..." --hypothesis "..."
 node scripts/sprint-board.mjs pitfall --list --unresolved
 node scripts/sprint-board.mjs pitfall --resolve PF-NNN --resolution "..."
+node scripts/sprint-board.mjs pitfall --promote PF-NNN --evidence "..."
+node scripts/sprint-board.mjs pitfall --feedback PF-NNN --outcome effective --evidence "..."
+node scripts/sprint-board.mjs pitfall --conflict PF-NNN --with PF-MMM --evidence "..."
 node scripts/sprint-board.mjs suggest-gate [--pitfalls-file <path>]
 node scripts/sprint-board.mjs summary
 

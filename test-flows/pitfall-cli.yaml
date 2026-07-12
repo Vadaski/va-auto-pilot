@@ -207,6 +207,60 @@ flows:
             - "constraint: Guard build validation with a persistent gate"
       should: []
 
+  - name: "pitfall lifecycle: promotes, records conflict, and retires learned rules"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        repo="$PWD"
+        tmpdir="$(mktemp -d)"
+        mkdir -p "$tmpdir/.va-auto-pilot/constraints"
+        cat > "$tmpdir/.va-auto-pilot/pitfalls.json" <<'EOF'
+        {"version":1,"entries":[
+          {"id":"PF-001","taskId":"AP-001","failureType":"gate","attempted":"a","hypothesis":"h1","missingContext":"","resolution":"r1","resolvedAt":"2026-01-01T00:00:00.000Z","createdAt":"2026-01-01T00:00:00.000Z"},
+          {"id":"PF-002","taskId":"AP-002","failureType":"gate","attempted":"b","hypothesis":"h2","missingContext":"","resolution":"r2","resolvedAt":"2026-01-01T00:00:00.000Z","createdAt":"2026-01-01T00:00:00.000Z"}
+        ]}
+        EOF
+        for id in 001 002; do
+          cat > "$tmpdir/.va-auto-pilot/constraints/pf-$id.yaml" <<EOF
+        id: learned-pf-$id
+        type: auto-pilot-constraint-set
+        governance:
+          origin: pitfall
+          status: probation
+          learnedAt: 2026-01-01T00:00:00.000Z
+          halfLifeDays: 90
+        payload:
+          domain: recovery
+          tags: [recovery]
+          synthesis: learned rule
+          constraints:
+            - type: invariant
+              statement: Keep recovery rule $id
+              confidence: 0.72
+              sourceFactorIds: [PF-$id]
+          blindSpots: [auto-generated-from-pitfall]
+        EOF
+        done
+        board=(node "$repo/scripts/sprint-board.mjs" pitfall --pitfalls-file "$tmpdir/.va-auto-pilot/pitfalls.json")
+        "${board[@]}" --promote PF-001 --evidence "replay one passed"
+        "${board[@]}" --promote PF-002 --evidence "replay two passed"
+        "${board[@]}" --conflict PF-002 --with PF-001 --evidence "retry ownership conflicts"
+        "${board[@]}" --feedback PF-002 --outcome ineffective --evidence "blocked valid recovery"
+        cat "$tmpdir/.va-auto-pilot/constraints/pf-001.yaml"
+        cat "$tmpdir/.va-auto-pilot/constraints/pf-002.yaml"
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains:
+            - "Pitfall rule promote: PF-001 -> active"
+            - "Pitfall rule conflict recorded: PF-002 <-> PF-001"
+            - "Pitfall rule feedback: PF-002 -> retired"
+            - "conflictsWith:"
+            - "status: retired"
+      should: []
+
   - name: "update --state Failed with failure-type: records failureDetail"
     command: "node"
     args:

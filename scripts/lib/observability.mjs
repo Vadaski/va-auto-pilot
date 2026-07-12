@@ -279,6 +279,40 @@ export function readTaskEvidenceSummary(workDir, relativeManifest, expected = {}
   const boundTaskId = expected.taskId || String(manifest.taskId ?? "");
 
   const bundleDir = path.dirname(manifestPath);
+  for (const [index, artifact] of (Array.isArray(manifest.artifacts) ? manifest.artifacts : []).entries()) {
+    let artifactPath;
+    try {
+      artifactPath = resolveContainedBundlePath(bundleDir, artifact?.path, `artifacts[${index}].path`);
+      if (fs.existsSync(artifactPath) && fs.lstatSync(artifactPath).isSymbolicLink()) {
+        errors.push(`artifacts[${index}] must not be a symbolic link`);
+        continue;
+      }
+      ensureSafeManagedPath(root, artifactPath, { create: false });
+      if (!fs.existsSync(artifactPath)) {
+        errors.push(`artifacts[${index}] file does not exist`);
+        continue;
+      }
+      const artifactStat = fs.lstatSync(artifactPath);
+      if (artifactStat.isSymbolicLink()) {
+        errors.push(`artifacts[${index}] must not be a symbolic link`);
+        continue;
+      }
+      if (!artifactStat.isFile()) {
+        errors.push(`artifacts[${index}] is not a regular file`);
+        continue;
+      }
+      const content = fs.readFileSync(artifactPath);
+      if (content.byteLength !== artifact.sizeBytes) {
+        errors.push(`artifacts[${index}] sizeBytes does not match file content`);
+      }
+      const actualSha256 = crypto.createHash("sha256").update(content).digest("hex");
+      if (actualSha256 !== artifact.sha256) {
+        errors.push(`artifacts[${index}] sha256 does not match file content`);
+      }
+    } catch (error) {
+      errors.push(`artifacts[${index}] is invalid: ${String(error?.message ?? error)}`);
+    }
+  }
   const eventsPath = path.resolve(bundleDir, String(manifest.eventsLog ?? ""));
   const relativeEventsPath = path.relative(bundleDir, eventsPath);
   if (!relativeEventsPath || relativeEventsPath.startsWith("..") || path.isAbsolute(relativeEventsPath)) {

@@ -8,6 +8,7 @@ import { buildCockpit, buildStructuredEvidenceSummary } from "../scripts/auto-pi
 import {
   buildBundleManifest,
   buildEvent,
+  hashText,
   readTaskEvidenceSummary,
   taskEvidenceBundlePaths,
   writeBundleManifest,
@@ -209,6 +210,71 @@ test("structured evidence rejects a manifest gate that disagrees with its event"
   });
   assert.equal(summary.manifestValid, false);
   assert.ok(summary.errors.includes("manifest gates do not match task.gate events"));
+});
+
+test("structured evidence verifies artifact containment, size, hash, and regular-file identity", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-artifact-integrity-"));
+  const relativeManifest = writeBundle(root);
+  const paths = taskEvidenceBundlePaths(root, "run-structured", "AP-001");
+  const artifactPath = path.join(paths.dir, "artifacts", "proof.txt");
+  const artifactContent = "proof-v1\n";
+  fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
+  fs.writeFileSync(artifactPath, artifactContent);
+  const manifest = JSON.parse(fs.readFileSync(paths.manifest, "utf8"));
+  manifest.artifacts = [{
+    name: "proof.txt",
+    path: "artifacts/proof.txt",
+    kind: "text",
+    sizeBytes: Buffer.byteLength(artifactContent),
+    sha256: hashText(artifactContent),
+    redacted: false,
+  }];
+  writeBundleManifest(paths.manifest, manifest, { safeRoot: root });
+
+  const valid = readTaskEvidenceSummary(root, relativeManifest, {
+    runId: "run-structured",
+    taskId: "AP-001",
+  });
+  assert.equal(valid.manifestValid, true);
+
+  fs.writeFileSync(artifactPath, "proof-v2\n");
+  const hashMismatch = readTaskEvidenceSummary(root, relativeManifest, {
+    runId: "run-structured",
+    taskId: "AP-001",
+  });
+  assert.equal(hashMismatch.manifestValid, false);
+  assert.ok(hashMismatch.errors.includes("artifacts[0] sha256 does not match file content"));
+
+  fs.writeFileSync(artifactPath, "longer-proof\n");
+  const sizeMismatch = readTaskEvidenceSummary(root, relativeManifest, {
+    runId: "run-structured",
+    taskId: "AP-001",
+  });
+  assert.ok(sizeMismatch.errors.includes("artifacts[0] sizeBytes does not match file content"));
+
+  manifest.artifacts[0].path = "../outside.txt";
+  writeBundleManifest(paths.manifest, manifest, { safeRoot: root });
+  const escaped = readTaskEvidenceSummary(root, relativeManifest, {
+    runId: "run-structured",
+    taskId: "AP-001",
+  });
+  assert.ok(escaped.errors.some((error) => error.includes("escapes the evidence bundle")));
+
+  if (process.platform === "win32") {
+    t.diagnostic("symlink identity assertion is POSIX-only");
+    return;
+  }
+  const outside = path.join(root, "outside-proof.txt");
+  fs.writeFileSync(outside, artifactContent);
+  fs.unlinkSync(artifactPath);
+  fs.symlinkSync(outside, artifactPath);
+  manifest.artifacts[0].path = "artifacts/proof.txt";
+  writeBundleManifest(paths.manifest, manifest, { safeRoot: root });
+  const symlinked = readTaskEvidenceSummary(root, relativeManifest, {
+    runId: "run-structured",
+    taskId: "AP-001",
+  });
+  assert.ok(symlinked.errors.some((error) => error.includes("symbolic link")));
 });
 
 test("structured evidence coverage includes every commit-ready task", () => {

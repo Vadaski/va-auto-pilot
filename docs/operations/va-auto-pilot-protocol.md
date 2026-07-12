@@ -43,7 +43,8 @@ write human objectives, constraints, risk notes, acceptance expectations, and
 overrides without requiring the human to edit internal files directly.
 Cockpit evidence must be shown through `humanJudgment.evidence.summary`, which
 prioritizes `structured`: validated current-run task manifests bound to their
-run/task IDs and event logs, with required gate outcomes and declared review counts when present.
+run/task IDs and event logs, with contained artifact size/hash identity,
+required gate outcomes, and declared review counts when present.
 Malformed, missing, mismatched, or failing completion bundles block evidence
 trust during commit approval. Journal memory is retained as fallback context
 only when no task bundle exists.

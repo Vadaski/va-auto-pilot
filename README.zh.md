@@ -79,7 +79,7 @@ VA Auto-Pilot 可以独立运行，也可以作为 va-agent-protocol 的 referen
 
 `scripts/lib/colony-bridge.mjs` 中的事件驱动 Colony 派发器可选地使用 `va-agent-protocol`，解析顺序为：`VA_AGENT_PROTOCOL_PATH` 环境变量 → 已安装的 `va-agent-protocol` npm 包 → 本地兄弟仓库。legacy/直接 Colony surface 保留智能路由；当前 orchestrated `await-workers` 为获得真实 PID/token 的 READY→persist→GO、worker 自持 deadline 与无重复恢复，强制使用 crash-safe spawn lifecycle，不会静默走 Colony 路由。
 
-长运行的 `run.json` 与 `tracks.json` 通过持久、带哈希校验的事务意图联合发布。控制文件损坏、GO 后 PID 尚未落盘的模糊窗口都会 fail closed。进程树控制覆盖 launcher/worker PGID 与 Windows 子进程树；但恶意命令仍可主动创建新的 POSIX session（`setsid`/detached daemon）逃逸这一 best-effort 边界，因此 worker 命令不得 daemonize。
+长运行的 `run.json` 与 `tracks.json` 通过持久、带哈希校验的事务意图联合发布。当 run 已持久进入 `done` 后，`recover --apply` 会立即、幂等地完成 claim release、checkpoint/review 清理和 active-run 移除，无需等待 lease TTL；`halted`、`error` 或仍有真实/新鲜 worker 证据时不会走这条捷径。控制文件损坏、GO 后 PID 尚未落盘的模糊窗口都会 fail closed。进程树控制覆盖 launcher/worker PGID 与 Windows 子进程树；但恶意命令仍可主动创建新的 POSIX session（`setsid`/detached daemon）逃逸这一 best-effort 边界，因此 worker 命令不得 daemonize。
 
 MCP 和 A2A 是互补的连接层。VA Auto-Pilot 位于连接和消息之上：它治理长链路工程任务如何被拆解、执行、审查、恢复和验收。
 

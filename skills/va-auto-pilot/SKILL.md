@@ -166,7 +166,7 @@ Unattended only: `node scripts/auto-pilot-loop.mjs --max-cycles 50` or `orchestr
 - Severity mapped: transient/fixable/critical
 - Recovery strategy selected: retry-immediately, retry-with-fix, escalate-model, create-fix-task, stop
 - Classification is journaled on every failure
-- `orchestrate recover --json` diagnoses interrupted runs; `--apply` only performs conservative state repair (clear dead locks, settle tracks with no live worker, return stale checkpoints to plan approval, close no-pending-work runs). Spawn workers cross a READY→persist→GO barrier, own their deadline independently of the manager, and persist run/tracks through a hash-checked transaction intent. Corrupt or ambiguous identity fails closed; orchestrated `await-workers` currently forces this spawn lifecycle instead of Colony routing.
+- `orchestrate recover --json` diagnoses interrupted runs; `--apply` only performs conservative state repair (clear dead locks, settle tracks with no live worker, return stale checkpoints to plan approval, close no-pending-work runs). If run/tracks durably reached `done` before shutdown cleanup, `--apply` immediately replays claim release, checkpoint/review cleanup, and active-run removal without waiting for claim TTL; `halted`, `error`, or live/recent worker state does not use this shortcut. Spawn workers cross a READY→persist→GO barrier, own their deadline independently of the manager, and persist run/tracks through a hash-checked transaction intent. Corrupt or ambiguous identity fails closed; orchestrated `await-workers` currently forces this spawn lifecycle instead of Colony routing.
 
 ### Structured Review Pipeline
 - Review output parsed for CRITICAL/BUG/P0/P1/P2/WARNING/STYLE findings

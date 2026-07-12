@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Made `done`-run shutdown recovery converge immediately after a crash: `recover --apply` now releases residual claims, clears checkpoint/review state, and removes stale active-run entries without waiting for lease expiry, while halted/error and live-worker cases remain fail-closed
 - Prevented run/task identifiers and DocStore artifact paths from escaping managed roots
 - Prevented `init` and `upgrade` from following destination or parent-directory symlinks outside the target project
 - Prevented stale or dirty task worktrees, unrelated working-tree changes, and squash recovery from silently entering approved commits

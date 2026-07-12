@@ -82,7 +82,7 @@ import {
   resolveTrackWorktreePath,
   squashMergeTrackCommit,
 } from "./lib/worktree-isolation.mjs";
-import { DEFAULT_TASK_CLAIM_TTL_MS } from "./lib/constants.mjs";
+import { DEFAULT_TASK_CLAIM_TTL_MS, DEFAULT_TRACK_TIMEOUT_MS } from "./lib/constants.mjs";
 import { resolveWorkspacePaths, writeWorkspace } from "./lib/workspace.mjs";
 import { planTaskIds } from "./lib/plan-helpers.mjs";
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./lib/pilot-state.mjs";
@@ -787,12 +787,110 @@ async function validatePreDispatch(run, opts) {
 
 }
 
+/**
+ * Finish the idempotent cross-file tail after run/tracks reached `done`
+ * state. Claims are released before local evidence is cleared, and the active
+ * index is removed last so a crash at any earlier boundary remains discoverable
+ * by recover --apply without waiting for the lease TTL.
+ */
+function findShutdownBlockingTrack(opts, runSelector, tracksDoc = readTracks(opts.workDir, runSelector)) {
+  const now = Date.now();
+  const timeoutMs = Number.isFinite(opts.trackTimeout) ? opts.trackTimeout : DEFAULT_TRACK_TIMEOUT_MS;
+  return (tracksDoc?.tracks ?? []).find((track) => {
+    if (isTrackWorkerAlive(opts.workDir, runSelector, track)) return true;
+    if (!["starting", "running"].includes(track.state)) return false;
+    const heartbeatMs = Date.parse(track.lastHeartbeat ?? track.startedAt ?? "");
+    return Number.isFinite(heartbeatMs) && now - heartbeatMs < timeoutMs;
+  }) ?? null;
+}
+
+async function finalizeDoneRunShutdown(opts, run, runSelector = opts.runId) {
+  if (!run?.runId || run.phase !== "done") {
+    return { ok: false, code: "RUN_NOT_DONE", message: "run has not reached done", changed: false };
+  }
+  if (runSelector && runSelector !== run.runId) {
+    return {
+      ok: false,
+      code: "RUN_SELECTOR_MISMATCH",
+      message: `run selector ${runSelector} does not match terminal run ${run.runId}`,
+      changed: false,
+    };
+  }
+  const liveTrack = findShutdownBlockingTrack(opts, runSelector);
+  if (liveTrack) {
+    return {
+      ok: false,
+      code: "LIVE_WORKERS",
+      message: `terminal run still has live worker ${liveTrack.taskId}`,
+      changed: false,
+    };
+  }
+
+  const runOpts = buildPersistedRunOpts(opts, run);
+  if (!fs.existsSync(runOpts.stateFile)) {
+    return {
+      ok: false,
+      code: "SPRINT_STATE_MISSING",
+      message: `cannot finalize terminal run without sprint state: ${runOpts.stateFile}`,
+      changed: false,
+    };
+  }
+  const beforeState = readSprintState(runOpts.stateFile);
+  const claimedTaskIds = (beforeState.tasks ?? [])
+    .filter((task) => task.claimedBy === run.runId)
+    .map((task) => task.id);
+  const shutdownPaths = orchestrationPaths(opts.workDir, runSelector);
+  const hadCheckpoint = fs.existsSync(shutdownPaths.checkpoint);
+  const hadPlanReview = fs.existsSync(shutdownPaths.planReview);
+  const wasActive = Boolean(runSelector)
+    && readActiveRuns(opts.workDir).some((entry) => entry.runId === run.runId);
+
+  const releaseResult = await sprintBoardExec(
+    ["release", "--run-id", run.runId, "--json"],
+    runOpts
+  );
+  if (releaseResult.exitCode !== 0) {
+    return {
+      ok: false,
+      code: "RELEASE_FAILED",
+      message: releaseResult.stderr || releaseResult.stdout,
+      changed: false,
+    };
+  }
+  const lingeringClaims = (readSprintState(runOpts.stateFile).tasks ?? [])
+    .filter((task) => task.claimedBy === run.runId)
+    .map((task) => task.id);
+  if (lingeringClaims.length > 0) {
+    return {
+      ok: false,
+      code: "RELEASE_INCOMPLETE",
+      message: `terminal run still owns claims: ${lingeringClaims.join(", ")}`,
+      changed: false,
+    };
+  }
+
+  clearCheckpoint(opts.workDir, runSelector);
+  clearPlanReview(opts.workDir, runSelector);
+  const activeRemoved = runSelector
+    ? await clearActiveRun(opts.workDir, run.runId)
+    : false;
+  return {
+    ok: true,
+    code: "TERMINAL_RUN_FINALIZED",
+    message: "terminal run shutdown tail is complete",
+    changed: claimedTaskIds.length > 0 || hadCheckpoint || hadPlanReview || wasActive || activeRemoved,
+    runId: run.runId,
+    releasedTaskIds: claimedTaskIds,
+    activeRemoved,
+  };
+}
+
 async function orchestrateCloseUnlocked(opts) {
   const run = readRun(opts.workDir, opts.runId);
   if (!run) {
     return emitResult(opts, { ok: true, action: "close", message: "no active run" });
   }
-  const liveTrack = findLiveTrackedWorker(opts.workDir, opts.runId);
+  const liveTrack = findShutdownBlockingTrack(opts, opts.runId);
   if (liveTrack) {
     fail(opts, "LIVE_WORKERS", `cannot close while worker ${liveTrack.taskId} is alive; halt or await it first`, {
       taskId: liveTrack.taskId,
@@ -808,7 +906,7 @@ async function orchestrateCloseUnlocked(opts) {
       if (currentRun?.runId !== run.runId
           || currentRun.phase !== expectedPhase
           || currentRun.updatedAt !== expectedUpdatedAt
-          || findLiveTrackedWorker(opts.workDir, opts.runId, currentTracks)) {
+          || findShutdownBlockingTrack(opts, opts.runId, currentTracks)) {
         return null;
       }
       const now = new Date().toISOString();
@@ -837,24 +935,15 @@ async function orchestrateCloseUnlocked(opts) {
       phase: publication.run?.phase ?? "missing",
     }, 2);
   }
-  // Publish the terminal state first. A crash or release failure then leaves a
-  // harmless stale claim (fail-closed), never an active run whose claim was
-  // already released to a sibling.
-  const releaseResult = await sprintBoardExec(
-    ["release", "--run-id", run.runId, "--json"],
-    opts
-  );
-  if (releaseResult.exitCode !== 0) {
-    fail(opts, "RELEASE_FAILED", releaseResult.stderr || releaseResult.stdout, {
+  // Publish the terminal state first. The remaining cross-file shutdown tail is
+  // deliberately ordered fail-closed and can be replayed by recover --apply.
+  const finalization = await finalizeDoneRunShutdown(opts, publication.run, opts.runId);
+  if (!finalization.ok) {
+    fail(opts, finalization.code, finalization.message, {
       runId: run.runId,
       phase: "done",
       retry: "orchestrate close --run-id <runId>",
     }, 1);
-  }
-  clearCheckpoint(opts.workDir, opts.runId);
-  clearPlanReview(opts.workDir, opts.runId);
-  if (opts.runId) {
-    await clearActiveRun(opts.workDir, run.runId);
   }
   await refreshSnapshot(opts);
   return emitResult(opts, { ok: true, action: "close", runId: run.runId });
@@ -905,7 +994,7 @@ export async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
           continue;
         }
         if (mutation.type === "return-to-plan-approval") {
-          if (findLiveTrackedWorker(opts.workDir, opts.runId, { ...currentTracks, tracks: nextTracks })) continue;
+          if (findShutdownBlockingTrack(opts, opts.runId, { ...currentTracks, tracks: nextTracks })) continue;
           if (!["plan-approved", "dispatch-queued", "running"].includes(nextRun.phase)) continue;
           nextRun.approvedPlanId = null;
           nextRun.phase = "awaiting-plan-approval";
@@ -956,7 +1045,7 @@ export async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
           continue;
         }
         if (mutation.type === "close-run") {
-          if (findLiveTrackedWorker(opts.workDir, opts.runId, { ...currentTracks, tracks: nextTracks })) continue;
+          if (findShutdownBlockingTrack(opts, opts.runId, { ...currentTracks, tracks: nextTracks })) continue;
           if (nextRun.phase !== "cycle-closed") continue;
           nextRun = {
             ...nextRun,
@@ -991,17 +1080,16 @@ export async function applyRecoveryPlan(plan, run, tracksDoc, opts) {
   if (!publication.updated) applied = [];
   const returnedToApproval = applied.some((mutation) => mutation.type === "return-to-plan-approval");
   const closedRun = applied.some((mutation) => mutation.type === "close-run");
-  if (returnedToApproval || closedRun) {
+  if (returnedToApproval) {
     clearCheckpoint(opts.workDir, opts.runId);
     clearPlanReview(opts.workDir, opts.runId);
   }
   if (closedRun) {
-    const releaseResult = await sprintBoardExec(["release", "--run-id", run.runId, "--json"], opts);
-    if (releaseResult.exitCode !== 0) {
-      throw new Error(`recovery closed ${run.runId} but could not release its claims: ${releaseResult.stderr || releaseResult.stdout}`);
-    }
-    if (opts.runId) {
-      await clearActiveRun(opts.workDir, run.runId);
+    const finalization = await finalizeDoneRunShutdown(opts, publication.run, opts.runId);
+    if (!finalization.ok) {
+      const error = /** @type {Error & { code: string }} */ (new Error(finalization.message));
+      error.code = finalization.code;
+      throw error;
     }
   }
   if (applied.length > 0) {
@@ -1044,7 +1132,16 @@ async function orchestrateRecover(opts) {
     const application = run
       ? await applyRecoveryPlan(plan, run, tracksDoc, opts)
       : { applied: false, mutations: [] };
-    return { plan, application };
+    let terminalFinalization = null;
+    if (opts.parsed?.flags?.has("apply") && run?.phase === "done") {
+      terminalFinalization = await finalizeDoneRunShutdown(opts, run, opts.runId);
+      if (!terminalFinalization.ok) {
+        const error = /** @type {Error & { code: string }} */ (new Error(terminalFinalization.message));
+        error.code = terminalFinalization.code;
+        throw error;
+      }
+    }
+    return { plan, application, terminalFinalization };
   };
 
   let inspection;
@@ -1066,15 +1163,18 @@ async function orchestrateRecover(opts) {
   } else {
     inspection = await inspectAndApply();
   }
-  const { plan, application } = inspection;
+  const { plan, application, terminalFinalization } = inspection;
   // Lazily release claims held by dead runs (lease expired + no active track). This is
   // the "steal expired claim" half of the lazy-takeover policy: recover is the only
   // place that actively scans for dead runs. Only mutates under --apply.
   const claimRelease = opts.parsed?.flags?.has("apply")
     ? await recoverDeadRunClaims(opts)
-    : { released: [], skipped: true };
+    : { released: [], finalized: [], skipped: true };
   const snapshot = await refreshSnapshot(opts);
-  const recovered = (application.applied && application.mutations.length > 0) || claimRelease.released.length > 0;
+  const recovered = (application.applied && application.mutations.length > 0)
+    || Boolean(terminalFinalization?.changed)
+    || claimRelease.released.length > 0
+    || (claimRelease.finalized ?? []).some((entry) => entry.changed);
   const ok = plan.ok || recovered;
   return emitResult(opts, {
     ok,
@@ -1082,6 +1182,8 @@ async function orchestrateRecover(opts) {
     applied: application.applied,
     plan,
     releasedClaims: claimRelease.released,
+    terminalFinalization,
+    finalizedRuns: claimRelease.finalized ?? [],
     snapshot,
   }, ok ? 0 : 1);
 }
@@ -1119,45 +1221,67 @@ export function buildPersistedRunOpts(opts, run) {
 }
 
 /**
- * Scan all active runs and release claims held by runs whose lease has expired
- * (heartbeat older than the claim TTL) AND that have no live track. A run with a
- * running track whose own heartbeat is within the track timeout is NOT considered
- * dead — the worker may still be executing even if the manager has been quiet.
+ * Reconcile active runs. Done runs bypass the lease TTL and immediately
+ * finish their idempotent shutdown tail when no worker is live. Nonterminal
+ * runs retain the existing expired-lease claim-release behavior.
  *
- * @returns {Promise<{ released: Array<{ runId: string, taskIds: string[] }>, skipped: boolean }>}
+ * @returns {Promise<{
+ *   released: Array<{ runId: string, taskIds: string[] }>,
+ *   finalized: Array<{ runId: string, changed: boolean, activeRemoved: boolean }>,
+ *   skipped: boolean,
+ * }>}
  */
 export async function recoverDeadRunClaims(opts) {
   const activeRuns = readActiveRuns(opts.workDir);
   if (activeRuns.length === 0) {
-    return { released: [], skipped: true };
+    return { released: [], finalized: [], skipped: true };
   }
   const now = Date.now();
   const ttlMs = DEFAULT_TASK_CLAIM_TTL_MS;
   const released = [];
+  const finalized = [];
 
   for (const entry of activeRuns) {
     const heartbeatMs = entry.heartbeatAt ? Date.parse(entry.heartbeatAt) : NaN;
-    if (Number.isFinite(heartbeatMs) && (now - heartbeatMs) < ttlMs) {
+    const initialRun = readRun(opts.workDir, entry.runId);
+    if (initialRun?.phase !== "done"
+        && Number.isFinite(heartbeatMs)
+        && (now - heartbeatMs) < ttlMs) {
       continue; // lease still live
     }
     try {
       await withPilotFileLock(executorLockTarget(opts.workDir, entry.runId), async () => {
         const latestEntry = readActiveRuns(opts.workDir).find((item) => item.runId === entry.runId);
-        const latestHeartbeatMs = latestEntry?.heartbeatAt ? Date.parse(latestEntry.heartbeatAt) : NaN;
-        if (!latestEntry || (Number.isFinite(latestHeartbeatMs) && (Date.now() - latestHeartbeatMs) < ttlMs)) {
-          return;
-        }
+        if (!latestEntry) return;
         const persistedRun = readRun(opts.workDir, entry.runId);
         if (!persistedRun) return;
-        const checkAt = Date.now();
+        const done = persistedRun.phase === "done";
+        const latestHeartbeatMs = latestEntry.heartbeatAt ? Date.parse(latestEntry.heartbeatAt) : NaN;
+        if (!done
+            && Number.isFinite(latestHeartbeatMs)
+            && (Date.now() - latestHeartbeatMs) < ttlMs) {
+          return;
+        }
         const tracksDoc = readTracks(opts.workDir, entry.runId);
-        const hasLiveTrack = (tracksDoc?.tracks ?? []).some((track) => {
-          if (isTrackWorkerAlive(opts.workDir, entry.runId, track)) return true;
-          if (!["starting", "running"].includes(track.state)) return false;
-          const trackMs = track.lastHeartbeat ? Date.parse(track.lastHeartbeat) : NaN;
-          return Number.isFinite(trackMs) && (checkAt - trackMs) < opts.trackTimeout;
-        });
-        if (hasLiveTrack) return;
+        if (findShutdownBlockingTrack(opts, entry.runId, tracksDoc)) return;
+
+        if (done) {
+          const finalization = await finalizeDoneRunShutdown(opts, persistedRun, entry.runId);
+          if (!finalization.ok) {
+            const error = /** @type {Error & { code: string }} */ (new Error(finalization.message));
+            error.code = finalization.code;
+            throw error;
+          }
+          finalized.push({
+            runId: persistedRun.runId,
+            changed: finalization.changed,
+            activeRemoved: finalization.activeRemoved,
+          });
+          if (finalization.releasedTaskIds.length > 0) {
+            released.push({ runId: persistedRun.runId, taskIds: finalization.releasedTaskIds });
+          }
+          return;
+        }
 
         const runOpts = buildPersistedRunOpts(opts, persistedRun);
         if (!fs.existsSync(runOpts.stateFile)) return;
@@ -1181,7 +1305,7 @@ export async function recoverDeadRunClaims(opts) {
     }
   }
 
-  return { released, skipped: false };
+  return { released, finalized, skipped: false };
 }
 
 async function promoteLegacyRootRun(opts) {
@@ -2890,7 +3014,7 @@ export async function runOrchestrateCommand(subcommand, argv) {
   // run here would revive a dead run immediately before recover scans it.
   if (opts.runId && !["init", "list-runs", "recover"].includes(subcommand)) {
     const run = readRun(opts.workDir, opts.runId);
-    if (run?.runId) {
+    if (run?.runId && !isTerminalRunPhase(run.phase)) {
       // Heartbeat is best-effort: a short lock timeout (no long backoff) so command
       // latency stays low. If the active-index lock is contended, skip this heartbeat
       // — the lease TTL is宽松 (>= 60min), so a missed beat is harmless. This keeps

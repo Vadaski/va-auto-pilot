@@ -642,6 +642,211 @@ test("dead-run recovery releases claims from each run's persisted workspace", as
   assert.equal(JSON.parse(fs.readFileSync(isolatedState, "utf8")).tasks[0].claimedBy, "");
 });
 
+test("recover immediately finalizes a terminal run shutdown tail without waiting for claim TTL", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-terminal-recover-"));
+  const runId = "run-terminal-crash";
+  const stateFile = writeState(root, [{
+    id: "AP-001",
+    title: "terminal claim",
+    priority: "P0",
+    state: "Backlog",
+    claimedBy: runId,
+    claimedAt: new Date().toISOString(),
+    claimExpiresAt: "2099-01-01T00:00:00.000Z",
+    dependsOn: [],
+  }]);
+  await writeRun(root, {
+    schemaVersion: 1,
+    runId,
+    phase: "done",
+    locks: { executorPid: null },
+    workspace: {
+      name: "default",
+      type: "shared",
+      dir: root,
+      executionTree: "shared",
+      stateFile,
+      boardFile: path.join(root, "docs", "todo", "sprint.md"),
+      journalFile: path.join(root, "docs", "todo", "run-journal.md"),
+      pitfallsFile: path.join(root, ".va-auto-pilot", "pitfalls.json"),
+    },
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }, runId);
+  await writeTracks(root, { schemaVersion: 1, runId, tracks: [] }, runId);
+  await writeActiveRun(root, {
+    runId,
+    startedAt: new Date().toISOString(),
+    heartbeatAt: new Date().toISOString(),
+  });
+  const paths = orchestrationPaths(root, runId);
+  fs.writeFileSync(paths.checkpoint, `${JSON.stringify({ approvedPlanId: "stale-plan" })}\n`);
+  fs.writeFileSync(paths.planReview, `${JSON.stringify({ status: "PASS" })}\n`);
+
+  const recovered = runNode(root, AUTO_PILOT, [
+    "orchestrate", "recover", "--apply", "--run-id", runId, "--json",
+  ]);
+  assert.equal(recovered.status, 0, recovered.stderr);
+  const payload = JSON.parse(recovered.stdout);
+  assert.equal(payload.terminalFinalization.changed, true);
+  assert.deepEqual(payload.terminalFinalization.releasedTaskIds, ["AP-001"]);
+  assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).tasks[0].claimedBy, "");
+  assert.equal(readActiveRuns(root).some((entry) => entry.runId === runId), false);
+  assert.equal(fs.existsSync(paths.checkpoint), false);
+  assert.equal(fs.existsSync(paths.planReview), false);
+
+  const retry = runNode(root, AUTO_PILOT, [
+    "orchestrate", "recover", "--apply", "--run-id", runId, "--json",
+  ]);
+  assert.equal(retry.status, 0, retry.stderr);
+  assert.equal(JSON.parse(retry.stdout).terminalFinalization.changed, false);
+
+  const rejectedPlan = runNode(root, AUTO_PILOT, [
+    "orchestrate", "plan", "--run-id", runId, "--json",
+  ]);
+  assert.notEqual(rejectedPlan.status, 0);
+  assert.equal(readActiveRuns(root).some((entry) => entry.runId === runId), false);
+
+  const init = runNode(root, AUTO_PILOT, ["orchestrate", "init", "--json"]);
+  assert.equal(init.status, 0, init.stderr);
+});
+
+test("dead-run scan removes a fresh terminal active entry even when it has no claims", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-terminal-no-claims-"));
+  const runId = "run-terminal-no-claims";
+  const stateFile = writeState(root, []);
+  await writeRun(root, {
+    schemaVersion: 1,
+    runId,
+    phase: "done",
+    locks: { executorPid: null },
+    workspace: {
+      name: "default",
+      type: "shared",
+      dir: root,
+      executionTree: "shared",
+      stateFile,
+    },
+  }, runId);
+  await writeTracks(root, { schemaVersion: 1, runId, tracks: [] }, runId);
+  await writeActiveRun(root, {
+    runId,
+    startedAt: new Date().toISOString(),
+    heartbeatAt: new Date().toISOString(),
+  });
+
+  const result = await recoverDeadRunClaims({
+    workDir: root,
+    stateFile,
+    boardFile: path.join(root, "docs", "todo", "sprint.md"),
+    journalFile: path.join(root, "docs", "todo", "run-journal.md"),
+    pitfallsFile: path.join(root, ".va-auto-pilot", "pitfalls.json"),
+    trackTimeout: 1_000,
+    sprintBoardLock: Promise.resolve(),
+  });
+
+  assert.deepEqual(result.released, []);
+  assert.deepEqual(result.finalized, [{ runId, changed: true, activeRemoved: true }]);
+  assert.equal(readActiveRuns(root).some((entry) => entry.runId === runId), false);
+});
+
+test("recover does not finalize halted runs with a fresh lease", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-halted-not-done-"));
+  const runId = "run-halted-not-done";
+  const stateFile = writeState(root, [{
+    id: "AP-001",
+    title: "halted claim",
+    priority: "P0",
+    state: "Backlog",
+    claimedBy: runId,
+    claimedAt: new Date().toISOString(),
+    claimExpiresAt: "2099-01-01T00:00:00.000Z",
+    dependsOn: [],
+  }]);
+  await writeRun(root, {
+    schemaVersion: 1,
+    runId,
+    phase: "halted",
+    locks: { executorPid: null },
+    workspace: { name: "default", type: "shared", executionTree: "shared", stateFile },
+  }, runId);
+  await writeTracks(root, { schemaVersion: 1, runId, tracks: [] }, runId);
+  await writeActiveRun(root, {
+    runId,
+    startedAt: new Date().toISOString(),
+    heartbeatAt: new Date().toISOString(),
+  });
+
+  const recovered = runNode(root, AUTO_PILOT, [
+    "orchestrate", "recover", "--apply", "--run-id", runId, "--json",
+  ]);
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.equal(JSON.parse(recovered.stdout).terminalFinalization, null);
+  assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).tasks[0].claimedBy, runId);
+  assert.equal(readActiveRuns(root).some((entry) => entry.runId === runId), true);
+});
+
+test("recent running-track evidence blocks done-run finalization on every recover path", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-done-running-track-"));
+  const runId = "run-done-running-track";
+  const stateFile = writeState(root, [{
+    id: "AP-001",
+    title: "running claim",
+    priority: "P0",
+    state: "Backlog",
+    claimedBy: runId,
+    claimedAt: new Date().toISOString(),
+    claimExpiresAt: "2099-01-01T00:00:00.000Z",
+    dependsOn: [],
+  }]);
+  await writeRun(root, {
+    schemaVersion: 1,
+    runId,
+    phase: "done",
+    locks: { executorPid: null },
+    workspace: { name: "default", type: "shared", executionTree: "shared", stateFile },
+  }, runId);
+  await writeTracks(root, {
+    schemaVersion: 1,
+    runId,
+    tracks: [{
+      taskId: "AP-001",
+      dispatchId: "dispatch-recent",
+      state: "running",
+      pid: null,
+      workerToken: "",
+      lastHeartbeat: new Date().toISOString(),
+    }],
+  }, runId);
+  await writeActiveRun(root, {
+    runId,
+    startedAt: new Date().toISOString(),
+    heartbeatAt: new Date().toISOString(),
+  });
+
+  const recovered = runNode(root, AUTO_PILOT, [
+    "orchestrate", "recover", "--apply", "--run-id", runId,
+    "--track-timeout", "600000", "--json",
+  ]);
+  assert.notEqual(recovered.status, 0);
+  assert.match(recovered.stderr, /LIVE_WORKERS/);
+  assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).tasks[0].claimedBy, runId);
+  assert.equal(readActiveRuns(root).some((entry) => entry.runId === runId), true);
+
+  const scanned = await recoverDeadRunClaims({
+    workDir: root,
+    stateFile,
+    boardFile: path.join(root, "docs", "todo", "sprint.md"),
+    journalFile: path.join(root, "docs", "todo", "run-journal.md"),
+    pitfallsFile: path.join(root, ".va-auto-pilot", "pitfalls.json"),
+    trackTimeout: 600_000,
+    sprintBoardLock: Promise.resolve(),
+  });
+  assert.deepEqual(scanned.released, []);
+  assert.deepEqual(scanned.finalized, []);
+  assert.equal(readActiveRuns(root).some((entry) => entry.runId === runId), true);
+});
+
 test("run-specific planning never returns work actively claimed by another run", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-foreign-claim-"));
   const stateFile = writeState(root, [

@@ -1,0 +1,99 @@
+按正式 detached-snapshot 审查流程：先独立校验五项身份与只读条件，再通读计划并做对抗性审查。五项身份已对齐。开始通读计划全文，并抽样对照代码与历史轮次。核对“可逆直至 finalize”与 C1/L2 交付依赖是否存在硬冲突。## Detached-Snapshot Plan Review (Round 9)
+
+### Identity verification (pre-review)
+
+| Check | Verified value |
+| --- | --- |
+| NONCE | `34F29B41-5DAE-4375-98D4-D2E7E802E5BA` |
+| SNAPSHOT_COMMIT (HEAD) | `d011be500bce9f60fcfe856e9d3912b2106a2250` |
+| SNAPSHOT_TREE | `fa4914da7382163ec0b290520e4c526911442ced` |
+| PLAN_SHA256 | `84090e8f050b49383368bc5ef9955d9df79e28659518ce00a3991967f0027821` |
+| git status | empty |
+| plan writability | mode `0444`, `W_OK=false` |
+| CLEAN_READ_ONLY | **true** |
+
+五元组与只读条件一致；以下为独立对抗审查（rounds 1–8 / preflight 仅作诊断史，结论不采信）。
+
+---
+
+### Perspective
+
+Crash consistency · state authority · capability / recovery adversary.  
+Walked: forward adoption, reverse export→materialize→flip, protected JSON COW, open predicates, leases/fences, outbox/inbox, Git saga, terminal/goal promotion, calibration saga, execution-cell durability, capability ceiling/grants.
+
+---
+
+### What already holds (non-blocking summary)
+
+R7–R9 类问题在正文中大多已闭合：`phase=activating` 在 seal/project/exit 前禁止 production open；reverse 在 `active+none` 前保持 recovery-only；Git 排除 generic outbox 且 `prepared→commit-object→ref-updated→kernel-bound` 单动作；inbox `pending→settled` 无 bind-before-ack 窗口；protected COW `prepared` 持久化 mutation 字节；capability 为 `min(backend ceiling, cell/grant/calibration)`；reverse flip 将 ceiling 压到 `protected-json-manual`；Node/durability-class 为 open 硬谓词。这些路径未再发现可执行的 false-success 双权威窗口。
+
+---
+
+### Blocking findings
+
+#### P1-1 — 可逆性不变量与 C1/L2 启用未机械闭合（双路径不可逆）
+
+**Invariant 冲突**
+
+- §2：migration “**reversible until** an explicit irreversible-finalization checkpoint is approved”。
+- §4.3：L2/trusted terminal 在无 lossless rollback-capability 时 **拒绝 reverse**（A3-REV-10）；且 “Before the first irreversible feature is used, the operator **must** run `state finalize-migration --irreversible`”。
+- §8 交付图：`C1` **仅 Depends on A3**（contracts/receipts/chain/provisional terminals），**不**依赖 finalize，也 **不**要求 C1 merge 证明 receipts/terminals 的 lossless reverse 条目。
+- `protected-json-manual` 禁止 live L2 receipts/feedback/calibration/trusted terminal——与 “收据可无损回到 protected-json 权威” 默认不相容，又无强制的 capability 表证明。
+
+**Attack trace**
+
+1. 完成 A3 cutover；**未** consume 两钥 irreversible-finalization；doctor/capability 仍宣称 reverse 可用。  
+2. 合并 C1：写入 receipt chain / `TaskDoneProvisional` / provisional attestation（L2 或 trusted-terminal 历史行）。  
+3. 运行 reverse → A3-REV-10 fail-closed；SQLite 仍权威，但 reverse 能力在无 finalization 仪式、无 `surrendered rollback capabilities` 枚举的情况下已实质丧失。  
+4. 结果：存在 **两条** 进入不可逆（或不可 reverse）的路径——（A）显式 `finalize-migration --irreversible`；（B）静默 L2 写入——与 “唯一不可逆检查点” 及 dual-authority/capability 诚实边界冲突。这是 **implementation gap making a required invariant non-executable**，也是 **dishonest reverse/support window**。
+
+**Minimum plan correction**
+
+任选其一并写入可执行门闩（schema + fault row + track depends）：
+
+1. **Gate L2**：任何 reverse-blocking 写入（receipt/feedback/calibration/trusted terminal）前，必须存在 `finalize-migration` 完成记录，或单次 “accept reverse loss” 两钥审批并记入 authority/capability 账本；**或**  
+2. **Lossless-first**：C1/B2/C2 启用前，A0/A3 `rollback_capability` 表对每一 L2 类型给出可机器验证的 protected-json 表示与 A3-REV 往返证明；缺条目则 L2 writer fail-closed；**或**  
+3. **改写不变量**：明确 “A3 后、finalize 前仅 L1 可逆；L2 启用 = 部分不可逆”，并在 doctor/capability 中在首条 L2 写入前/时下调 reverse 能力（不得继续宣称 full reverse until finalize）。
+
+交付图至少改为：`C1` depends on `A3 + (finalize|lossless-capability-set)`，并增加 fault：`A3-REV-12` / `C1-L2-01`（L2 启用与 reverse 能力账本不一致 → fail-closed）。
+
+---
+
+#### P1-2 — Forward freeze “semantic conflict” 缺少一等 durable 目的子相（首迁路径）
+
+**Gap**
+
+Forward 矩阵 “record semantic conflict” 行：
+
+- reactivation：明确 CAS 到 `manual-conflict`；  
+- **first adoption**：仅写 “CASes the control intent subphase”，**未命名** 目标 subphase；  
+- 该行 “Action while entry persists” 仍为 `resume-freeze`，与 `manual-conflict → diagnose-only` 总表不对齐。
+
+**Attack / failure mode**
+
+1. 首迁 freeze 发现 divergent/malformed 图，validator 记 finding hash。  
+2. 若 intent 仍停在 `freeze-partial`（唯一合法 recovery = `resume-freeze`），崩溃恢复会继续 freeze/import，而非 `diagnose-only`。  
+3. 与 §2 “malformed/divergent … quarantined and **blocks cutover**” 冲突 → 可执行路径上 **ambiguous authority import** 或冲突态不可区分（两动作争同一持久态：继续 freeze vs 停机诊断）。
+
+**Minimum plan correction**
+
+- 首迁与 reactivation 对称：conflict 时 durable 目标一律为 `manual-conflict`（pre-authority intent 或 authority row）。  
+- 删掉 conflict 行上的 `resume-freeze`；仅 `freeze-partial` 且 **无** conflict finding 时 `resume-freeze`。  
+- 增加 fault `A3-FWD-CONFLICT-01`：kill 在 finding 持久化后 → 必为 `diagnose-only`，不得 `freeze-verified`/`importing`。
+
+---
+
+### P2（nonblocking）
+
+1. **`terminal-evidence-pending` 耗尽**：有界重试后无 `manual-conflict`/re-proof 终态，存在 liveness stall（非 false success）。  
+2. **任务 vs 目标晋升不对称**：`GitBoundUntrusted` 在 `full-trusted` 下可一步到 `TaskDone`；目标强制 `provisional→promote`。建议任务也强制 promotion 字段填充，避免审计证据缺口。  
+3. **`protected_json_writes` “one current write”**：`bound` 后如何释放 current 指针未写死，实现易误锁死 L1 写入。  
+4. **历史 `TaskDone` 即使 `TaskProofStale` 仍按 A3-REV-10 阻塞 reverse**：与 P1-1 同源；应在 capability 账本中显式暴露。
+
+---
+
+### Verdict
+
+存在 **2** 个 P1（可逆性/L2 双路径；freeze conflict 目的子相）。不满足 “zero CRITICAL/P1”。
+
+PLAN REVIEW STATUS: FAIL

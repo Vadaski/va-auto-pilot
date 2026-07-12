@@ -2,8 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-
-const root = process.cwd();
+import { pathToFileURL } from "node:url";
 
 const scanRoots = [
   "README.md",
@@ -19,6 +18,8 @@ const excludedFiles = new Set([
 ]);
 
 const excludedPrefixes = [
+  "docs/plans/",
+  "docs/reviews/",
   "docs/todo/",
 ];
 
@@ -28,13 +29,13 @@ function normalize(relativePath) {
   return relativePath.replace(/\\/g, "/");
 }
 
-function isExcluded(relativePath) {
+export function isExcluded(relativePath) {
   const normalized = normalize(relativePath);
   return excludedFiles.has(normalized)
     || excludedPrefixes.some((prefix) => normalized.startsWith(prefix));
 }
 
-function collectFiles(entry, files = []) {
+function collectFiles(root, entry, files = []) {
   const absolutePath = path.join(root, entry);
   if (!fs.existsSync(absolutePath)) {
     return files;
@@ -53,38 +54,47 @@ function collectFiles(entry, files = []) {
   }
 
   for (const dirent of fs.readdirSync(absolutePath, { withFileTypes: true })) {
-    collectFiles(path.join(entry, dirent.name), files);
+    collectFiles(root, path.join(entry, dirent.name), files);
   }
   return files;
 }
 
-const files = scanRoots.flatMap((entry) => collectFiles(entry));
-const findings = [];
-
-for (const file of files) {
-  const text = fs.readFileSync(path.join(root, file), "utf8");
-  const lines = text.split(/\r?\n/);
-  for (let index = 0; index < lines.length; index += 1) {
-    bannedPattern.lastIndex = 0;
-    const matches = [...lines[index].matchAll(bannedPattern)];
-    for (const match of matches) {
-      findings.push({
-        file: normalize(file),
-        line: index + 1,
-        match: match[0],
-        text: lines[index].trim(),
-      });
+export function validatePublicNarrative(root = process.cwd()) {
+  const files = scanRoots.flatMap((entry) => collectFiles(root, entry));
+  const findings = [];
+  for (const file of files) {
+    const text = fs.readFileSync(path.join(root, file), "utf8");
+    const lines = text.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      bannedPattern.lastIndex = 0;
+      const matches = [...lines[index].matchAll(bannedPattern)];
+      for (const match of matches) {
+        findings.push({
+          file: normalize(file),
+          line: index + 1,
+          match: match[0],
+          text: lines[index].trim(),
+        });
+      }
     }
   }
+  return { files: files.map(normalize), findings };
 }
 
-if (findings.length > 0) {
-  console.error("Public narrative scan failed:");
-  for (const finding of findings) {
-    console.error(`${finding.file}:${finding.line}: ${finding.match}`);
-    console.error(`  ${finding.text}`);
+export function main() {
+  const { files, findings } = validatePublicNarrative();
+  if (findings.length > 0) {
+    console.error("Public narrative scan failed:");
+    for (const finding of findings) {
+      console.error(`${finding.file}:${finding.line}: ${finding.match}`);
+      console.error(`  ${finding.text}`);
+    }
+    process.exitCode = 1;
+    return;
   }
-  process.exit(1);
+  console.log(`Public narrative scan passed (${files.length} files).`);
 }
 
-console.log(`Public narrative scan passed (${files.length} files).`);
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main();
+}

@@ -362,6 +362,7 @@ curl -fsSL https://raw.githubusercontent.com/Vadaski/va-auto-pilot/main/skills/v
 - 协议：`docs/operations/va-auto-pilot-protocol.md`
 - 公共叙事规范：`docs/operations/public-narrative-spec.md`
 - 开源准备清单：`docs/operations/open-source-readiness-checklist.md`
+- 故障注入耐久测试：`docs/operations/fault-injection-soak.md`
 - 下一代路线图：`docs/operations/next-gen-harness-loop-roadmap.md`
 - 启动提示：`docs/operations/start-va-auto-pilot-prompt.md`
 - 分发说明：`docs/operations/distribute-skill.md`
@@ -384,6 +385,7 @@ cd website && python3 -m http.server 4173
 
 ```bash
 npm run check:all
+npm run check:fault-injection
 npm run validate:distribution
 ```
 

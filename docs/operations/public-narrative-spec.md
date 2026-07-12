@@ -169,9 +169,9 @@ Chinese:
 Run these before closing any public narrative cleanup task:
 
 ```bash
-rg -n "Co-creators|共创作者|超越时代两个版本|protocol engineering|weak model|弱模型|vs MCP|vs A2A|MCP \\(Anthropic\\)|A2A \\(Google\\)|返回值 = 结果|验证机制.*弱|Codex-only|Claude-only|Powered by va-agent-protocol|<review-agent>" README.md README.zh.md website docs --glob '!docs/todo/**' --glob '!docs/operations/public-narrative-spec.md' --glob '!docs/operations/public-positioning-audit.md' --glob '!docs/operations/open-source-readiness-checklist.md'
-rg -n "Claude Opus|GPT-5|gpt-5\\.[0-9]|composer-2\\.5|templates/scripts|human-out-of-the-loop" README.md README.zh.md website docs --glob '!docs/todo/**' --glob '!docs/operations/public-narrative-spec.md' --glob '!docs/operations/public-positioning-audit.md' --glob '!docs/operations/open-source-readiness-checklist.md'
-rg -n "Codex|Claude" README.md README.zh.md website docs/operations docs/articles --glob '!docs/todo/**' --glob '!docs/operations/public-narrative-spec.md' --glob '!docs/operations/public-positioning-audit.md' --glob '!docs/operations/open-source-readiness-checklist.md'
+rg -n "Co-creators|共创作者|超越时代两个版本|protocol engineering|weak model|弱模型|vs MCP|vs A2A|MCP \\(Anthropic\\)|A2A \\(Google\\)|返回值 = 结果|验证机制.*弱|Codex-only|Claude-only|Powered by va-agent-protocol|<review-agent>" README.md README.zh.md website docs --glob '!docs/plans/**' --glob '!docs/reviews/**' --glob '!docs/todo/**' --glob '!docs/operations/public-narrative-spec.md' --glob '!docs/operations/public-positioning-audit.md' --glob '!docs/operations/open-source-readiness-checklist.md'
+rg -n "Claude Opus|GPT-5|gpt-5\\.[0-9]|composer-2\\.5|templates/scripts|human-out-of-the-loop" README.md README.zh.md website docs --glob '!docs/plans/**' --glob '!docs/reviews/**' --glob '!docs/todo/**' --glob '!docs/operations/public-narrative-spec.md' --glob '!docs/operations/public-positioning-audit.md' --glob '!docs/operations/open-source-readiness-checklist.md'
+rg -n "Codex|Claude" README.md README.zh.md website docs/operations docs/articles --glob '!docs/plans/**' --glob '!docs/reviews/**' --glob '!docs/todo/**' --glob '!docs/operations/public-narrative-spec.md' --glob '!docs/operations/public-positioning-audit.md' --glob '!docs/operations/open-source-readiness-checklist.md'
 ```
 
 The last command is not a zero-match rule. Remaining vendor mentions must be one

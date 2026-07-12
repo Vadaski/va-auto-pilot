@@ -73,6 +73,7 @@
     "check:mcp-resources": "node ./scripts/validate-mcp-resources.mjs",
     "check:protocol-fixtures": "node ./scripts/validate-protocol-fixtures.mjs",
     "check:runtime-proof": "node ./scripts/validate-runtime-proof.mjs",
+    "check:fault-injection": "node ./scripts/fault-injection-soak.mjs --iterations 3",
     "check:smoke": "node ./scripts/smoke-test-runner.mjs --config test-flows/cli-critical-smoke.yaml --timeout 60000",
     "check:public-narrative": "node ./scripts/validate-public-narrative.mjs",
     "check:website": "node ./scripts/validate-website.mjs",

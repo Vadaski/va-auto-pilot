@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Repeatable crash fault-injection soak runner with worker, commit-transaction, and orchestration-recovery suites plus JSON reporting
 - Evidence artifact verification for bundle containment, regular-file identity, byte size, and SHA-256 content binding
 - Cockpit structured-proof summaries that validate current-run evidence manifests, event bindings, required gates, outcomes, and declared review counts before completion trust
 - Evidence-backed pitfall rule promotion, effectiveness feedback, confidence decay, retirement, and deterministic conflict quarantine

@@ -382,6 +382,7 @@ See the next-gen Harness + Loop roadmap:
 - Protocol: `docs/operations/va-auto-pilot-protocol.md`
 - Public narrative spec: `docs/operations/public-narrative-spec.md`
 - Open-source readiness checklist: `docs/operations/open-source-readiness-checklist.md`
+- Fault-injection soak: `docs/operations/fault-injection-soak.md`
 - Next-gen roadmap: `docs/operations/next-gen-harness-loop-roadmap.md`
 - Start prompt: `docs/operations/start-va-auto-pilot-prompt.md`
 - Distribution: `docs/operations/distribute-skill.md`
@@ -404,6 +405,7 @@ cd website && python3 -m http.server 4173
 
 ```bash
 npm run check:all
+npm run check:fault-injection
 npm run validate:distribution
 ```
 

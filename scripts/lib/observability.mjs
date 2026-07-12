@@ -218,6 +218,217 @@ export function taskEvidenceBundlePaths(workDir, runId, taskId) {
   };
 }
 
+function invalidBundleSummary(relativeManifest, errors, expected = {}) {
+  return {
+    manifest: String(relativeManifest ?? ""),
+    manifestValid: false,
+    errors,
+    runId: String(expected.runId ?? ""),
+    taskId: String(expected.taskId ?? ""),
+    state: "",
+    outcome: "",
+    gates: [],
+    requiredGateCount: 0,
+    passedRequiredGateCount: 0,
+    failedGates: [],
+    review: { present: false, verified: false, criticalCount: null, warningCount: null, disposition: "" },
+  };
+}
+
+export function readTaskEvidenceSummary(workDir, relativeManifest, expected = {}) {
+  const root = path.resolve(workDir);
+  const evidenceRoot = resolveEvidenceDir(root);
+  const manifestPath = path.resolve(root, String(relativeManifest ?? ""));
+  const relativeToEvidence = path.relative(evidenceRoot, manifestPath);
+  if (!relativeToEvidence
+      || relativeToEvidence.startsWith("..")
+      || path.isAbsolute(relativeToEvidence)
+      || path.basename(manifestPath) !== "manifest.json") {
+    return invalidBundleSummary(relativeManifest, ["manifest path escapes the managed evidence root"], expected);
+  }
+
+  try {
+    ensureSafeManagedPath(root, manifestPath, { create: false });
+  } catch (error) {
+    return invalidBundleSummary(relativeManifest, [String(error?.message ?? error)], expected);
+  }
+  if (!fs.existsSync(manifestPath) || !fs.lstatSync(manifestPath).isFile()) {
+    return invalidBundleSummary(relativeManifest, ["manifest file does not exist"], expected);
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  } catch (error) {
+    return invalidBundleSummary(relativeManifest, [`manifest JSON is invalid: ${String(error?.message ?? error)}`], expected);
+  }
+  const validation = validateBundleManifest(manifest);
+  const errors = [...validation.errors];
+  let parsedEvents = [];
+  if (manifest.bundleType !== "task") errors.push("manifest must be a task bundle");
+  if (expected.runId && manifest.runId !== expected.runId) {
+    errors.push(`manifest runId ${manifest.runId ?? "<missing>"} does not match ${expected.runId}`);
+  }
+  if (expected.taskId && manifest.taskId !== expected.taskId) {
+    errors.push(`manifest taskId ${manifest.taskId ?? "<missing>"} does not match ${expected.taskId}`);
+  }
+  if (manifest.state !== manifest.outcome?.state) {
+    errors.push(`manifest state ${manifest.state ?? "<missing>"} does not match outcome ${manifest.outcome?.state ?? "<missing>"}`);
+  }
+  const boundRunId = expected.runId || String(manifest.runId ?? "");
+  const boundTaskId = expected.taskId || String(manifest.taskId ?? "");
+
+  const bundleDir = path.dirname(manifestPath);
+  const eventsPath = path.resolve(bundleDir, String(manifest.eventsLog ?? ""));
+  const relativeEventsPath = path.relative(bundleDir, eventsPath);
+  if (!relativeEventsPath || relativeEventsPath.startsWith("..") || path.isAbsolute(relativeEventsPath)) {
+    errors.push("eventsLog escapes the evidence bundle");
+  } else {
+    try {
+      ensureSafeManagedPath(root, eventsPath, { create: false });
+      if (!fs.existsSync(eventsPath) || !fs.lstatSync(eventsPath).isFile()) {
+        errors.push("eventsLog file does not exist");
+      } else {
+        const eventLines = fs.readFileSync(eventsPath, "utf8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const events = [];
+        for (const [index, line] of eventLines.entries()) {
+          try {
+            const event = JSON.parse(line);
+            const eventValidation = validateEvent(event);
+            if (!eventValidation.ok) {
+              errors.push(`eventsLog line ${index + 1}: ${eventValidation.errors.join("; ")}`);
+            }
+            if (boundRunId && event.runId !== boundRunId) {
+              errors.push(`eventsLog line ${index + 1}: runId does not match ${boundRunId}`);
+            }
+            if (boundTaskId && event.taskId !== boundTaskId) {
+              errors.push(`eventsLog line ${index + 1}: taskId does not match ${boundTaskId}`);
+            }
+            events.push(event);
+          } catch (error) {
+            errors.push(`eventsLog line ${index + 1}: invalid JSON (${String(error?.message ?? error)})`);
+          }
+        }
+        if (events.length === 0) {
+          errors.push("eventsLog contains no events");
+        }
+        const eventIds = new Set(events.map((event) => event.eventId));
+        for (const entry of Array.isArray(manifest.timeline) ? manifest.timeline : []) {
+          if (!eventIds.has(entry.eventId)) {
+            errors.push(`timeline event ${entry.eventId} is missing from eventsLog`);
+          }
+        }
+        parsedEvents = events;
+      }
+    } catch (error) {
+      errors.push(String(error?.message ?? error));
+    }
+  }
+
+  const gates = (Array.isArray(manifest.gates) ? manifest.gates : []).map((gate) => ({
+    name: String(gate?.name ?? ""),
+    required: gate?.required === true,
+    passed: gate?.passed === true,
+    exitCode: Number.isInteger(Number(gate?.exitCode)) ? Number(gate.exitCode) : 1,
+    durationMs: Number.isInteger(Number(gate?.durationMs)) ? Number(gate.durationMs) : 0,
+  }));
+  const requiredGates = gates.filter((gate) => gate.required);
+  const eventGates = parsedEvents
+    .filter((event) => event.eventType === "task.gate")
+    .map((event) => ({
+      name: String(event.payload?.gateName ?? ""),
+      required: event.payload?.required !== false,
+      passed: event.payload?.passed === true,
+      exitCode: Number.isInteger(Number(event.payload?.exitCode)) ? Number(event.payload.exitCode) : 1,
+      durationMs: Number.isInteger(Number(event.payload?.durationMs)) ? Number(event.payload.durationMs) : 0,
+    }));
+  const gateKey = (gate) => JSON.stringify([
+    gate.name,
+    gate.required,
+    gate.passed,
+    gate.exitCode,
+    gate.durationMs,
+  ]);
+  const manifestGateKeys = gates.map(gateKey).sort();
+  const eventGateKeys = eventGates.map(gateKey).sort();
+  if (JSON.stringify(manifestGateKeys) !== JSON.stringify(eventGateKeys)) {
+    errors.push("manifest gates do not match task.gate events");
+  }
+  const requiredOutcomeEvent = manifest.outcome?.state === "completed"
+    ? "task.completed"
+    : manifest.outcome?.state === "failed"
+      ? "task.failed"
+      : "";
+  const outcomeEvent = parsedEvents.find((event) => event.eventType === requiredOutcomeEvent);
+  if (requiredOutcomeEvent && !outcomeEvent) {
+    errors.push(`outcome is missing ${requiredOutcomeEvent} event`);
+  } else if (outcomeEvent && outcomeEvent.payload?.state !== manifest.outcome?.state) {
+    errors.push(`${requiredOutcomeEvent} state does not match manifest outcome`);
+  } else if (requiredOutcomeEvent === "task.completed"
+      && outcomeEvent.payload?.evidenceBundle !== path.relative(root, manifestPath).replace(/\\/g, "/")) {
+    errors.push("task.completed evidenceBundle does not match manifest path");
+  }
+
+  const review = {
+    present: Boolean(manifest.review),
+    verified: false,
+    criticalCount: null,
+    warningCount: null,
+    disposition: String(manifest.review?.disposition ?? ""),
+  };
+  if (manifest.review) {
+    const findingsPath = path.resolve(bundleDir, String(manifest.review.findingsIndexArtifact ?? ""));
+    const relativeFindingsPath = path.relative(bundleDir, findingsPath);
+    if (!relativeFindingsPath || relativeFindingsPath.startsWith("..") || path.isAbsolute(relativeFindingsPath)) {
+      errors.push("review findings index escapes the evidence bundle");
+    } else {
+      try {
+        ensureSafeManagedPath(root, findingsPath, { create: false });
+        const findings = JSON.parse(fs.readFileSync(findingsPath, "utf8"));
+        const criticalCount = Number(findings?.summary?.critical);
+        const warningCount = Number(findings?.summary?.warning);
+        if (!Number.isInteger(criticalCount) || criticalCount < 0
+            || !Number.isInteger(warningCount) || warningCount < 0) {
+          errors.push("review findings index has invalid summary counts");
+        } else {
+          review.criticalCount = criticalCount;
+          review.warningCount = warningCount;
+          if (criticalCount !== manifest.review.criticalCount || warningCount !== manifest.review.warningCount) {
+            errors.push("manifest review counts do not match findings index");
+          }
+        }
+      } catch (error) {
+        errors.push(`review findings index is invalid: ${String(error?.message ?? error)}`);
+      }
+    }
+    const reviewEvent = parsedEvents.find((event) => (
+      event.eventType === "task.review"
+      && event.payload?.findingsIndexArtifact === manifest.review.findingsIndexArtifact
+    ));
+    if (!reviewEvent) {
+      errors.push("manifest review is missing its task.review event");
+    } else if (Number(reviewEvent.payload?.criticalCount) !== manifest.review.criticalCount
+        || Number(reviewEvent.payload?.warningCount) !== manifest.review.warningCount) {
+      errors.push("manifest review counts do not match task.review event");
+    }
+    review.verified = !errors.some((error) => error.startsWith("review ") || error.startsWith("manifest review"));
+  }
+  return {
+    manifest: path.relative(root, manifestPath).replace(/\\/g, "/"),
+    manifestValid: errors.length === 0,
+    errors,
+    runId: String(manifest.runId ?? ""),
+    taskId: String(manifest.taskId ?? ""),
+    state: String(manifest.state ?? ""),
+    outcome: String(manifest.outcome?.state ?? ""),
+    gates,
+    requiredGateCount: requiredGates.length,
+    passedRequiredGateCount: requiredGates.filter((gate) => gate.passed).length,
+    failedGates: requiredGates.filter((gate) => !gate.passed),
+    review,
+  };
+}
+
 export function createEventId() {
   return `evt-${crypto.randomUUID()}`;
 }

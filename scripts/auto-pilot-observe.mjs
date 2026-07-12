@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { buildGateTrustSummary } from "./lib/gate-trust.mjs";
+import { buildGateTrustSummary, buildTaskEvidenceGatePolicy } from "./lib/gate-trust.mjs";
 import { readHumanBoardInstructions, resolveHumanBoardPath } from "./lib/human-board.mjs";
 import { buildOrchestrationOpts, emitResult, sprintBoardExec, tryParseJson } from "./lib/orchestration-cli.mjs";
 import { readQualityGateConfig } from "./lib/sprint-utils.mjs";
@@ -21,6 +21,7 @@ import {
 } from "./lib/orchestration-state.mjs";
 import { detectStopCondition, readSprintState } from "./auto-pilot-loop.mjs";
 import { planTaskIds } from "./lib/plan-helpers.mjs";
+import { readTaskEvidenceSummary } from "./lib/observability.mjs";
 
 function tailJournal(journalFile, maxEntries = 5) {
   if (!fs.existsSync(journalFile)) {
@@ -307,6 +308,139 @@ function buildEvidenceSummary(entries) {
   };
 }
 
+export function buildStructuredEvidenceSummary(workDir, run, trackList, expectedTaskIds = [], expectedRequiredGateNames = []) {
+  const tasks = [];
+  const requiredGateNames = uniqueStrings(
+    (Array.isArray(expectedRequiredGateNames) ? expectedRequiredGateNames : []).map(cleanOneLine)
+  );
+  const expectedIds = uniqueStrings([
+    ...(Array.isArray(expectedTaskIds) ? expectedTaskIds : []),
+    ...(Array.isArray(run?.approvedCommitTasks) ? run.approvedCommitTasks : []),
+  ].map(cleanOneLine));
+  const scopedTaskIds = new Set(expectedIds);
+  for (const track of Array.isArray(trackList) ? trackList : []) {
+    const manifest = cleanOneLine(track?.evidenceBundle);
+    const taskId = cleanOneLine(track?.taskId);
+    if (!taskId) continue;
+    if (scopedTaskIds.size > 0 && !scopedTaskIds.has(taskId)) continue;
+    if (!manifest) {
+      const terminalTrack = ["succeeded", "failed"].includes(track?.resultStatus)
+        || ["settled", "failed"].includes(track?.state)
+        || ["Done", "Failed"].includes(track?.sprintState);
+      if (terminalTrack) {
+        const missing = readTaskEvidenceSummary(workDir, "", {
+          runId: cleanOneLine(run?.runId),
+          taskId,
+        });
+        missing.errors = ["terminal track has no evidence bundle"];
+        tasks.push(missing);
+      }
+      continue;
+    }
+    tasks.push(readTaskEvidenceSummary(workDir, manifest, {
+      runId: cleanOneLine(run?.runId),
+      taskId,
+    }));
+  }
+  const summarizedTaskIds = new Set(tasks.map((task) => cleanOneLine(task.taskId)).filter(Boolean));
+  for (const taskId of expectedIds) {
+    if (summarizedTaskIds.has(taskId)) continue;
+    const missing = readTaskEvidenceSummary(workDir, "", {
+      runId: cleanOneLine(run?.runId),
+      taskId,
+    });
+    missing.errors = ["expected completion task has no track-bound evidence bundle"];
+    tasks.push(missing);
+    summarizedTaskIds.add(taskId);
+  }
+  tasks.sort((left, right) => left.taskId.localeCompare(right.taskId));
+
+  const issues = [];
+  for (const task of tasks) {
+    for (const message of task.errors) {
+      issues.push({ code: "INVALID_EVIDENCE_BUNDLE", taskId: task.taskId, message });
+    }
+    if (task.manifestValid && task.requiredGateCount === 0) {
+      issues.push({ code: "NO_REQUIRED_GATE_EVIDENCE", taskId: task.taskId, message: "bundle has no required gate evidence" });
+    }
+    if (task.manifestValid) {
+      const evidencedRequiredGates = new Set(
+        task.gates.filter((gate) => gate.required).map((gate) => gate.name)
+      );
+      for (const gateName of requiredGateNames) {
+        if (!evidencedRequiredGates.has(gateName)) {
+          issues.push({
+            code: "MISSING_CONFIGURED_REQUIRED_GATE",
+            taskId: task.taskId,
+            message: `${gateName} has no required gate evidence`,
+          });
+        }
+      }
+    }
+    for (const gate of task.failedGates) {
+      issues.push({
+        code: "REQUIRED_GATE_FAILED",
+        taskId: task.taskId,
+        message: `${gate.name || "unnamed gate"} failed with exit ${gate.exitCode}`,
+      });
+    }
+    if (task.review.verified && task.review.criticalCount > 0) {
+      issues.push({
+        code: "CRITICAL_REVIEW_FINDINGS",
+        taskId: task.taskId,
+        message: `${task.review.criticalCount} critical review finding(s) remain`,
+      });
+    }
+  }
+
+  const requiredGateCount = tasks.reduce((total, task) => total + task.requiredGateCount, 0);
+  const passedRequiredGateCount = tasks.reduce((total, task) => total + task.passedRequiredGateCount, 0);
+  const failedGates = tasks.flatMap((task) => task.failedGates.map((gate) => ({ taskId: task.taskId, ...gate })));
+  const outcomes = {
+    completed: tasks.filter((task) => task.outcome === "completed").length,
+    failed: tasks.filter((task) => task.outcome === "failed").length,
+    abandoned: tasks.filter((task) => task.outcome === "abandoned").length,
+  };
+  const manifestValid = tasks.length > 0 && tasks.every((task) => task.manifestValid);
+  const proofReady = manifestValid
+    && tasks.every((task) => task.outcome === "completed" && task.requiredGateCount > 0)
+    && failedGates.length === 0
+    && !issues.some((issue) => issue.code === "MISSING_CONFIGURED_REQUIRED_GATE")
+    && tasks.every((task) => !task.review.present
+      || (task.review.verified && task.review.criticalCount === 0));
+  const status = tasks.length === 0
+    ? "missing"
+    : !manifestValid
+      ? "invalid"
+      : proofReady
+        ? "verified"
+        : "failing";
+
+  return {
+    source: "evidence-bundle-manifests",
+    status,
+    proofReady,
+    manifestValid: tasks.length === 0 ? null : manifestValid,
+    expectedTaskCount: tasks.length,
+    bundleCount: tasks.filter((task) => task.manifest).length,
+    verifiedBundleCount: tasks.filter((task) => task.manifestValid).length,
+    requiredGates: {
+      total: requiredGateCount,
+      passed: passedRequiredGateCount,
+      failed: failedGates,
+    },
+    review: {
+      verifiedBundleCount: tasks.filter((task) => task.review.verified).length,
+      criticalCount: tasks.reduce((total, task) => total + (Number(task.review.criticalCount) || 0), 0),
+      warningCount: tasks.reduce((total, task) => total + (Number(task.review.warningCount) || 0), 0),
+    },
+    outcomes,
+    tasks,
+    issues,
+    journalFallbackUsed: tasks.length === 0,
+  };
+}
+
 function summarizePitfalls(pitfalls) {
   return (Array.isArray(pitfalls) ? pitfalls : []).map((pitfall) => ({
     id: cleanOneLine(pitfall?.id),
@@ -328,10 +462,22 @@ function buildStaleStatus(snapshot) {
   };
 }
 
-function buildEvidenceTrust(gateTrust) {
-  const risks = Array.isArray(gateTrust?.evidenceRisks) ? gateTrust.evidenceRisks : [];
+function buildEvidenceTrust(gateTrust, structuredEvidence, phase) {
+  const completionProofRequired = ["awaiting-commit-approval", "commit-approved"].includes(phase);
+  const structuredRisks = completionProofRequired && structuredEvidence?.status !== "verified"
+    ? [
+      `structured completion evidence is ${structuredEvidence?.status ?? "missing"}`,
+      ...((structuredEvidence?.issues ?? []).map((issue) => `${issue.code}: ${issue.message}`)),
+    ]
+    : [];
+  const risks = uniqueStrings([
+    ...(Array.isArray(gateTrust?.evidenceRisks) ? gateTrust.evidenceRisks : []),
+    ...structuredRisks,
+  ]);
   const status = gateTrust?.status ?? "not-configured";
-  const trustedProof = status === "configured" && risks.length === 0;
+  const trustedProof = status === "configured"
+    && risks.length === 0
+    && (!completionProofRequired || structuredEvidence?.proofReady === true);
   const reason = trustedProof
     ? "Required evidence gates are configured and no evidence risk signals are active."
     : risks.length > 0
@@ -340,7 +486,8 @@ function buildEvidenceTrust(gateTrust) {
   return {
     status: trustedProof ? "trusted" : "evidence-risk",
     trustedProof,
-    blocksAcceptance: ["missing-required-gates", "not-configured"].includes(status),
+    blocksAcceptance: ["missing-required-gates", "not-configured"].includes(status)
+      || (completionProofRequired && structuredEvidence?.proofReady !== true),
     reason,
     risks,
   };
@@ -352,12 +499,28 @@ function buildEvidenceView(snapshot, evidenceSummary) {
   const staleStatus = buildStaleStatus(snapshot);
   const recoveryStatus = snapshot.recovery ?? {};
   const commitReadiness = snapshot.commitReadiness ?? {};
-  const trust = buildEvidenceTrust(gateTrust);
+  const structured = snapshot.structuredEvidence ?? {
+    source: "evidence-bundle-manifests",
+    status: "missing",
+    proofReady: false,
+    manifestValid: null,
+    expectedTaskCount: 0,
+    bundleCount: 0,
+    verifiedBundleCount: 0,
+    requiredGates: { total: 0, passed: 0, failed: [] },
+    review: { verifiedBundleCount: 0, criticalCount: 0, warningCount: 0 },
+    outcomes: { completed: 0, failed: 0, abandoned: 0 },
+    tasks: [],
+    issues: [],
+    journalFallbackUsed: true,
+  };
+  const trust = buildEvidenceTrust(gateTrust, structured, snapshot.run?.phase ?? "idle");
 
   return {
     ...evidenceSummary,
     gateTrust,
     trust,
+    structured,
     unresolvedPitfalls,
     recoveryStatus: {
       status: recoveryStatus.status ?? "unknown",
@@ -418,6 +581,10 @@ function riskLevelFromSnapshot(snapshot) {
   if (snapshot.commitReadiness?.status === "invalid-approval") {
     return "high";
   }
+  if (["awaiting-commit-approval", "commit-approved"].includes(snapshot.run?.phase)
+      && snapshot.structuredEvidence?.proofReady !== true) {
+    return "high";
+  }
   if (snapshot.gateTrust?.status === "needs-agent-attention" || snapshot.gateTrust?.status === "not-configured") {
     return "medium";
   }
@@ -437,7 +604,7 @@ function riskLevelFromSnapshot(snapshot) {
   return "low";
 }
 
-function buildApprovalState({ pendingApproval, uncheckedCount, staleStatus, commitReadiness }) {
+function buildApprovalState({ pendingApproval, uncheckedCount, staleStatus, commitReadiness, evidenceTrust }) {
   if (staleStatus?.requiresReapproval) {
     return {
       required: true,
@@ -468,6 +635,18 @@ function buildApprovalState({ pendingApproval, uncheckedCount, staleStatus, comm
       managerActionRequired: true,
       blocksDispatch: true,
       reason: "The plan has been reviewed and needs approval before work can be dispatched.",
+    };
+  }
+
+  if ((pendingApproval === "commit-approval" || commitReadiness?.approvalRequired)
+      && evidenceTrust?.blocksAcceptance) {
+    return {
+      required: true,
+      type: "commit-evidence-remediation",
+      humanApprovalNeeded: false,
+      managerActionRequired: true,
+      blocksDispatch: false,
+      reason: "Structured completion evidence is missing, invalid, or failing; repair evidence before approval.",
     };
   }
 
@@ -565,6 +744,19 @@ function buildProgressState({ run, pendingTasks, uncheckedCount, approval, evide
       needsApproval: true,
       needsManagerAction: true,
       reason: commitReadiness.reason || "Commit approval references incomplete work.",
+    };
+  }
+
+  if (["awaiting-commit-approval", "commit-approved"].includes(run?.phase)
+      && evidenceView.trust?.blocksAcceptance) {
+    return {
+      status: "blocked",
+      permitsProgress: false,
+      permitsDispatch: false,
+      blocksDispatch: false,
+      needsApproval: false,
+      needsManagerAction: true,
+      reason: "Structured completion evidence must be repaired before approval or commit.",
     };
   }
 
@@ -728,6 +920,10 @@ function buildEvidenceStatus({ evidenceView, pendingTasks, phase }) {
   if (evidenceView.staleStatus?.blocksDispatch || evidenceView.recoveryStatus?.criticalIssues?.length > 0) {
     return "blocked";
   }
+  if (["awaiting-commit-approval", "commit-approved"].includes(phase)
+      && evidenceView.trust?.blocksAcceptance) {
+    return "invalid-completion-evidence";
+  }
   if (phase === "awaiting-commit-approval") {
     return "needs-human-trust-check";
   }
@@ -750,7 +946,17 @@ export function buildCockpit(snapshot) {
   const evidenceSummary = buildEvidenceSummary(snapshot.journalTail ?? []);
   const evidenceView = buildEvidenceView(snapshot, evidenceSummary);
   const goal = deriveGoal(snapshot);
+  const structuredSignals = evidenceView.structured.expectedTaskCount > 0
+    ? [
+      `structured evidence: ${evidenceView.structured.status} (${evidenceView.structured.verifiedBundleCount}/${evidenceView.structured.expectedTaskCount} task proofs valid)`,
+      ...evidenceView.structured.issues.map((issue) => `structured evidence: ${issue.code} ${issue.message}`),
+    ]
+    : [];
+  const narrativeEvidenceSignals = evidenceView.structured.journalFallbackUsed
+    ? [...evidenceSummary.failures, ...evidenceSummary.gates, ...evidenceSummary.completions]
+    : evidenceSummary.failures;
   const evidenceSignals = uniqueStrings([
+    ...structuredSignals,
     ...((evidenceView.trust?.risks ?? []).map((signal) => `evidence risk: ${signal}`)),
     ...((snapshot.gateTrust?.weakSignals ?? []).map((signal) => `gate trust: ${signal}`)),
     ...((snapshot.gateTrust?.missingRequired ?? []).map((gate) => `gate trust: missing ${gate}`)),
@@ -759,11 +965,9 @@ export function buildCockpit(snapshot) {
     ...((evidenceView.recoveryStatus?.issues ?? []).map((issue) => `recovery: ${issue.code} ${issue.message}`)),
     ...((evidenceView.unresolvedPitfalls ?? []).map((pitfall) => `unresolved problem: ${pitfall.id || pitfall.failureType || pitfall.hypothesis}`)),
     ...(evidenceView.commitReadiness?.reason ? [`commit readiness: ${evidenceView.commitReadiness.reason}`] : []),
-    ...evidenceSummary.failures,
-    ...evidenceSummary.gates,
-    ...evidenceSummary.completions,
+    ...narrativeEvidenceSignals,
     ...evidenceSummary.decisions,
-    ...evidenceSummary.recent,
+    ...(evidenceView.structured.journalFallbackUsed ? evidenceSummary.recent : []),
   ]).slice(0, 10);
   const pendingApproval =
     evidenceView.staleStatus?.requiresReapproval ? "plan-reapproval"
@@ -777,6 +981,7 @@ export function buildCockpit(snapshot) {
     uncheckedCount: unchecked.length,
     staleStatus: evidenceView.staleStatus,
     commitReadiness: evidenceView.commitReadiness,
+    evidenceTrust: evidenceView.trust,
   });
   const progress = buildProgressState({
     run: snapshot.run,
@@ -894,6 +1099,7 @@ export async function refreshSnapshot(opts) {
   const pitfallsParsed = tryParseJson(pitfallResult.stdout.trim());
   const qualityGate = readQualityGateConfig(path.join(opts.workDir, ".va-auto-pilot", "config.yaml"));
   const gateTrust = buildGateTrustSummary(qualityGate);
+  const taskEvidenceGatePolicy = buildTaskEvidenceGatePolicy(qualityGate);
 
   const pendingTasks = Array.isArray(state.tasks)
     ? state.tasks.filter((task) => task.state !== "Done").length
@@ -923,6 +1129,15 @@ export async function refreshSnapshot(opts) {
     stopCondition,
   });
 
+  const structuredEvidence = buildStructuredEvidenceSummary(
+    opts.workDir,
+    run,
+    trackList,
+    run?.phase === "commit-approved" && commitReadiness.approvedTaskIds.length > 0
+      ? commitReadiness.approvedTaskIds
+      : commitReadiness.candidateTaskIds,
+    taskEvidenceGatePolicy.requiredGateNames
+  );
   const snapshot = {
     schemaVersion: 1,
     updatedAt: new Date().toISOString(),
@@ -951,6 +1166,7 @@ export async function refreshSnapshot(opts) {
     checkpointStatus,
     recovery,
     commitReadiness,
+    structuredEvidence,
     anomalies,
     recommendedActions: buildRecommendedActions({
       run,
@@ -962,6 +1178,7 @@ export async function refreshSnapshot(opts) {
       gateTrust,
       checkpointStatus,
       recovery,
+      structuredEvidence,
     }),
     nextCommands: buildNextCommands({
       run,
@@ -974,6 +1191,7 @@ export async function refreshSnapshot(opts) {
       checkpointStatus,
       recovery,
       commitReadiness,
+      structuredEvidence,
     }),
   };
 
@@ -1019,7 +1237,7 @@ function buildAnomalies({ run, trackList, state, pendingTasks, stopCondition }) 
   return anomalies;
 }
 
-function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies, gateTrust, checkpointStatus, recovery }) {
+function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies, gateTrust, checkpointStatus, recovery, structuredEvidence }) {
   const actions = [];
   if (gateTrust?.status === "missing-required-gates") {
     actions.push("configure required evidence gates");
@@ -1095,10 +1313,14 @@ function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directive
       actions.push("run previewed agent work or close the preview");
       break;
     case "awaiting-commit-approval":
-      actions.push("approve completion evidence if trustworthy");
+      actions.push(structuredEvidence?.proofReady
+        ? "approve completion evidence if trustworthy"
+        : "repair structured completion evidence before approval");
       break;
     case "commit-approved":
-      actions.push("commit approved results");
+      actions.push(structuredEvidence?.proofReady
+        ? "commit approved results"
+        : "repair structured completion evidence before commit");
       break;
     case "committed":
       actions.push("summarize committed cycle");
@@ -1117,7 +1339,7 @@ function command(label, args, reason) {
   };
 }
 
-function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies, gateTrust, checkpointStatus, recovery, commitReadiness }) {
+function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies, gateTrust, checkpointStatus, recovery, commitReadiness, structuredEvidence }) {
   const commands = [];
 
   if (["missing-required-gates", "needs-agent-attention", "not-configured"].includes(gateTrust?.status)
@@ -1216,10 +1438,18 @@ function buildNextCommands({ run, stopCondition, uncheckedBoard, directives, pen
       commands.push(command("Close preview", ["orchestrate", "close"], "Close the preview without executing workers."));
       break;
     case "awaiting-commit-approval":
-      commands.push(command("Approve commit", ["orchestrate", "approve-commit", "--tasks", "<ids>"], "Completed worker results need commit approval."));
+      if (structuredEvidence?.proofReady) {
+        commands.push(command("Approve commit", ["orchestrate", "approve-commit", "--tasks", "<ids>"], "Completed worker results have structurally valid evidence and need commit approval."));
+      } else {
+        commands.push(command("Inspect evidence", ["observe", "--json"], "Structured completion evidence must be repaired before commit approval."));
+      }
       break;
     case "commit-approved":
-      commands.push(command("Commit results", ["orchestrate", "commit"], "Commit approval has been granted."));
+      if (structuredEvidence?.proofReady) {
+        commands.push(command("Commit results", ["orchestrate", "commit"], "Commit approval has been granted."));
+      } else {
+        commands.push(command("Inspect evidence", ["observe", "--json"], "Approved completion evidence is no longer structurally valid."));
+      }
       break;
     case "committed":
       commands.push(command("Write journal", ["orchestrate", "journal"], "Committed work needs journal closure."));
@@ -1294,6 +1524,7 @@ export function formatCockpitHuman(cockpit) {
   const evidence = cockpit.humanJudgment?.evidence ?? {};
   const summary = evidence.summary ?? {};
   const gateTrust = summary.gateTrust ?? {};
+  const structured = summary.structured ?? {};
   const staleStatus = summary.staleStatus ?? {};
   const recovery = summary.recoveryStatus ?? {};
   const commitReadiness = summary.commitReadiness ?? {};
@@ -1310,6 +1541,7 @@ export function formatCockpitHuman(cockpit) {
     `Evidence trust: ${formatEvidenceTrust(evidenceTrust)}`,
     `Evidence: ${evidence.status ?? "unknown"}`,
     `  Gate trust: ${gateTrust.status ?? "unknown"}${(gateTrust.evidenceRisks ?? []).length > 0 ? ` (${gateTrust.evidenceRisks.length} risk signal(s))` : ""}`,
+    `  Structured proof: ${structured.status ?? "missing"}${structured.expectedTaskCount ? ` (${structured.verifiedBundleCount}/${structured.expectedTaskCount} task proofs valid)` : ""}`,
     `  Recent completions: ${shortList(summary.completions)}`,
     `  Recent failures: ${shortList(summary.failures)}`,
     `  Known unresolved problems: ${shortList(summary.unresolvedPitfalls, {

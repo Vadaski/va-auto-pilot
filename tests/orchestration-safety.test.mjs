@@ -35,7 +35,13 @@ import {
   writeRun,
   writeTracks,
 } from "../scripts/lib/orchestration-state.mjs";
-import { taskEvidenceBundleDir } from "../scripts/lib/observability.mjs";
+import {
+  buildBundleManifest,
+  buildEvent,
+  taskEvidenceBundleDir,
+  taskEvidenceBundlePaths,
+  writeBundleManifest,
+} from "../scripts/lib/observability.mjs";
 import { classifyCommandPermission, detectOutOfScopeFiles } from "../scripts/lib/permission-scope.mjs";
 import { withPilotFileLock } from "../scripts/lib/pilot-state.mjs";
 import { runPlanReviewCommand, validatePlanReviewForApprove } from "../scripts/lib/plan-review.mjs";
@@ -1539,10 +1545,62 @@ test("isolated commit readiness requires a result commit and exact file manifest
 
 test("commit approval binds every task evidence bundle file", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-evidence-approval-"));
-  const bundle = path.join(root, ".va-auto-pilot", "evidence", "run-a", "AP-001");
+  const bundlePaths = taskEvidenceBundlePaths(root, "run-a", "AP-001");
+  const bundle = bundlePaths.dir;
   fs.mkdirSync(path.join(bundle, "redacted"), { recursive: true });
-  fs.writeFileSync(path.join(bundle, "manifest.json"), "{\"state\":\"completed\"}\n");
-  fs.writeFileSync(path.join(bundle, "events.jsonl"), "{\"event\":1}\n");
+  fs.mkdirSync(path.join(root, ".va-auto-pilot"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".va-auto-pilot", "config.yaml"), [
+    "qualityGate:",
+    "  buildCommand: 'true'",
+    "  reviewCommand: 'true'",
+    "  acceptanceTestCommand: 'true'",
+    "",
+  ].join("\n"));
+  const gates = ["build", "review", "acceptance"].map((gateName) => buildEvent({
+    eventType: "task.gate",
+    runId: "run-a",
+    taskId: "AP-001",
+    phase: "gate",
+    payload: { gateName, required: true, passed: true, exitCode: 0, durationMs: 1 },
+    provenance: { source: "auto-pilot-loop" },
+  }));
+  const completed = buildEvent({
+    eventType: "task.completed",
+    runId: "run-a",
+    taskId: "AP-001",
+    phase: "done",
+    payload: {
+      state: "completed",
+      evidenceBundle: ".va-auto-pilot/evidence/run-a/AP-001/manifest.json",
+    },
+    provenance: { source: "auto-pilot-loop" },
+  });
+  const events = [...gates, completed];
+  fs.writeFileSync(bundlePaths.eventsLog, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+  writeBundleManifest(bundlePaths.manifest, buildBundleManifest({
+    bundleType: "task",
+    runId: "run-a",
+    taskId: "AP-001",
+    state: "completed",
+    outcome: { state: "completed" },
+    timeline: events.map((event) => ({
+      at: event.timestamp,
+      phase: event.phase,
+      eventId: event.eventId,
+      note: event.eventType,
+    })),
+    artifacts: [],
+    gates: gates.map((event) => ({
+      name: event.payload.gateName,
+      required: true,
+      passed: true,
+      exitCode: 0,
+      durationMs: 1,
+    })),
+    eventsLog: "events.jsonl",
+    redactedShareable: "redacted/manifest.json",
+  }), { safeRoot: root });
+  const baseManifest = JSON.parse(fs.readFileSync(bundlePaths.manifest, "utf8"));
   fs.writeFileSync(path.join(bundle, "redacted", "manifest.json"), "{\"redacted\":true}\n");
   const relativeManifest = ".va-auto-pilot/evidence/run-a/AP-001/manifest.json";
   const evidenceFiles = collectEvidenceBundleFiles(root, relativeManifest);
@@ -1565,9 +1623,82 @@ test("commit approval binds every task evidence bundle file", () => {
   const approved = buildCommitApprovalManifest([task], { tracks: [track] }, { workDir: root });
   assert.deepEqual(Object.keys(approved.manifest.tasks[0].evidenceFileHashes).sort(), evidenceFiles);
 
-  fs.writeFileSync(path.join(bundle, "events.jsonl"), "{\"event\":2}\n");
+  fs.writeFileSync(path.join(bundle, "redacted", "manifest.json"), "{\"redacted\":2}\n");
   const changed = buildCommitApprovalManifest([task], { tracks: [track] }, { workDir: root });
   assert.notEqual(changed.hash, approved.hash);
+
+  fs.writeFileSync(path.join(bundle, "unexpected.txt"), "not tracked\n");
+  assert.throws(
+    () => buildCommitApprovalManifest([task], { runId: "run-a", tracks: [track] }, { workDir: root }),
+    /evidence bundle file set changed after worker settlement/
+  );
+  fs.unlinkSync(path.join(bundle, "unexpected.txt"));
+
+  const reviewEvent = buildEvent({
+    eventType: "task.review",
+    runId: "run-a",
+    taskId: "AP-001",
+    phase: "review",
+    payload: { findingsIndexArtifact: "findings/index.json", criticalCount: 1, warningCount: 0 },
+    provenance: { source: "auto-pilot-loop" },
+  });
+  fs.mkdirSync(path.join(bundle, "findings"), { recursive: true });
+  fs.writeFileSync(path.join(bundle, "findings", "index.json"), `${JSON.stringify({
+    summary: { critical: 1, warning: 0 },
+    findings: [{ severity: "critical", message: "blocking" }],
+  })}\n`);
+  fs.writeFileSync(bundlePaths.eventsLog, `${[...events, reviewEvent].map((event) => JSON.stringify(event)).join("\n")}\n`);
+  writeBundleManifest(bundlePaths.manifest, {
+    ...baseManifest,
+    timeline: [...baseManifest.timeline, {
+      at: reviewEvent.timestamp,
+      phase: reviewEvent.phase,
+      eventId: reviewEvent.eventId,
+      note: reviewEvent.eventType,
+    }],
+    review: {
+      findingsIndexArtifact: "findings/index.json",
+      criticalCount: 1,
+      warningCount: 0,
+      disposition: "blocking",
+    },
+  }, { safeRoot: root });
+  const criticalTrack = {
+    ...track,
+    evidenceFiles: collectEvidenceBundleFiles(root, relativeManifest),
+  };
+  assert.throws(
+    () => buildCommitApprovalManifest([task], { runId: "run-a", tracks: [criticalTrack] }, { workDir: root }),
+    /review evidence is unverified or has critical findings/
+  );
+  fs.writeFileSync(bundlePaths.eventsLog, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+  writeBundleManifest(bundlePaths.manifest, baseManifest, { safeRoot: root });
+  fs.unlinkSync(path.join(bundle, "findings", "index.json"));
+  fs.rmdirSync(path.join(bundle, "findings"));
+
+  const tamperedEvents = events.map((event) => (
+    event.eventType === "task.gate" && event.payload.gateName === "acceptance"
+      ? { ...event, payload: { ...event.payload, passed: false, exitCode: 1 } }
+      : event
+  ));
+  fs.writeFileSync(bundlePaths.eventsLog, `${tamperedEvents.map((event) => JSON.stringify(event)).join("\n")}\n`);
+  assert.throws(
+    () => buildCommitApprovalManifest([task], { runId: "run-a", tracks: [track] }, { workDir: root }),
+    /manifest gates do not match task\.gate events/
+  );
+
+  const acceptanceEventId = gates.find((event) => event.payload.gateName === "acceptance").eventId;
+  fs.writeFileSync(bundlePaths.eventsLog, `${events
+    .filter((event) => event.eventId !== acceptanceEventId)
+    .map((event) => JSON.stringify(event)).join("\n")}\n`);
+  const omittedGateManifest = JSON.parse(fs.readFileSync(bundlePaths.manifest, "utf8"));
+  omittedGateManifest.gates = omittedGateManifest.gates.filter((gate) => gate.name !== "acceptance");
+  omittedGateManifest.timeline = omittedGateManifest.timeline.filter((entry) => entry.eventId !== acceptanceEventId);
+  writeBundleManifest(bundlePaths.manifest, omittedGateManifest, { safeRoot: root });
+  assert.throws(
+    () => buildCommitApprovalManifest([task], { runId: "run-a", tracks: [track] }, { workDir: root }),
+    /missing configured required gate evidence: acceptance/
+  );
 });
 
 test("commit evidence collection rejects a symlinked bundle parent", () => {

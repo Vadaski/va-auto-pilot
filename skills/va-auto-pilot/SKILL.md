@@ -57,9 +57,11 @@ operation, keep the human conversation focused on three judgments: whether the
 goal is still correct, whether the risk is acceptable, and whether the
 acceptance evidence is trustworthy.
 Use `cockpit.humanJudgment.evidence.summary` for the evidence view; it
-compresses journal memory into recent completions, failures, gates, and
-decisions. Its `gateTrust` field summarizes missing or weak evidence gates so
-the human can judge evidence trust without reading `qualityGate` internals.
+prioritizes validated current-run task manifests under `structured`, including
+run/task and event-log bindings, required gate results, outcomes, and declared
+review counts when present. Journal summaries are fallback context only when no bundle exists. Its
+`gateTrust` field summarizes missing or weak evidence gates so the human can
+judge evidence trust without reading `qualityGate` internals.
 
 Use the cockpit and intent commands as the daily agent-facing interface:
 

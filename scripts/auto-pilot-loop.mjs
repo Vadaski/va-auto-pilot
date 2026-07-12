@@ -1383,7 +1383,11 @@ async function releaseTaskClaim(taskId, opts) {
 
 async function transitionToDone(task, opts, expectedState = "Testing") {
   if (opts.dryRun) return;
-  const bundlePaths = taskEvidenceBundlePaths(opts.workDir ?? process.cwd(), resolveObservabilityRunId(opts), task.id);
+  const bundlePaths = taskEvidenceBundlePaths(
+    resolveObservabilityWorkDir(opts),
+    resolveObservabilityRunId(opts),
+    task.id
+  );
   await requireSprintBoard([
     "update", "--id", task.id, "--state", "Done",
     "--verification", `Auto-pilot loop: all gates passed at ${nowIso()}`,

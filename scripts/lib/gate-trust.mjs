@@ -38,6 +38,40 @@ function gateEntry(name, command, { required = true } = {}) {
   return normalized ? { name, command: normalized, required } : null;
 }
 
+export function buildTaskEvidenceGatePolicy(qualityGate = {}) {
+  const reviewRequired = qualityGate.reviewRequired !== false
+    && qualityGate.allowAdvisoryReview !== true
+    && qualityGate.review?.required !== false;
+  const gates = [
+    gateEntry("build", qualityGate.buildCommand),
+    gateEntry("review", qualityGate.reviewCommand, { required: reviewRequired }),
+    gateEntry("acceptance", qualityGate.acceptanceTestCommand),
+    gateEntry("eval", qualityGate.evalCommand),
+    ...(Array.isArray(qualityGate.evalGates)
+      ? qualityGate.evalGates.map((gate, index) => gateEntry(
+        String(gate?.name ?? `eval-${index + 1}`),
+        gate?.command,
+        { required: gate?.required !== false }
+      ))
+      : []),
+    ...(Array.isArray(qualityGate.adaptiveGates)
+      ? qualityGate.adaptiveGates.map((gate, index) => gateEntry(
+        String(gate?.name ?? `adaptive-${index + 1}`),
+        gate?.command,
+        { required: gate?.required !== false }
+      ))
+      : []),
+  ].filter(Boolean);
+  const missingRequired = [];
+  if (!normalizeCommand(qualityGate.buildCommand)) missingRequired.push("build");
+  if (!normalizeCommand(qualityGate.acceptanceTestCommand)) missingRequired.push("acceptance");
+  if (reviewRequired && !normalizeCommand(qualityGate.reviewCommand)) missingRequired.push("review");
+  return {
+    requiredGateNames: uniqueStrings(gates.filter((gate) => gate.required).map((gate) => gate.name)),
+    missingRequired: uniqueStrings(missingRequired),
+  };
+}
+
 export function buildGateTrustSummary(qualityGate = {}) {
   const maintenanceNotes = [];
   const gates = [

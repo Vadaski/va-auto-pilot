@@ -194,9 +194,11 @@ va-auto-pilot run . --agent-template 'kimi -w . --quiet -p "Implement task {task
 The cockpit is the daily control surface. It keeps human attention on whether
 the goal is still right, whether risk is acceptable, and whether the evidence is
 trustworthy. Sprint state, run journals, pitfalls, quality gates, and
-orchestration phases remain auditable internals for the agent. Journal evidence
-is summarized into recent completions, failures, gates, and decisions before it
-is shown to humans, with gate trust compressed into evidence-risk signals.
+orchestration phases remain auditable internals for the agent. For the active
+run, cockpit validates task evidence manifests, event-log bindings, required
+gate outcomes, and declared review counts when present before presenting structured proof. Journal
+summaries are fallback context only when no bundle exists; gate trust is
+compressed into evidence-risk signals.
 Agents can maintain stale placeholder gates with `va-auto-pilot gates audit` and
 `va-auto-pilot gates maintain --apply`. The explicit goal path is
 `goal -> plan-from-goal -> candidate backlog -> orchestrate plan -> review-plan`;

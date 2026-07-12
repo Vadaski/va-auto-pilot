@@ -191,7 +191,7 @@ va-auto-pilot run . --agent-template 'kimi -w . --quiet -p "Implement task {task
 
 cockpit 是日常控制面：人类只需要判断目标是否仍然正确、风险是否可接受、验收证据是否可信。
 sprint-state、run-journal、pitfall、quality gate 和 orchestration phase 都是 agent 的可审计内部机制。
-journal 证据会先压缩成最近完成项、失败项、gate 和决策摘要，gate 可信度会压缩成证据风险信号，再呈现给人类。
+对于当前 run，cockpit 会先校验任务 evidence manifest、event log 绑定、必需 gate 结果，以及存在时声明的 review 计数，再呈现结构化 proof。只有没有 bundle 时，journal 摘要才作为回退上下文；gate 可信度会压缩成证据风险信号。
 过期 placeholder gate 由 agent 通过 `va-auto-pilot gates audit` 和 `va-auto-pilot gates maintain --apply` 维护。
 显式目标路径是 `goal -> plan-from-goal -> candidate backlog -> orchestrate plan -> review-plan`；`orchestrate plan` 也会自动消费未处理的 objective intent。
 

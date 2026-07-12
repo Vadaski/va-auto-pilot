@@ -7159,6 +7159,8 @@ test("auto-pilot cockpit: returns goal risk evidence view only", () => {
   assert.ok(evidence.summary.recoveryStatus);
   assert.ok(evidence.summary.staleStatus);
   assert.ok(evidence.summary.commitReadiness);
+  assert.equal(evidence.summary.structured.status, "missing");
+  assert.equal(evidence.summary.structured.journalFallbackUsed, true);
   assert.equal(payload.cockpit.progress.status, "ready-to-plan");
   assert.equal(payload.cockpit.progress.permitsProgress, true);
   assert.equal(payload.cockpit.progress.permitsDispatch, false);
@@ -7326,6 +7328,7 @@ test("auto-pilot cockpit: quick start human output matches golden first screen",
     "Evidence trust: TRUSTED - Required evidence gates are configured and no evidence risk signals are active.",
     "Evidence: collecting",
     "  Gate trust: configured",
+    "  Structured proof: missing",
     "  Recent completions: none",
     "  Recent failures: none",
     "  Known unresolved problems: none",

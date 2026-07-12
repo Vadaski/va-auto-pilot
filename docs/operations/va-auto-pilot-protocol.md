@@ -42,8 +42,11 @@ into the three human judgments. Use `node scripts/auto-pilot.mjs intent ...` to
 write human objectives, constraints, risk notes, acceptance expectations, and
 overrides without requiring the human to edit internal files directly.
 Cockpit evidence must be shown through `humanJudgment.evidence.summary`, which
-compresses journal memory into recent completions, failures, gates, and critical
-decisions.
+prioritizes `structured`: validated current-run task manifests bound to their
+run/task IDs and event logs, with required gate outcomes and declared review counts when present.
+Malformed, missing, mismatched, or failing completion bundles block evidence
+trust during commit approval. Journal memory is retained as fallback context
+only when no task bundle exists.
 Its `gateTrust` field summarizes whether configured gates look trustworthy
 enough for acceptance, including maintenance notes for deliberately disabled
 optional gates such as smoke tests. Humans see this as risk and evidence-trust

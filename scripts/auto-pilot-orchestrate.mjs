@@ -69,6 +69,7 @@ import {
   buildEvent,
   ensureSafeManagedPath,
   observabilityPaths,
+  readTaskEvidenceSummary,
 } from "./lib/observability.mjs";
 import {
   collectApprovalChangeContext,
@@ -87,6 +88,7 @@ import { resolveWorkspacePaths, writeWorkspace } from "./lib/workspace.mjs";
 import { planTaskIds } from "./lib/plan-helpers.mjs";
 import { withPilotFileLock, writeJsonFileAtomicSync } from "./lib/pilot-state.mjs";
 import { resolveHumanBoardPath } from "./lib/human-board.mjs";
+import { buildTaskEvidenceGatePolicy } from "./lib/gate-trust.mjs";
 
 const execFileAsync = promisify(execFile);
 const MAX_SQUASH_MERGE_ATTEMPTS = 3;
@@ -412,6 +414,12 @@ function collectManagerApprovalFiles(opts) {
 }
 
 export function buildCommitApprovalManifest(tasks, tracksDoc, opts) {
+  const gateConfig = readQualityGateConfig(path.join(opts.workDir, ".va-auto-pilot", "config.yaml"));
+  const gatePolicy = buildTaskEvidenceGatePolicy(gateConfig);
+  if (gatePolicy.missingRequired.length > 0) {
+    throw new Error(`cannot build commit approval manifest: required quality gates are not configured: ${gatePolicy.missingRequired.join(", ")}`);
+  }
+  const expectedRequiredGates = new Set(gatePolicy.requiredGateNames);
   const tracksByTaskId = new Map((tracksDoc?.tracks ?? []).map((track) => [track.taskId, track]));
   const entries = tasks.map((task) => {
     const track = tracksByTaskId.get(task.id);
@@ -420,11 +428,43 @@ export function buildCommitApprovalManifest(tasks, tracksDoc, opts) {
       throw new Error(`cannot build commit approval manifest for ${task.id}: ${readiness.reason}`);
     }
     const files = sortedUniqueStrings(track.approvalFiles);
-    const evidenceFiles = sortedUniqueStrings(track.evidenceFiles);
+    const trackedEvidenceFiles = sortedUniqueStrings(track.evidenceFiles);
     const resultCommit = String(track.worktree?.resultCommit ?? "");
     const evidenceBundle = String(track.evidenceBundle ?? "");
-    if (evidenceBundle && !evidenceFiles.includes(evidenceBundle)) {
+    if (!evidenceBundle) {
+      throw new Error(`cannot build commit approval manifest for ${task.id}: task has no structured evidence bundle`);
+    }
+    if (!trackedEvidenceFiles.includes(evidenceBundle)) {
       throw new Error(`cannot build commit approval manifest for ${task.id}: evidence manifest is not in the approved evidence files`);
+    }
+    const evidenceFiles = collectEvidenceBundleFiles(opts.workDir, evidenceBundle);
+    if (JSON.stringify(evidenceFiles) !== JSON.stringify(trackedEvidenceFiles)) {
+      throw new Error(`cannot build commit approval manifest for ${task.id}: evidence bundle file set changed after worker settlement`);
+    }
+    const evidenceSummary = readTaskEvidenceSummary(opts.workDir, evidenceBundle, {
+      runId: tracksDoc?.runId ?? opts.runId ?? "",
+      taskId: task.id,
+    });
+    if (!evidenceSummary.manifestValid) {
+      throw new Error(`cannot build commit approval manifest for ${task.id}: ${evidenceSummary.errors.join("; ")}`);
+    }
+    if (evidenceSummary.outcome !== "completed") {
+      throw new Error(`cannot build commit approval manifest for ${task.id}: evidence outcome is ${evidenceSummary.outcome || "missing"}`);
+    }
+    if (evidenceSummary.requiredGateCount === 0 || evidenceSummary.failedGates.length > 0) {
+      throw new Error(`cannot build commit approval manifest for ${task.id}: required gate evidence is incomplete or failing`);
+    }
+    if (evidenceSummary.review.present
+        && (!evidenceSummary.review.verified || evidenceSummary.review.criticalCount > 0)) {
+      throw new Error(`cannot build commit approval manifest for ${task.id}: review evidence is unverified or has critical findings`);
+    }
+    const evidencedRequiredGates = new Set(
+      evidenceSummary.gates.filter((gate) => gate.required).map((gate) => gate.name)
+    );
+    const missingEvidenceGates = [...expectedRequiredGates]
+      .filter((gateName) => !evidencedRequiredGates.has(gateName));
+    if (missingEvidenceGates.length > 0) {
+      throw new Error(`cannot build commit approval manifest for ${task.id}: missing configured required gate evidence: ${missingEvidenceGates.join(", ")}`);
     }
     return {
       taskId: task.id,
@@ -2494,7 +2534,7 @@ async function orchestrateApproveCommit(opts) {
 
   const commitApproval = buildCommitApprovalManifest(
     tasks.map((taskId) => taskById.get(taskId)),
-    { tracks: [...tracksByTaskId.values()] },
+    { runId: run.runId, tracks: [...tracksByTaskId.values()] },
     opts
   );
 

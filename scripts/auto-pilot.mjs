@@ -18,6 +18,7 @@ import { runGates } from "./auto-pilot-gates.mjs";
 import { runGoal } from "./auto-pilot-goal.mjs";
 import { runIntervene } from "./auto-pilot-intervene.mjs";
 import { runIntent } from "./auto-pilot-intent.mjs";
+import { runMeta } from "./auto-pilot-meta.mjs";
 import { runPlanFromGoal } from "./auto-pilot-plan-from-goal.mjs";
 import { runProgressIterate } from "./auto-pilot-progress-iterate.mjs";
 
@@ -43,6 +44,10 @@ Usage:
   node scripts/auto-pilot.mjs cockpit [--json]
   node scripts/auto-pilot.mjs gates audit [--json]
   node scripts/auto-pilot.mjs gates maintain [--apply] [--json]
+  node scripts/auto-pilot.mjs meta record --category <cat> --severity <sev> --title "..." --symptom "..." --expected "..." --actual "..." [--json]
+  node scripts/auto-pilot.mjs meta list [--open] [--category <cat>] [--json]
+  node scripts/auto-pilot.mjs meta resolve --id MP-NNN --resolution "..." [--json]
+  node scripts/auto-pilot.mjs meta report --project <path> [--output <file>] [--json]
   node scripts/auto-pilot.mjs goal --text "..."
   node scripts/auto-pilot.mjs plan-from-goal [--apply] [--json]
   node scripts/auto-pilot.mjs progress-iterate [--delegate-readonly] [--json]
@@ -114,6 +119,15 @@ async function main() {
       process.exit(1);
     }
     await runGates(subcommand, argv.slice(2));
+    return;
+  }
+
+  if (command === "meta") {
+    if (!subcommand) {
+      printHelp();
+      process.exit(1);
+    }
+    await runMeta(subcommand, argv.slice(2));
     return;
   }
 

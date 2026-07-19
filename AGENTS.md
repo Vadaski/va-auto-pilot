@@ -69,6 +69,7 @@ Key control surfaces:
 
 - `.va-auto-pilot/config.yaml` — quality gates, adaptive gates, runtime config
 - `.va-auto-pilot/sprint-state.json` — current sprint state (mutable runtime artifact)
+- `.va-auto-pilot/meta-problems.json` — meta-problem records (tool-level feedback; see `docs/plans/meta-problem-awareness.md`)
 - `docs/todo/human-board.md` — human override channel
 - `docs/todo/sprint.md` — sprint backlog and decisions
 - `docs/todo/run-journal.md` — run journal and failure records

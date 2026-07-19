@@ -240,6 +240,39 @@ At the start of each cycle:
 
 ---
 
+## Meta-Problem Awareness Contract
+
+Pitfalls record failures of the *project's own code*. Meta-problems record
+failures of *va-auto-pilot itself* — gates that cannot express the project's
+stack, orchestration or state bugs, protocol text that misleads, CLI or prompt
+surfaces that confuse agents.
+
+Rules:
+
+1. When a failure or friction is caused by the tool (not the project's code),
+   record it before the cycle ends:
+
+   ```bash
+   node scripts/auto-pilot.mjs meta record \
+     --category <architecture|gate|protocol|ux|state|integration> \
+     --severity <blocker|major|minor|nit> \
+     --title "..." --symptom "..." --expected "..." --actual "..." \
+     [--hypothesis "..."] [--suggestion "..."] \
+     [--command "..."] [--exit-code N] [--output-excerpt "..."] \
+     [--component "scripts/..."] [--task <TASK-ID>]
+   ```
+
+2. Attach reproduction evidence whenever available: the command, its exit
+   code, and a short output excerpt. A record without evidence cannot be
+   judged objectively upstream.
+3. Business-code failures still go to `pitfall`. When in doubt, record both.
+4. Never edit `.va-auto-pilot/meta-problems.json` by hand; use the CLI.
+5. Records stay local. To feed them back into va-auto-pilot, a human runs
+   `va-auto-pilot meta report --project <this-project>` from the va-auto-pilot
+   repository and turns the resulting clusters into backlog items.
+
+---
+
 ## Decision Loop
 
 ```bash

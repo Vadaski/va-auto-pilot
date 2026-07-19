@@ -89,6 +89,7 @@ Strategic intent: `node scripts/auto-pilot.mjs intent ...` → `docs/todo/human-
 - Do not prescribe implementation steps to workers — objective + constraints + gates only.
 - Read memory via `node scripts/sprint-board.mjs journal --view`.
 - Use `orchestrate recover --json` before resuming after crashes, stale checkpoints, or ambiguous worker state.
+- Friction or failure caused by va-auto-pilot itself (not the project's code) → record it via `node scripts/auto-pilot.mjs meta record` with command/exit-code/output evidence before the cycle ends.
 
 ## Unattended (CI only)
 

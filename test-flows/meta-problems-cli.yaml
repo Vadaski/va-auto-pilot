@@ -1,0 +1,251 @@
+name: Meta-problem CLI
+# CLI flows for `auto-pilot.mjs meta` — the meta-problem awareness capability
+# (record side inside a project, reader side via `report --project <path>`).
+# Flows use isolated_meta: true or explicit tmpdirs to avoid mutating the repo.
+
+flows:
+  - name: "meta record: records entry and prints MP-ID"
+    command: "node"
+    args:
+      - "scripts/auto-pilot.mjs"
+      - "meta"
+      - "record"
+      - "--category"
+      - "gate"
+      - "--severity"
+      - "major"
+      - "--title"
+      - "gate cannot express cargo workspace"
+      - "--symptom"
+      - "rust workspace gate runs npm test"
+      - "--expected"
+      - "gate command matches stack"
+      - "--actual"
+      - "init wrote npm-based gate for a cargo project"
+      - "--command"
+      - "npm run check:all"
+      - "--exit-code"
+      - "2"
+      - "--output-excerpt"
+      - "npm ERR! missing script"
+      - "--component"
+      - "scripts/auto-pilot-gates.mjs"
+    isolated_meta: true
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["Recorded meta-problem MP-001", "major/gate"]
+      should: []
+
+  - name: "meta record: rejects missing required --symptom"
+    command: "node"
+    args:
+      - "scripts/auto-pilot.mjs"
+      - "meta"
+      - "record"
+      - "--category"
+      - "gate"
+      - "--severity"
+      - "major"
+      - "--title"
+      - "t"
+      - "--expected"
+      - "e"
+      - "--actual"
+      - "a"
+    isolated_meta: true
+    assert:
+      must:
+        - exit_code_nonzero: true
+        - stderr_contains: ["Missing required option --symptom"]
+      should: []
+
+  - name: "meta record: rejects invalid category"
+    command: "node"
+    args:
+      - "scripts/auto-pilot.mjs"
+      - "meta"
+      - "record"
+      - "--category"
+      - "bogus"
+      - "--severity"
+      - "major"
+      - "--title"
+      - "t"
+      - "--symptom"
+      - "s"
+      - "--expected"
+      - "e"
+      - "--actual"
+      - "a"
+    isolated_meta: true
+    assert:
+      must:
+        - exit_code_nonzero: true
+        - stderr_contains: ["Invalid --category"]
+      should: []
+
+  - name: "meta record: rejects invalid exit-code"
+    command: "node"
+    args:
+      - "scripts/auto-pilot.mjs"
+      - "meta"
+      - "record"
+      - "--category"
+      - "gate"
+      - "--severity"
+      - "major"
+      - "--title"
+      - "t"
+      - "--symptom"
+      - "s"
+      - "--expected"
+      - "e"
+      - "--actual"
+      - "a"
+      - "--exit-code"
+      - "abc"
+    isolated_meta: true
+    assert:
+      must:
+        - exit_code_nonzero: true
+        - stderr_contains: ["Invalid --exit-code"]
+      should: []
+
+  - name: "meta list: prints empty message when no entries"
+    command: "node"
+    args:
+      - "scripts/auto-pilot.mjs"
+      - "meta"
+      - "list"
+    isolated_meta: true
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["No meta-problems recorded."]
+      should: []
+
+  - name: "meta list --json: returns parseable JSON"
+    command: "node"
+    args:
+      - "scripts/auto-pilot.mjs"
+      - "meta"
+      - "list"
+      - "--json"
+    isolated_meta: true
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_json_parseable: true
+      should: []
+
+  - name: "meta resolve: rejects unknown MP-ID"
+    command: "node"
+    args:
+      - "scripts/auto-pilot.mjs"
+      - "meta"
+      - "resolve"
+      - "--id"
+      - "MP-999"
+      - "--resolution"
+      - "fixed"
+    isolated_meta: true
+    assert:
+      must:
+        - exit_code_nonzero: true
+        - stderr_contains: ["Meta-problem not found"]
+      should: []
+
+  - name: "bin meta: va-auto-pilot forwards the meta command"
+    command: "node"
+    args:
+      - "bin/va-auto-pilot.mjs"
+      - "meta"
+      - "list"
+    isolated_meta: true
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains: ["No meta-problems recorded."]
+      should: []
+
+  - name: "meta lifecycle: record two, resolve one, open list shows the other"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        repo="$PWD"
+        tmpdir="$(mktemp -d)"
+        meta="$tmpdir/.va-auto-pilot/meta-problems.json"
+        mkdir -p "$(dirname "$meta")"
+        (
+          cd "$tmpdir"
+          node "$repo/scripts/auto-pilot.mjs" meta record --category gate --severity blocker --title "loop deadlocks on stale checkpoint" --symptom "dispatch hangs" --expected "dispatch proceeds" --actual "await-workers never returns" --component "scripts/auto-pilot-loop.mjs" >/dev/null
+          node "$repo/scripts/auto-pilot.mjs" meta record --category ux --severity nit --title "help omits meta" --symptom "no meta in help" --expected "meta listed" --actual "absent" >/dev/null
+          node "$repo/scripts/auto-pilot.mjs" meta resolve --id MP-002 --resolution "help updated" >/dev/null
+          node "$repo/scripts/auto-pilot.mjs" meta list --open
+          node "$repo/scripts/auto-pilot.mjs" meta list
+        )
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains:
+            - "MP-001 [blocker/gate] (open) loop deadlocks on stale checkpoint"
+            - "MP-002 [nit/ux] (resolved) help omits meta"
+      should: []
+
+  - name: "meta report: clusters a project's open records into an improvement report (closed loop)"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        repo="$PWD"
+        project_dir="$(mktemp -d)"
+        reader_dir="$(mktemp -d)"
+        mkdir -p "$project_dir/.va-auto-pilot"
+        (
+          cd "$project_dir"
+          node "$repo/scripts/auto-pilot.mjs" meta record --category gate --severity blocker --title "gate runner drops stderr" --symptom "gate failure shows empty output" --expected "stderr tail in failure reason" --actual "empty excerpt" --command "npm run check:all" --exit-code 1 --output-excerpt "eslint: 3 problems" --component "scripts/auto-pilot-gates.mjs" >/dev/null
+          node "$repo/scripts/auto-pilot.mjs" meta record --category gate --severity major --title "cargo stack misdetected" --symptom "npm gate on rust project" --expected "cargo gate" --actual "npm gate" --component "scripts/auto-pilot-gates.mjs" >/dev/null
+          node "$repo/scripts/auto-pilot.mjs" meta record --category protocol --severity minor --title "protocol omits journal rule" --symptom "agent skipped journal" --expected "explicit rule" --actual "implicit" --component "templates/docs/operations/va-auto-pilot-protocol.md" >/dev/null
+          node "$repo/scripts/auto-pilot.mjs" meta resolve --id MP-003 --resolution "documented" >/dev/null
+        )
+        (
+          cd "$reader_dir"
+          node "$repo/scripts/auto-pilot.mjs" meta report --project "$project_dir" --output "$reader_dir/report.md"
+          cat "$reader_dir/report.md"
+          printf '\n---JSON---\n'
+          node "$repo/scripts/auto-pilot.mjs" meta report --project "$project_dir" --json
+        )
+    assert:
+      must:
+        - exit_code: 0
+        - stdout_contains:
+            - "# Meta-Problem Improvement Report"
+            - "2 open / 3 entries (1 resolved, 0 invalid)"
+            - "[blocker] gate — scripts/auto-pilot-gates.mjs (2)"
+            - "Candidate areas: `scripts/auto-pilot-gates.mjs`"
+            - "MP-001 (blocker) gate runner drops stderr"
+            - "Output excerpt: `eslint: 3 problems`"
+            - "\"maxSeverity\": \"blocker\""
+            - "\"category\": \"gate\""
+        - stdout_not_contains:
+            - "MP-003 (minor) protocol omits journal rule"
+      should: []
+
+  - name: "meta report: fails clearly when the project has no records"
+    command: "bash"
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        repo="$PWD"
+        empty_project="$(mktemp -d)"
+        node "$repo/scripts/auto-pilot.mjs" meta report --project "$empty_project"
+    assert:
+      must:
+        - exit_code_nonzero: true
+        - stderr_contains: ["No meta-problems recorded in project"]
+      should: []

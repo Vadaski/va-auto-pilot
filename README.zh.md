@@ -128,6 +128,10 @@ VA Auto-Pilot 采用不同的模型。在任何评审开始之前，管理 Agent
 
 陷阱指南记录结构化的失败元数据——不只是错误字符串，还有假设和缺失的上下文。相关的未解决 pitfall 会成为硬约束；从已解决 pitfall 学到的规则先进入 probation，只有携带证据显式提升后才会生效。活跃学习规则会按配置的半衰期降低置信度：有效反馈刷新寿命，无效反馈将其退役；当两条相关规则原本都可注入时，显式声明的冲突会同时隔离双方。系统复利的是经过治理的知识，而不是把每次历史失败都永久堆进 prompt。
 
+### 7. 工具会报告自己的问题
+
+pitfall 复利的是*项目自身*的失败；meta-problem 闭环的是*工具自身*的失败。当 gate 无法表达项目的技术栈、orchestration 状态机行为异常、或协议文本误导 agent 时，agent 会把一条结构化的 meta-problem（分类、严重度、期望 vs 实际、命令/退出码/输出证据）记录到项目本地的 `.va-auto-pilot/meta-problems.json`——协议要求必须在当轮 cycle 结束前完成记录。记录永不离开项目磁盘。在采用了 auto-pilot 的项目上运行 `va-auto-pilot meta report --project <path>`，会把它未解决的 meta-problem 聚类成按严重度排序、映射到本仓库候选模块的改进报告，让真实世界的摩擦流回 backlog，而不是随冲刺结束蒸发。
+
 ---
 
 ## 什么时候用 VA Auto-Pilot

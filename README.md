@@ -130,6 +130,10 @@ Every sprint ends with a fresh-context adversarial reviewer who has seen only th
 
 The pitfall guide captures structured failure metadata — not just error strings, but hypotheses and missing context. Relevant unresolved pitfalls become hard constraints; rules learned from resolved pitfalls enter probation and require evidence-backed promotion. Active learned rules lose confidence over their configured half-life, effective feedback refreshes them, ineffective feedback retires them, and declared conflicts quarantine both otherwise-injectable relevant rules. The system compounds validated knowledge without turning every historical failure into permanent prompt debt.
 
+### 7. The tool reports on itself
+
+Pitfalls compound knowledge about the *project's* failures; meta-problems close the loop on the *tool's* failures. When a gate cannot express a project's stack, the orchestration state machine misbehaves, or protocol text misleads an agent, the agent records a structured meta-problem (category, severity, expected-vs-actual, command/exit-code/output evidence) into the project's local `.va-auto-pilot/meta-problems.json` — the protocol makes this recording mandatory before the cycle ends. Records never leave the project's disk. Pointing `va-auto-pilot meta report --project <path>` at an adopted project clusters its open meta-problems into a severity-ordered improvement report mapped to candidate areas of this repository, so real-world friction flows back into the backlog instead of evaporating at sprint end.
+
 ---
 
 ## When to Use VA Auto-Pilot

@@ -62,6 +62,7 @@ const NEVER_OVERWRITE = new Set([
   "docs/todo/run-journal.md",
   "docs/todo/human-board.md",
   ".va-auto-pilot/pitfalls.json",
+  ".va-auto-pilot/meta-problems.json",
   "docs/todo/sprint.md"
 ]);
 
@@ -85,6 +86,7 @@ Usage:
   va-auto-pilot plan-from-goal [--apply] [--json]
   va-auto-pilot intent <objective|constraint|risk|acceptance|override|note> --text "..."
   va-auto-pilot intervene <subcommand> [options]
+  va-auto-pilot meta <record|list|resolve|report> [options]
   va-auto-pilot --help
 
 Commands:
@@ -99,6 +101,16 @@ Commands:
   plan-from-goal Generate/apply candidate backlog from captured objective intent
   intent       Append human intent through the agent-managed override channel
   intervene    Tactical directives for the active run (separate from human-board)
+  meta         Record tool-level problems (meta-problems) and report them upstream
+
+Options (meta):
+  record --category <architecture|gate|protocol|ux|state|integration> --severity <blocker|major|minor|nit>
+         --title "..." --symptom "..." --expected "..." --actual "..."
+         [--hypothesis "..."] [--suggestion "..."] [--command "..."] [--exit-code <n>]
+         [--output-excerpt "..."] [--component "..."] [--task <TASK-ID>] [--files a,b] [--source agent|human]
+  list [--open] [--category <cat>]
+  resolve --id MP-NNN --resolution "..."
+  report --project <path> [--output <file>]   Cluster a project's open meta-problems into an improvement report
 
 Options (run):
   --max-cycles <n>        Maximum task cycles (default: 50)
@@ -1148,7 +1160,7 @@ function main() {
     process.exit(0);
   }
 
-  if (["orchestrate", "observe", "cockpit", "gates", "goal", "plan-from-goal", "intent", "intervene"].includes(argv[0])) {
+  if (["orchestrate", "observe", "cockpit", "gates", "goal", "plan-from-goal", "intent", "intervene", "meta"].includes(argv[0])) {
     runAutoPilotCli(argv);
     return;
   }

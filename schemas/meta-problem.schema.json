@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vadaski.github.io/va-auto-pilot/schemas/meta-problem.schema.json",
+  "title": "VA Auto-Pilot Meta-Problem Record",
+  "description": "A single meta-problem entry: a defect or friction in va-auto-pilot itself, observed while running it inside an adopted project.",
+  "type": "object",
+  "required": ["id", "category", "severity", "title", "symptom", "expected", "actual", "context", "source", "resolution", "resolvedAt", "createdAt"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^MP-\\d{3,}$",
+      "description": "Zero-padded sequential identifier (MP-001, MP-002, ...)."
+    },
+    "category": {
+      "type": "string",
+      "enum": ["architecture", "gate", "protocol", "ux", "state", "integration"],
+      "description": "Which part of va-auto-pilot the problem belongs to."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["blocker", "major", "minor", "nit"],
+      "description": "blocker: loop cannot proceed; major: costly workaround; minor: friction; nit: polish."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One-line summary."
+    },
+    "symptom": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What was observed."
+    },
+    "expected": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What should have happened."
+    },
+    "actual": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What happened instead."
+    },
+    "hypothesis": {
+      "type": "string",
+      "description": "Suspected root cause."
+    },
+    "suggestion": {
+      "type": "string",
+      "description": "Proposed fix direction."
+    },
+    "context": {
+      "type": "object",
+      "description": "Reproduction evidence. The object itself is required so readers know evidence was considered; each field is optional.",
+      "properties": {
+        "command": { "type": "string", "description": "Command that surfaced the problem." },
+        "exitCode": { "type": ["integer", "null"], "description": "Exit code of the command, if any." },
+        "outputExcerpt": { "type": "string", "maxLength": 500, "description": "Key output lines, truncated like pitfall failure reasons." },
+        "component": { "type": "string", "description": "Script/module/area implicated, e.g. scripts/auto-pilot-gates.mjs." },
+        "taskId": { "type": "string", "description": "Sprint task being executed when observed." },
+        "files": { "type": "array", "items": { "type": "string" }, "description": "Related file paths." }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "string",
+      "enum": ["agent", "human"],
+      "description": "Who recorded the entry."
+    },
+    "resolution": {
+      "type": "string",
+      "description": "Empty while open."
+    },
+    "resolvedAt": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Null while open."
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

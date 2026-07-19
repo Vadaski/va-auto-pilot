@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Meta-problem awareness: adopted projects record tool-level problems (`va-auto-pilot meta record/list/resolve`) into a schema-validated local `.va-auto-pilot/meta-problems.json` with category, severity, expected-vs-actual, and command/exit-code/output evidence, and `va-auto-pilot meta report --project <path>` clusters a project's open records into a severity-ordered improvement report mapped to candidate repo areas
+- Meta-Problem Awareness Contract in the protocol templates, start prompt, and skill guidance making tool-caused friction recording mandatory before cycle end
 - Repeatable crash fault-injection soak runner with worker, commit-transaction, and orchestration-recovery suites plus JSON reporting
 - Evidence artifact verification for bundle containment, regular-file identity, byte size, and SHA-256 content binding
 - Cockpit structured-proof summaries that validate current-run evidence manifests, event bindings, required gates, outcomes, and declared review counts before completion trust

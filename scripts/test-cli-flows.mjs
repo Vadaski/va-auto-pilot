@@ -16,6 +16,8 @@
  *                       --journal-file pointing to it
  *   isolated_pitfalls - if true, create a temp pitfalls file and pass
  *                       --pitfalls-file pointing to it
+ *   isolated_meta     - if true, create a temp meta-problems file and pass
+ *                       --meta-file pointing to it
  *
  * Assertion types supported:
  *   exit_code: <n>              — exit code must equal n
@@ -148,6 +150,15 @@ function makeTempPitfallsFile() {
   return tmpPitfalls;
 }
 
+function makeTempMetaFile() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-cli-meta-"));
+  const tmpMeta = path.join(tmpDir, "meta-problems.json");
+  // Meta-problem flows must start from a clean slate so assertions do not
+  // depend on whatever records happen to exist in the repo.
+  fs.writeFileSync(tmpMeta, JSON.stringify({ version: 1, entries: [] }, null, 2) + "\n", "utf8");
+  return tmpMeta;
+}
+
 // ---------------------------------------------------------------------------
 // Flow executor
 // ---------------------------------------------------------------------------
@@ -176,6 +187,11 @@ function runFlow(flow) {
   if (flow.isolated_pitfalls) {
     const tmpPitfalls = makeTempPitfallsFile();
     finalArgs = [...finalArgs, "--pitfalls-file", tmpPitfalls];
+  }
+
+  if (flow.isolated_meta) {
+    const tmpMeta = makeTempMetaFile();
+    finalArgs = [...finalArgs, "--meta-file", tmpMeta];
   }
 
   const spawnEnv = { ...process.env, ...isolationEnv, ...env };

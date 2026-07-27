@@ -30,7 +30,6 @@ test("spawnBounded settles after its grace when an escaped descendant retains st
     "while (!fs.existsSync(marker) && Date.now() < deadline) Atomics.wait(wait, 0, 0, 10);",
     "if (!fs.existsSync(marker)) process.exit(2);",
   ].join("");
-  const startedAt = Date.now();
 
   try {
     let result;

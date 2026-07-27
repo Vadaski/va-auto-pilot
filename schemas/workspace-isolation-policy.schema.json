@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vadaski.github.io/va-auto-pilot/schemas/workspace-isolation-policy.schema.json",
+  "title": "VA Auto-Pilot Workspace Isolation Policy",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "architecturePlanSha256",
+    "ignoredPaths",
+    "artifactRoots",
+    "failClosedScenarioIds",
+    "routeRule"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "architecturePlanSha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+    "ignoredPaths": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "artifactRoots": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "failClosedScenarioIds": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "routeRule": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

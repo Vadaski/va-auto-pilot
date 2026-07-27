@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "architecturePlanSha256": "a2dbc412711aacb870cea5ca1334536a6d585860568d5979933caa8257215965",
+  "reviewLedger": "docs/reviews/vnext-plan-preflight-rev31.md",
+  "artifactFiles": {
+    "writerInventory": "docs/operations/state-architecture/state-writer-inventory.json",
+    "terminalInventory": "docs/operations/state-architecture/state-terminal-inventory.json",
+    "workspaceIsolationPolicy": "docs/operations/state-architecture/workspace-isolation-policy.json",
+    "bootstrapReview": "docs/operations/state-architecture/bootstrap-review-manifest.json"
+  },
+  "requiredSchemas": [
+    "schemas/state-architecture-manifest.schema.json",
+    "schemas/state-writer-inventory.schema.json",
+    "schemas/state-terminal-inventory.schema.json",
+    "schemas/workspace-isolation-policy.schema.json",
+    "schemas/bootstrap-review-manifest.schema.json"
+  ],
+  "architectureGates": [
+    "npm run check:state-architecture",
+    "node ./scripts/validate-state-architecture.mjs"
+  ],
+  "publicMetaProfiles": [
+    {
+      "profileId": "meta-record",
+      "entrypoint": "scripts/auto-pilot-meta.mjs",
+      "mode": "mutating",
+      "routeScope": "workspace-aware",
+      "stdoutOnly": false
+    },
+    {
+      "profileId": "meta-resolve",
+      "entrypoint": "scripts/auto-pilot-meta.mjs",
+      "mode": "mutating",
+      "routeScope": "workspace-aware",
+      "stdoutOnly": false
+    },
+    {
+      "profileId": "meta-list",
+      "entrypoint": "scripts/auto-pilot-meta.mjs",
+      "mode": "read-only",
+      "routeScope": "workspace-aware",
+      "stdoutOnly": true
+    },
+    {
+      "profileId": "meta-list-pre-route",
+      "entrypoint": "scripts/auto-pilot-meta.mjs",
+      "mode": "read-only",
+      "routeScope": "project-readonly",
+      "stdoutOnly": true
+    },
+    {
+      "profileId": "meta-report",
+      "entrypoint": "scripts/auto-pilot-meta.mjs",
+      "mode": "read-only",
+      "routeScope": "workspace-aware",
+      "stdoutOnly": true
+    },
+    {
+      "profileId": "meta-report-pre-route",
+      "entrypoint": "scripts/auto-pilot-meta.mjs",
+      "mode": "read-only",
+      "routeScope": "project-readonly",
+      "stdoutOnly": true
+    }
+  ]
+}

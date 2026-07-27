@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -44,7 +45,13 @@ import {
 } from "../scripts/lib/observability.mjs";
 import { classifyCommandPermission, detectOutOfScopeFiles } from "../scripts/lib/permission-scope.mjs";
 import { withPilotFileLock } from "../scripts/lib/pilot-state.mjs";
-import { runPlanReviewCommand, validatePlanReviewForApprove } from "../scripts/lib/plan-review.mjs";
+import {
+  computeCandidatePlanHash,
+  materializeArchitecturePlanBindingToWorktree,
+  runPlanReviewCommand,
+  validateArchitecturePlanBinding,
+  validatePlanReviewForApprove,
+} from "../scripts/lib/plan-review.mjs";
 import { normalizeTask } from "../scripts/lib/sprint-board/core.mjs";
 import { prepareTrackWorktree } from "../scripts/lib/worktree-isolation.mjs";
 import { resolveWorkspacePaths, writeWorkspace } from "../scripts/lib/workspace.mjs";
@@ -86,6 +93,20 @@ function writeState(root, tasks) {
   fs.mkdirSync(path.dirname(stateFile), { recursive: true });
   fs.writeFileSync(stateFile, `${JSON.stringify({ version: 1, projectPrefix: "AP", updatedAt: "2026-07-09T00:00:00.000Z", tasks }, null, 2)}\n`);
   return stateFile;
+}
+
+/** Install a deterministic authorizing plan reviewer (dry-run reviews cannot approve). */
+function writeStubPlanReviewerConfig(root) {
+  const configDir = path.join(root, ".va-auto-pilot");
+  fs.mkdirSync(configDir, { recursive: true });
+  const reviewer = path.join(configDir, "stub-plan-reviewer.mjs");
+  fs.writeFileSync(reviewer, "console.log('PLAN REVIEW STATUS: PASS');\n", "utf8");
+  fs.writeFileSync(path.join(configDir, "config.yaml"), [
+    "qualityGate:",
+    "  buildCommand: 'true'",
+    `  planReviewCommand: ${JSON.stringify(`${process.execPath} ${reviewer}`)}`,
+    "",
+  ].join("\n"), "utf8");
 }
 
 test("run and task identifiers cannot escape their managed roots", () => {
@@ -356,6 +377,97 @@ test("plan review requires one unambiguous final PASS marker", async () => {
     candidatePlan: { primaryTaskId: "AP-001", parallelTracks: [] },
     runId: "run-review",
   }).ok, false);
+});
+
+test("architecturePlanBinding fails closed on missing or mismatched plan bytes", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-arch-binding-"));
+  const planRel = path.join("docs", "plans", "example.md");
+  fs.mkdirSync(path.join(root, "docs", "plans"), { recursive: true });
+  const body = "# plan\n";
+  fs.writeFileSync(path.join(root, planRel), body, "utf8");
+  const sha256 = crypto.createHash("sha256").update(body).digest("hex");
+
+  const bound = {
+    primaryTaskId: "AP-001",
+    architecturePlanBinding: {
+      schemaVersion: 1,
+      path: planRel,
+      sha256,
+      bytes: Buffer.byteLength(body),
+    },
+  };
+  assert.equal(validateArchitecturePlanBinding(bound, root).ok, true);
+
+  const mismatched = {
+    ...bound,
+    architecturePlanBinding: { ...bound.architecturePlanBinding, sha256: "0".repeat(64) },
+  };
+  const mismatch = validateArchitecturePlanBinding(mismatched, root);
+  assert.equal(mismatch.ok, false);
+  assert.equal(mismatch.code, "ARCHITECTURE_PLAN_BINDING_MISMATCH");
+
+  const escaped = {
+    ...bound,
+    architecturePlanBinding: { ...bound.architecturePlanBinding, path: "../outside.md" },
+  };
+  assert.equal(validateArchitecturePlanBinding(escaped, root).code, "ARCHITECTURE_PLAN_BINDING_ESCAPE");
+
+  const approveMismatch = validatePlanReviewForApprove({
+    review: {
+      planHash: computeCandidatePlanHash(mismatched),
+      passed: true,
+      status: "PASS",
+      findings: { critical: [] },
+      architecturePlanSha256: sha256,
+    },
+    candidatePlan: mismatched,
+    runId: "run-bind",
+    workDir: root,
+  });
+  assert.equal(approveMismatch.ok, false);
+  assert.equal(approveMismatch.code, "ARCHITECTURE_PLAN_BINDING_MISMATCH");
+
+  const approveOk = validatePlanReviewForApprove({
+    review: {
+      planHash: computeCandidatePlanHash(bound),
+      passed: true,
+      status: "PASS",
+      findings: { critical: [] },
+      architecturePlanSha256: sha256,
+    },
+    candidatePlan: bound,
+    runId: "run-bind",
+    workDir: root,
+  });
+  assert.equal(approveOk.ok, true);
+
+  assert.equal(validatePlanReviewForApprove({
+    review: {
+      planHash: computeCandidatePlanHash(bound),
+      passed: true,
+      status: "PASS",
+      dryRun: true,
+      findings: { critical: [] },
+      architecturePlanSha256: sha256,
+    },
+    candidatePlan: bound,
+    runId: "run-bind",
+    workDir: root,
+  }).code, "PLAN_REVIEW_DRY_RUN");
+
+  const worktree = path.join(root, ".va", "worktrees", "run-x", "AP-001");
+  fs.mkdirSync(path.join(worktree, "docs", "plans"), { recursive: true });
+  fs.writeFileSync(path.join(worktree, planRel), "# stale head plan\n", "utf8");
+  const materialized = materializeArchitecturePlanBindingToWorktree({
+    workDir: root,
+    worktreePath: worktree,
+    candidatePlan: bound,
+  });
+  assert.equal(materialized.ok, true);
+  assert.equal(
+    crypto.createHash("sha256").update(fs.readFileSync(path.join(worktree, planRel))).digest("hex"),
+    sha256,
+  );
 });
 
 test("corrupt workspace metadata falls back without recursive stack overflow", () => {
@@ -878,10 +990,11 @@ test("run-specific planning never returns work actively claimed by another run",
 test("dispatch rejects replay outside the approved phase", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "va-dispatch-phase-"));
   writeState(root, [{ id: "AP-001", title: "task", priority: "P1", state: "Backlog", dependsOn: [] }]);
+  writeStubPlanReviewerConfig(root);
   const commands = [
     ["orchestrate", "init", "--run-id", "run-phase", "--json"],
     ["orchestrate", "plan", "--run-id", "run-phase", "--json"],
-    ["orchestrate", "review-plan", "--run-id", "run-phase", "--dry-run", "--json"],
+    ["orchestrate", "review-plan", "--run-id", "run-phase", "--json"],
     ["orchestrate", "approve-plan", "--run-id", "run-phase", "--json"],
     ["orchestrate", "dispatch", "--run-id", "run-phase", "--dry-run", "--json"],
   ];
@@ -932,11 +1045,12 @@ test("plan governance phase checks are enforced by each CLI action", () => {
     state: "Backlog",
     dependsOn: [],
   }]);
+  writeStubPlanReviewerConfig(root);
   const runId = "run-governance-phase";
   for (const args of [
     ["orchestrate", "init", "--run-id", runId, "--json", "--state-file", stateFile],
     ["orchestrate", "plan", "--run-id", runId, "--json", "--state-file", stateFile],
-    ["orchestrate", "review-plan", "--run-id", runId, "--dry-run", "--json", "--state-file", stateFile],
+    ["orchestrate", "review-plan", "--run-id", runId, "--json", "--state-file", stateFile],
     ["orchestrate", "approve-plan", "--run-id", runId, "--json", "--state-file", stateFile],
     ["orchestrate", "dispatch", "--run-id", runId, "--dry-run", "--json", "--state-file", stateFile],
   ]) {

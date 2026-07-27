@@ -59,8 +59,10 @@ import {
 import { refreshSnapshot } from "./auto-pilot-observe.mjs";
 import {
   clearPlanReview,
+  materializeArchitecturePlanBindingToWorktree,
   readPlanReview,
   runPlanReviewCommand,
+  validateArchitecturePlanBinding,
   validatePlanReviewForApprove,
   writePlanReview,
 } from "./lib/plan-review.mjs";
@@ -1732,27 +1734,35 @@ async function orchestrateReviewPlan(opts) {
     fail(opts, "NO_CANDIDATE_PLAN", "run orchestrate plan first", {}, 2);
   }
 
-  // The previous review ceases to be authoritative as soon as a re-review
+  // The previous review ceases to be authoritative as soon as a real re-review
   // starts. Clear it before invoking the external reviewer so an interrupted
-  // command cannot leave an old PASS available for approve-plan.
-  clearPlanReview(opts.workDir, opts.runId);
+  // command cannot leave an old PASS available for approve-plan. Dry-run must
+  // not destroy a published review or invalidate an approved checkpoint.
+  if (!opts.dryRun) {
+    clearPlanReview(opts.workDir, opts.runId);
 
-  // A requested re-review supersedes the old decision immediately. If the new
-  // reviewer fails or crashes, the prior checkpoint must not remain dispatchable.
-  if (run.phase === "plan-approved") {
-    const invalidated = await transitionRunIfUnchanged(opts, run, (current) => ({
-      ...current,
-      approvedPlanId: null,
-      approvedCommitTasks: [],
-      commitApprovalManifest: null,
-      commitApprovalManifestHash: null,
-      approvedCommitManifest: null,
-      approvedCommitManifestHash: null,
-      phase: "awaiting-plan-approval",
-      updatedAt: new Date().toISOString(),
-    }), "plan review invalidation");
-    Object.assign(run, invalidated);
-    clearCheckpoint(opts.workDir, opts.runId);
+    // A requested re-review supersedes the old decision immediately. If the new
+    // reviewer fails or crashes, the prior checkpoint must not remain dispatchable.
+    if (run.phase === "plan-approved") {
+      const invalidated = await transitionRunIfUnchanged(opts, run, (current) => ({
+        ...current,
+        approvedPlanId: null,
+        approvedCommitTasks: [],
+        commitApprovalManifest: null,
+        commitApprovalManifestHash: null,
+        approvedCommitManifest: null,
+        approvedCommitManifestHash: null,
+        phase: "awaiting-plan-approval",
+        updatedAt: new Date().toISOString(),
+      }), "plan review invalidation");
+      Object.assign(run, invalidated);
+      clearCheckpoint(opts.workDir, opts.runId);
+    }
+  }
+
+  const bindingPrecheck = validateArchitecturePlanBinding(run.candidatePlan, opts.workDir);
+  if (!bindingPrecheck.ok) {
+    fail(opts, bindingPrecheck.code, bindingPrecheck.message, bindingPrecheck.context ?? {}, 2);
   }
 
   const gateConfig = readQualityGateConfig();
@@ -1764,6 +1774,24 @@ async function orchestrateReviewPlan(opts) {
     reviewCommand,
     dryRun: opts.dryRun,
   });
+
+  // Dry-run may inspect binding/hash and reviewer wiring, but must not publish a
+  // plan-reviewed checkpoint, journal a real PASS, or leave an approvable artifact.
+  if (opts.dryRun) {
+    const payload = {
+      ok: Boolean(review.passed),
+      phase: run.phase,
+      runId: run.runId,
+      planHash: review.planHash,
+      review,
+      dryRun: true,
+    };
+    if (!review.passed) {
+      fail(opts, "PLAN_REVIEW_CRITICAL", "dry-run plan review would fail", { review }, 1);
+    }
+    await refreshSnapshot(opts);
+    return emitResult(opts, payload);
+  }
 
   if (!review.passed) {
     await writePlanReview(opts.workDir, review, opts.runId);
@@ -1906,6 +1934,7 @@ async function orchestrateApprovePlan(opts) {
       review: readPlanReview(opts.workDir, opts.runId),
       candidatePlan: run.candidatePlan,
       runId: run.runId,
+      workDir: opts.workDir,
     });
     if (!validation.ok) {
       fail(opts, validation.code, validation.message, validation.context ?? {}, 2);
@@ -1959,6 +1988,21 @@ async function orchestrateDispatchUnlocked(opts) {
           path: resolveTrackWorktreePath(opts.workDir, worktreeConfig, run.runId, taskId),
         }
         : await prepareTrackWorktree({ workDir: opts.workDir, runId: run.runId, taskId, config: worktreeConfig });
+      if (!opts.dryRun && track.worktree?.path && run.candidatePlan?.architecturePlanBinding) {
+        const materialized = materializeArchitecturePlanBindingToWorktree({
+          workDir: opts.workDir,
+          worktreePath: track.worktree.path,
+          candidatePlan: run.candidatePlan,
+        });
+        if (!materialized.ok) {
+          fail(opts, materialized.code, materialized.message, materialized.context ?? {}, 2);
+        }
+        track.worktree.architecturePlanBinding = {
+          path: materialized.path,
+          sha256: materialized.sha256,
+          materialized: true,
+        };
+      }
     }
     tracks.push(track);
   }

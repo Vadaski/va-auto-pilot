@@ -48,6 +48,10 @@ import {
   findNextTask,
   buildParallelPlan
 } from "./lib/sprint-board/core.mjs";
+import {
+  resolveWorkspaceSiblingPath,
+  validateWorkspaceArtifactRoots,
+} from "./lib/workspace.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -2117,11 +2121,43 @@ async function main() {
   }
 
   const stateFile = path.resolve(parsed.options["state-file"] ?? DEFAULTS.stateFile);
-  const boardFile = path.resolve(parsed.options["board-file"] ?? DEFAULTS.boardFile);
-  const journalFile = path.resolve(parsed.options["journal-file"] ?? DEFAULTS.journalFile);
-  const pitfallsFile = path.resolve(parsed.options["pitfalls-file"] ?? DEFAULT_PITFALLS_FILE);
-  const historyFile = resolveEvalHistoryFile(process.cwd(), parsed.options["history-file"] ?? DEFAULT_EVAL_HISTORY_FILE);
+  const boardFile = path.resolve(
+    parsed.options["board-file"]
+      ?? resolveWorkspaceSiblingPath(stateFile, "sprint.md", DEFAULTS.boardFile, process.cwd())
+  );
+  const journalFile = path.resolve(
+    parsed.options["journal-file"]
+      ?? resolveWorkspaceSiblingPath(stateFile, "run-journal.md", DEFAULTS.journalFile, process.cwd())
+  );
+  const pitfallsFile = path.resolve(
+    parsed.options["pitfalls-file"]
+      ?? resolveWorkspaceSiblingPath(stateFile, "pitfalls.json", DEFAULT_PITFALLS_FILE, process.cwd())
+  );
+  const historyFile = resolveEvalHistoryFile(
+    process.cwd(),
+    parsed.options["history-file"]
+      ?? resolveWorkspaceSiblingPath(
+        stateFile,
+        path.join("evidence", "eval-history.jsonl"),
+        DEFAULT_EVAL_HISTORY_FILE,
+        process.cwd()
+      )
+  );
   const humanBoardFile = resolveHumanBoardPath(stateFile);
+  const workspaceRootValidation = validateWorkspaceArtifactRoots({
+    stateFile,
+    boardFile,
+    journalFile,
+    pitfallsFile,
+    historyFile,
+  });
+  if (!workspaceRootValidation.ok) {
+    throw new VAPilotError(
+      "WORKSPACE_ROOT_MISMATCH",
+      workspaceRootValidation.errors[0],
+      { errors: workspaceRootValidation.errors }
+    );
+  }
 
   if (parsed.command === "journal") {
     if (parsed.flags.has("view")) {

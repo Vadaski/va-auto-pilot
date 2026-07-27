@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "architecturePlanSha256": "a2dbc412711aacb870cea5ca1334536a6d585860568d5979933caa8257215965",
+  "reviewLedger": "docs/reviews/vnext-plan-preflight-rev31.md",
+  "reviewRoster": [
+    "reviewer-a",
+    "reviewer-b",
+    "reviewer-c",
+    "reviewer-d"
+  ],
+  "trustBoundary": {
+    "readOnlyProfiles": [
+      "meta-list",
+      "meta-list-pre-route",
+      "meta-report",
+      "meta-report-pre-route"
+    ],
+    "mutatingProfiles": [
+      "meta-record",
+      "meta-resolve"
+    ],
+    "protectedArtifacts": [
+      "docs/plans/vnext-durable-autonomy-architecture.md",
+      "docs/reviews/vnext-plan-preflight-rev31.md",
+      "docs/operations/state-architecture/*.json",
+      "schemas/*.json"
+    ],
+    "cutoverBlockedTracks": [
+      "A1",
+      "A2",
+      "A3",
+      "C0",
+      "C1",
+      "C2"
+    ],
+    "rule": "A0 freezes review/trust metadata, workspace routing, inventories, and gates only. Authority cutover, live default switching, and production trust-root installation remain out of scope."
+  }
+}

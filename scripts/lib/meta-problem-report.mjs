@@ -98,15 +98,16 @@ export function clusterMetaProblems(entries) {
 }
 
 /**
- * Build the improvement report for a project directory. Resolved entries are
- * counted but excluded from clusters; invalid entries are surfaced, never
- * silently dropped.
+ * Build the improvement report for an exact meta-problems file. Resolved
+ * entries are counted but excluded from clusters; invalid entries are surfaced,
+ * never silently dropped.
  *
- * @param {string} projectDir
+ * @param {{ projectDir: string, metaFile: string }} input
  * @returns {MetaProblemReport}
  */
-export function buildMetaProblemReport(projectDir) {
-  const metaFile = metaFileForProject(projectDir);
+export function buildMetaProblemReportFromFile(input) {
+  const projectDir = path.resolve(input.projectDir);
+  const metaFile = path.resolve(input.metaFile);
   if (!fs.existsSync(metaFile)) {
     throw new VAPilotError("FILE_NOT_FOUND", `No meta-problems recorded in project: ${metaFile}`, { metaFile, projectDir });
   }
@@ -133,7 +134,7 @@ export function buildMetaProblemReport(projectDir) {
 
   return {
     reportVersion: META_PROBLEM_REPORT_VERSION,
-    project: path.resolve(projectDir),
+    project: projectDir,
     metaFile,
     generatedAt: nowIso(),
     totals: {
@@ -145,6 +146,20 @@ export function buildMetaProblemReport(projectDir) {
     clusters: clusterMetaProblems(validOpen),
     invalidEntries,
   };
+}
+
+/**
+ * Build the improvement report for a project directory.
+ *
+ * @param {string} projectDir
+ * @returns {MetaProblemReport}
+ */
+export function buildMetaProblemReport(projectDir) {
+  const resolvedProject = path.resolve(projectDir);
+  return buildMetaProblemReportFromFile({
+    projectDir: resolvedProject,
+    metaFile: metaFileForProject(resolvedProject),
+  });
 }
 
 /**

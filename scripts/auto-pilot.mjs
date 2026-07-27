@@ -46,8 +46,10 @@ Usage:
   node scripts/auto-pilot.mjs gates maintain [--apply] [--json]
   node scripts/auto-pilot.mjs meta record --category <cat> --severity <sev> --title "..." --symptom "..." --expected "..." --actual "..." [--json]
   node scripts/auto-pilot.mjs meta list [--open] [--category <cat>] [--json]
+  node scripts/auto-pilot.mjs meta list --project <path> [--open] [--category <cat>] [--json]
   node scripts/auto-pilot.mjs meta resolve --id MP-NNN --resolution "..." [--json]
-  node scripts/auto-pilot.mjs meta report --project <path> [--output <file>] [--json]
+  node scripts/auto-pilot.mjs meta report [--json]
+  node scripts/auto-pilot.mjs meta report --project <path> [--json]
   node scripts/auto-pilot.mjs goal --text "..."
   node scripts/auto-pilot.mjs plan-from-goal [--apply] [--json]
   node scripts/auto-pilot.mjs progress-iterate [--delegate-readonly] [--json]

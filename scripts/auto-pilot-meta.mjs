@@ -10,7 +10,6 @@
  * Design doc: docs/plans/meta-problem-awareness.md
  */
 
-import fs from "node:fs";
 import path from "node:path";
 
 import {
@@ -19,12 +18,31 @@ import {
   VALID_SEVERITIES,
   addMetaProblem,
   listMetaProblems,
+  metaFileForProject,
   resolveMetaProblem,
 } from "./lib/meta-problems.mjs";
-import { buildMetaProblemReport, renderMetaProblemReportMarkdown } from "./lib/meta-problem-report.mjs";
+import {
+  buildMetaProblemReport,
+  buildMetaProblemReportFromFile,
+  renderMetaProblemReportMarkdown
+} from "./lib/meta-problem-report.mjs";
 import { emitResult } from "./lib/orchestration-cli.mjs";
+import { resolveDefaults } from "./lib/sprint-utils.mjs";
+import {
+  resolveProjectRootFromStateFile,
+  resolveWorkspaceSiblingPath,
+  validateWorkspaceArtifactRoots
+} from "./lib/workspace.mjs";
 
 const BOOL_FLAGS = new Set(["json", "open"]);
+const PRE_ROUTE_READ_DISALLOWED_OPTIONS = [
+  "state-file",
+  "board-file",
+  "journal-file",
+  "pitfalls-file",
+  "history-file",
+  "meta-file",
+];
 
 /**
  * @param {string[]} argv
@@ -82,6 +100,40 @@ function formatList(entries) {
   return entries.map(formatEntryLine).join("\n");
 }
 
+function resolveRoutedMetaContext(parsed) {
+  const defaults = resolveDefaults(process.cwd());
+  const stateFile = path.resolve(parsed.options["state-file"] ?? defaults.stateFile);
+  const defaultMetaFile = resolveWorkspaceSiblingPath(
+    stateFile,
+    "meta-problems.json",
+    DEFAULT_META_FILE,
+    process.cwd()
+  );
+  const metaFile = path.resolve(process.cwd(), parsed.options["meta-file"] ?? defaultMetaFile);
+  const rootValidation = validateWorkspaceArtifactRoots({ stateFile, metaFile });
+  if (!rootValidation.ok) {
+    throw new Error(rootValidation.errors[0]);
+  }
+  return {
+    stateFile,
+    metaFile,
+    projectDir: resolveProjectRootFromStateFile(stateFile, process.cwd()),
+  };
+}
+
+function resolvePreRouteProject(parsed, subcommand) {
+  const project = parsed.options.project;
+  if (!project) {
+    throw new Error(`meta ${subcommand} without a current route requires --project <path>`);
+  }
+  for (const optionName of PRE_ROUTE_READ_DISALLOWED_OPTIONS) {
+    if (parsed.options[optionName] !== undefined) {
+      throw new Error(`meta ${subcommand} --project does not accept --${optionName}; use the routed form without --project`);
+    }
+  }
+  return path.resolve(process.cwd(), project);
+}
+
 /**
  * @param {string} subcommand record | list | resolve | report
  * @param {string[]} argv
@@ -90,9 +142,15 @@ function formatList(entries) {
 export async function runMeta(subcommand, argv = []) {
   const parsed = parseArgs(argv);
   const json = parsed.flags.has("json");
-  const metaFile = path.resolve(process.cwd(), parsed.options["meta-file"] ?? DEFAULT_META_FILE);
+  if (parsed.options.output) {
+    throw new Error("meta report is stdout-only in A0; --output is not allowed");
+  }
 
   if (subcommand === "record") {
+    if (parsed.options.project) {
+      throw new Error("--project is only supported for meta list/report, not meta record");
+    }
+    const { metaFile } = resolveRoutedMetaContext(parsed);
     const entry = addMetaProblem(metaFile, parsed.options);
     emitResult({ json }, {
       ok: true,
@@ -104,6 +162,20 @@ export async function runMeta(subcommand, argv = []) {
   }
 
   if (subcommand === "list") {
+    if (parsed.options.project && parsed.options["meta-file"]) {
+      throw new Error("meta list does not accept --meta-file with --project");
+    }
+    let metaFile;
+    let project = null;
+    if (parsed.options.project) {
+      project = resolvePreRouteProject(parsed, subcommand);
+      metaFile = metaFileForProject(project);
+    } else {
+      if (parsed.options["meta-file"]) {
+        throw new Error("meta list does not accept --meta-file; use the current route or --project <path>");
+      }
+      ({ metaFile } = resolveRoutedMetaContext(parsed));
+    }
     const entries = listMetaProblems(metaFile, {
       open: parsed.flags.has("open"),
       category: parsed.options.category,
@@ -111,6 +183,7 @@ export async function runMeta(subcommand, argv = []) {
     emitResult({ json }, {
       ok: true,
       metaFile,
+      project,
       count: entries.length,
       entries,
       message: formatList(entries),
@@ -119,6 +192,10 @@ export async function runMeta(subcommand, argv = []) {
   }
 
   if (subcommand === "resolve") {
+    if (parsed.options.project) {
+      throw new Error("--project is only supported for meta list/report, not meta resolve");
+    }
+    const { metaFile } = resolveRoutedMetaContext(parsed);
     const entry = resolveMetaProblem(metaFile, parsed.options.id, parsed.options.resolution);
     emitResult({ json }, {
       ok: true,
@@ -130,26 +207,20 @@ export async function runMeta(subcommand, argv = []) {
   }
 
   if (subcommand === "report") {
-    const project = parsed.options.project;
-    if (!project) {
-      throw new Error("Missing value for --project (path to the project whose meta-problems should be reported)");
+    if (parsed.options["meta-file"]) {
+      throw new Error("meta report does not accept --meta-file; use the current route or --project <path>");
     }
-    const report = buildMetaProblemReport(project);
+    const report = parsed.options.project
+      ? buildMetaProblemReport(resolvePreRouteProject(parsed, subcommand))
+      : (() => {
+          const { metaFile, projectDir } = resolveRoutedMetaContext(parsed);
+          return buildMetaProblemReportFromFile({ projectDir, metaFile });
+        })();
     const markdown = renderMetaProblemReportMarkdown(report);
-    let outputFile = null;
-    if (parsed.options.output) {
-      outputFile = path.resolve(process.cwd(), parsed.options.output);
-      fs.mkdirSync(path.dirname(outputFile), { recursive: true });
-      fs.writeFileSync(outputFile, markdown, "utf8");
-    }
     if (json) {
-      emitResult({ json: true }, { ok: true, outputFile, ...report });
+      emitResult({ json: true }, { ok: true, outputFile: null, ...report });
     } else {
-      if (outputFile) {
-        process.stdout.write(`Report written to ${outputFile}\n`);
-      } else {
-        process.stdout.write(markdown);
-      }
+      process.stdout.write(markdown);
     }
     return;
   }

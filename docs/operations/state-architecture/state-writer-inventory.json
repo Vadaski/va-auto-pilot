@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "architecturePlanSha256": "a2dbc412711aacb870cea5ca1334536a6d585860568d5979933caa8257215965",
+  "surfaces": [
+    {
+      "writerId": "sprint-state",
+      "entrypoint": "scripts/sprint-board.mjs",
+      "authority": "pre-A2 file authority",
+      "writes": [
+        ".va-auto-pilot/sprint-state.json",
+        ".va-auto-pilot/workspaces/<workspace>/sprint-state.json"
+      ]
+    },
+    {
+      "writerId": "sprint-board",
+      "entrypoint": "scripts/sprint-board.mjs",
+      "authority": "derived board projection",
+      "writes": [
+        "docs/todo/sprint.md",
+        ".va-auto-pilot/workspaces/<workspace>/sprint.md"
+      ]
+    },
+    {
+      "writerId": "run-journal",
+      "entrypoint": "scripts/sprint-board.mjs",
+      "authority": "derived journal projection",
+      "writes": [
+        "docs/todo/run-journal.md",
+        ".va-auto-pilot/workspaces/<workspace>/run-journal.md"
+      ]
+    },
+    {
+      "writerId": "pitfalls",
+      "entrypoint": "scripts/sprint-board.mjs",
+      "authority": "pitfall and learned-rule storage",
+      "writes": [
+        ".va-auto-pilot/pitfalls.json",
+        ".va-auto-pilot/workspaces/<workspace>/pitfalls.json"
+      ]
+    },
+    {
+      "writerId": "meta-record",
+      "entrypoint": "scripts/auto-pilot-meta.mjs",
+      "authority": "meta-problem mutator",
+      "writes": [
+        ".va-auto-pilot/meta-problems.json",
+        ".va-auto-pilot/workspaces/<workspace>/meta-problems.json"
+      ]
+    },
+    {
+      "writerId": "meta-resolve",
+      "entrypoint": "scripts/auto-pilot-meta.mjs",
+      "authority": "meta-problem mutator",
+      "writes": [
+        ".va-auto-pilot/meta-problems.json",
+        ".va-auto-pilot/workspaces/<workspace>/meta-problems.json"
+      ]
+    },
+    {
+      "writerId": "meta-list",
+      "entrypoint": "scripts/auto-pilot-meta.mjs",
+      "authority": "stdout-only read view",
+      "writes": []
+    },
+    {
+      "writerId": "meta-list-pre-route",
+      "entrypoint": "scripts/auto-pilot-meta.mjs",
+      "authority": "stdout-only pre-route read view",
+      "writes": []
+    },
+    {
+      "writerId": "meta-report",
+      "entrypoint": "scripts/auto-pilot-meta.mjs",
+      "authority": "stdout-only improvement report",
+      "writes": []
+    },
+    {
+      "writerId": "meta-report-pre-route",
+      "entrypoint": "scripts/auto-pilot-meta.mjs",
+      "authority": "stdout-only pre-route improvement report",
+      "writes": []
+    },
+    {
+      "writerId": "eval-history",
+      "entrypoint": "scripts/lib/eval-history.mjs",
+      "authority": "append-only evaluation audit",
+      "writes": [
+        ".va-auto-pilot/evidence/eval-history.jsonl",
+        ".va-auto-pilot/workspaces/<workspace>/evidence/eval-history.jsonl"
+      ]
+    }
+  ]
+}

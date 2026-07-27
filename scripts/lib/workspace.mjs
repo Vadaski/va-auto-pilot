@@ -24,6 +24,12 @@ import { assertSafeIdentifier } from "./identifiers.mjs";
  */
 
 export const WORKSPACE_SCHEMA_VERSION = 1;
+const WORKSPACE_STATE_FILE_NAME = "sprint-state.json";
+
+function isInsideDir(parent, target) {
+  const relative = path.relative(parent, target);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
 
 /** @returns {string} the directory holding all workspace metadata */
 export function resolveWorkspacesRoot(workDir = process.cwd()) {
@@ -39,6 +45,135 @@ export function resolveWorkspaceDir(workDir, name) {
     throw new Error(`workspace path escapes the managed workspace root: ${workspaceName}`);
   }
   return resolved;
+}
+
+/**
+ * Resolve the isolated workspace directory from a managed sprint-state path.
+ * Returns null for the default integration sprint-state.
+ *
+ * @param {string} stateFile
+ * @returns {string | null}
+ */
+export function resolveWorkspaceDirFromStateFile(stateFile) {
+  const resolved = path.resolve(stateFile);
+  if (path.basename(resolved) !== WORKSPACE_STATE_FILE_NAME) {
+    return null;
+  }
+  const workspaceDir = path.dirname(resolved);
+  const workspacesDir = path.dirname(workspaceDir);
+  const pilotDir = path.dirname(workspacesDir);
+  if (path.basename(workspacesDir) !== "workspaces" || path.basename(pilotDir) !== ".va-auto-pilot") {
+    return null;
+  }
+  return workspaceDir;
+}
+
+function resolveWorkspaceDirFromManagedPath(filePath) {
+  let current = path.resolve(filePath);
+  while (true) {
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    if (path.basename(parent) === "workspaces"
+        && path.basename(path.dirname(parent)) === ".va-auto-pilot") {
+      return current;
+    }
+    current = parent;
+  }
+}
+
+function resolveProjectRootFromWorkspaceDir(workspaceDir) {
+  return path.dirname(path.dirname(path.dirname(workspaceDir)));
+}
+
+/**
+ * Resolve the project root that owns a managed sprint-state path.
+ *
+ * @param {string} stateFile
+ * @param {string} [workDir]
+ * @returns {string}
+ */
+export function resolveProjectRootFromStateFile(stateFile, workDir = process.cwd()) {
+  const resolved = path.resolve(stateFile);
+  const workspaceDir = resolveWorkspaceDirFromStateFile(resolved);
+  if (workspaceDir) {
+    return resolveProjectRootFromWorkspaceDir(workspaceDir);
+  }
+  if (path.basename(resolved) === WORKSPACE_STATE_FILE_NAME
+      && path.basename(path.dirname(resolved)) === ".va-auto-pilot") {
+    return path.dirname(path.dirname(resolved));
+  }
+  return path.resolve(workDir);
+}
+
+/**
+ * Resolve a workspace-aware sibling artifact path. When `stateFile` points to an
+ * isolated workspace backlog, omitted sibling paths must stay under that same
+ * workspace instead of silently falling back to the integration root.
+ *
+ * @param {string} stateFile
+ * @param {string} workspaceRelative
+ * @param {string} projectRelative
+ * @param {string} [workDir]
+ * @returns {string}
+ */
+export function resolveWorkspaceSiblingPath(
+  stateFile,
+  workspaceRelative,
+  projectRelative,
+  workDir = process.cwd()
+) {
+  const workspaceDir = resolveWorkspaceDirFromStateFile(stateFile);
+  if (workspaceDir) {
+    return path.join(workspaceDir, workspaceRelative);
+  }
+  return path.resolve(workDir, projectRelative);
+}
+
+/**
+ * Validate that managed artifact paths do not mix an isolated workspace root
+ * with integration-root paths. This prevents `--state-file` from rebinding only
+ * one artifact while sibling writes still target the default tree.
+ *
+ * @param {{ stateFile: string, boardFile?: string, journalFile?: string, pitfallsFile?: string, historyFile?: string, metaFile?: string }} paths
+ * @returns {{ ok: boolean, errors: string[] }}
+ */
+export function validateWorkspaceArtifactRoots(paths) {
+  const errors = [];
+  const stateFile = path.resolve(paths.stateFile);
+  const workspaceDir = resolveWorkspaceDirFromStateFile(stateFile);
+  if (!workspaceDir) {
+    for (const [label, filePath] of Object.entries(paths)) {
+      if (label === "stateFile" || !filePath) {
+        continue;
+      }
+      const otherWorkspaceDir = resolveWorkspaceDirFromManagedPath(filePath);
+      if (otherWorkspaceDir) {
+        errors.push(`${label} uses isolated workspace root ${otherWorkspaceDir} while stateFile stays on the integration root`);
+      }
+    }
+    return { ok: errors.length === 0, errors };
+  }
+
+  const projectRoot = resolveProjectRootFromWorkspaceDir(workspaceDir);
+  for (const [label, filePath] of Object.entries(paths)) {
+    if (label === "stateFile" || !filePath) {
+      continue;
+    }
+    const resolved = path.resolve(filePath);
+    const otherWorkspaceDir = resolveWorkspaceDirFromManagedPath(resolved);
+    if (otherWorkspaceDir && otherWorkspaceDir !== workspaceDir) {
+      errors.push(`${label} targets a different workspace root: expected ${workspaceDir}, got ${otherWorkspaceDir}`);
+      continue;
+    }
+    if (!otherWorkspaceDir
+        && isInsideDir(projectRoot, resolved)
+        && !isInsideDir(workspaceDir, resolved)) {
+      errors.push(`${label} falls back to integration-root path ${resolved} while stateFile is isolated under ${workspaceDir}`);
+    }
+  }
+  return { ok: errors.length === 0, errors };
 }
 
 function sanitizeWorkspaceName(name) {

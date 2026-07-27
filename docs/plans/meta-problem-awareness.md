@@ -109,14 +109,17 @@ va-auto-pilot meta record --category <cat> --severity <sev> --title <text> \
   [--component <text>] [--task <TASK-ID>] [--files a,b,c] \
   [--source agent|human] [--json]
 va-auto-pilot meta list [--open] [--category <cat>] [--json]
+va-auto-pilot meta list --project <path> [--open] [--category <cat>] [--json]
 va-auto-pilot meta resolve --id MP-NNN --resolution <text> [--json]
-va-auto-pilot meta report --project <path> [--output <file>] [--json]
+va-auto-pilot meta report [--json]
+va-auto-pilot meta report --project <path> [--json]
 ```
 
-`record`/`list`/`resolve` default to `.va-auto-pilot/meta-problems.json` under
-cwd (overridable with `--meta-file`). `report` is the **reader side**: it
-resolves `<project>/.va-auto-pilot/meta-problems.json`, validates every entry,
-and emits a structured improvement report.
+`record`/`resolve` default to `.va-auto-pilot/meta-problems.json` under cwd
+(overridable with `--meta-file`). Routed `list`/`report` read from the current
+workspace-aware route; pre-route `list --project <path>` / `report --project
+<path>` read from `<project>/.va-auto-pilot/meta-problems.json`. Read-only
+profiles are stdout-only and do not accept `--output` or `--meta-file`.
 
 ## Report (reader side)
 
@@ -127,7 +130,7 @@ Deterministic generator in `scripts/lib/meta-problem-report.mjs`:
    `(unspecified)`).
 3. Sort clusters by worst severity (blocker > major > minor > nit), then count.
 4. Map each cluster's category to candidate repo areas (table above).
-5. Emit JSON payload and a markdown rendering (`--output` or stdout):
+5. Emit JSON payload and a markdown rendering on stdout:
 
 ```json
 {

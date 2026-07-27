@@ -132,7 +132,7 @@ The pitfall guide captures structured failure metadata — not just error string
 
 ### 7. The tool reports on itself
 
-Pitfalls compound knowledge about the *project's* failures; meta-problems close the loop on the *tool's* failures. When a gate cannot express a project's stack, the orchestration state machine misbehaves, or protocol text misleads an agent, the agent records a structured meta-problem (category, severity, expected-vs-actual, command/exit-code/output evidence) into the project's local `.va-auto-pilot/meta-problems.json` — the protocol makes this recording mandatory before the cycle ends. Records never leave the project's disk. Pointing `va-auto-pilot meta report --project <path>` at an adopted project clusters its open meta-problems into a severity-ordered improvement report mapped to candidate areas of this repository, so real-world friction flows back into the backlog instead of evaporating at sprint end.
+Pitfalls compound knowledge about the *project's* failures; meta-problems close the loop on the *tool's* failures. When a gate cannot express a project's stack, the orchestration state machine misbehaves, or protocol text misleads an agent, the agent records a structured meta-problem (category, severity, expected-vs-actual, command/exit-code/output evidence) into the project's local `.va-auto-pilot/meta-problems.json` — the protocol makes this recording mandatory before the cycle ends. Records never leave the project's disk. Running `va-auto-pilot meta report --project <path>` against an adopted project prints a stdout-only improvement report mapped to candidate areas of this repository, so real-world friction flows back into the backlog instead of evaporating at sprint end.
 
 ---
 

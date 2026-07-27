@@ -214,8 +214,9 @@ flows:
         )
         (
           cd "$reader_dir"
-          node "$repo/scripts/auto-pilot.mjs" meta report --project "$project_dir" --output "$reader_dir/report.md"
-          cat "$reader_dir/report.md"
+          node "$repo/scripts/auto-pilot.mjs" meta list --project "$project_dir" --open
+          printf '\n---REPORT---\n'
+          node "$repo/scripts/auto-pilot.mjs" meta report --project "$project_dir"
           printf '\n---JSON---\n'
           node "$repo/scripts/auto-pilot.mjs" meta report --project "$project_dir" --json
         )
@@ -223,6 +224,8 @@ flows:
       must:
         - exit_code: 0
         - stdout_contains:
+            - "MP-001 [blocker/gate] (open) gate runner drops stderr"
+            - "---REPORT---"
             - "# Meta-Problem Improvement Report"
             - "2 open / 3 entries (1 resolved, 0 invalid)"
             - "[blocker] gate — scripts/auto-pilot-gates.mjs (2)"

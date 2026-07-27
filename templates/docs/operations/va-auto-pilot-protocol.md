@@ -194,7 +194,8 @@ Rules:
 4. Never edit `.va-auto-pilot/meta-problems.json` by hand; use the CLI.
 5. Records stay local. To feed them back into va-auto-pilot, a human runs
    `va-auto-pilot meta report --project <this-project>` from the va-auto-pilot
-   repository and turns the resulting clusters into backlog items.
+   repository; the command is stdout-only and the resulting clusters become
+   backlog items.
 
 ---
 

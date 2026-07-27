@@ -16,8 +16,8 @@
  *                       --journal-file pointing to it
  *   isolated_pitfalls - if true, create a temp pitfalls file and pass
  *                       --pitfalls-file pointing to it
- *   isolated_meta     - if true, create a temp meta-problems file and pass
- *                       --meta-file pointing to it
+ *   isolated_meta     - if true, create a temp workspace-scoped sprint-state +
+ *                       meta-problems pair and pass --state-file pointing to it
  *
  * Assertion types supported:
  *   exit_code: <n>              — exit code must equal n
@@ -150,13 +150,17 @@ function makeTempPitfallsFile() {
   return tmpPitfalls;
 }
 
-function makeTempMetaFile() {
+function makeTempMetaRoute() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "va-cli-meta-"));
-  const tmpMeta = path.join(tmpDir, "meta-problems.json");
+  const workspaceDir = path.join(tmpDir, ".va-auto-pilot", "workspaces", "meta-flow");
+  const tmpState = path.join(workspaceDir, "sprint-state.json");
+  const tmpMeta = path.join(workspaceDir, "meta-problems.json");
+  fs.mkdirSync(workspaceDir, { recursive: true });
+  fs.writeFileSync(tmpState, JSON.stringify({ version: 1, projectPrefix: "AP", tasks: [] }, null, 2) + "\n", "utf8");
   // Meta-problem flows must start from a clean slate so assertions do not
   // depend on whatever records happen to exist in the repo.
   fs.writeFileSync(tmpMeta, JSON.stringify({ version: 1, entries: [] }, null, 2) + "\n", "utf8");
-  return tmpMeta;
+  return { tmpState, tmpMeta };
 }
 
 // ---------------------------------------------------------------------------
@@ -190,8 +194,10 @@ function runFlow(flow) {
   }
 
   if (flow.isolated_meta) {
-    const tmpMeta = makeTempMetaFile();
-    finalArgs = [...finalArgs, "--meta-file", tmpMeta];
+    const { tmpState } = makeTempMetaRoute();
+    if (!finalArgs.includes("--state-file")) {
+      finalArgs = [...finalArgs, "--state-file", tmpState];
+    }
   }
 
   const spawnEnv = { ...process.env, ...isolationEnv, ...env };

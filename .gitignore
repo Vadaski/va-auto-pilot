@@ -9,3 +9,4 @@ coverage/
 .va/worktrees/
 .va-auto-pilot/orchestration/
 .va-auto-pilot/parallel-runs/
+.va-auto-pilot/workspaces/

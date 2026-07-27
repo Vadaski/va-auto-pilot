@@ -191,7 +191,7 @@ Unattended only: `node scripts/auto-pilot-loop.mjs --max-cycles 50` or `orchestr
 ### Meta-Problem Awareness
 - Pitfalls record failures of the *project's own code*; meta-problems record failures of *va-auto-pilot itself* (gates, orchestration, protocol text, CLI UX, state handling).
 - When the tool causes the friction/failure, record it before the cycle ends: `node scripts/auto-pilot.mjs meta record --category ... --severity ... --title ... --symptom ... --expected ... --actual ...` with `--command`/`--exit-code`/`--output-excerpt` evidence whenever available.
-- Records live in `.va-auto-pilot/meta-problems.json` and stay local. Upstream feedback: run `va-auto-pilot meta report --project <path>` from the va-auto-pilot repo to get clustered improvement reports.
+- Records live in `.va-auto-pilot/meta-problems.json` and stay local. Routed `meta list` / `meta report` stay on the current workspace-aware route; pre-route `meta list --project <path>` / `meta report --project <path>` are stdout-only readers for an adopted project from outside that route.
 - When in doubt between pitfall and meta-problem, record both.
 
 ### Managed DocStore
@@ -252,8 +252,10 @@ node scripts/sprint-board.mjs summary
 # Meta-problems (tool-level feedback)
 node scripts/auto-pilot.mjs meta record --category gate --severity major --title "..." --symptom "..." --expected "..." --actual "..." [--command "..." --exit-code N --output-excerpt "..."]
 node scripts/auto-pilot.mjs meta list [--open] [--json]
+node scripts/auto-pilot.mjs meta list --project <path> [--open] [--json]
 node scripts/auto-pilot.mjs meta resolve --id MP-NNN --resolution "..."
-node scripts/auto-pilot.mjs meta report --project <path> [--output report.md] [--json]
+node scripts/auto-pilot.mjs meta report [--json]
+node scripts/auto-pilot.mjs meta report --project <path> [--json]
 
 # Managed DocStore (optional)
 node scripts/doc-store-cli.mjs init | adopt | install-hook | doctor | enforce-staged --base main

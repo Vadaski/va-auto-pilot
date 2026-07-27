@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "architecturePlanSha256": "a2dbc412711aacb870cea5ca1334536a6d585860568d5979933caa8257215965",
+  "ignoredPaths": [
+    ".va-auto-pilot/workspaces/"
+  ],
+  "artifactRoots": [
+    ".va-auto-pilot/workspaces/<workspace>/sprint-state.json",
+    ".va-auto-pilot/workspaces/<workspace>/sprint.md",
+    ".va-auto-pilot/workspaces/<workspace>/run-journal.md",
+    ".va-auto-pilot/workspaces/<workspace>/pitfalls.json",
+    ".va-auto-pilot/workspaces/<workspace>/meta-problems.json",
+    ".va-auto-pilot/workspaces/<workspace>/evidence/eval-history.jsonl",
+    ".va-auto-pilot/workspaces/<workspace>/docs/todo/human-board.md"
+  ],
+  "failClosedScenarioIds": [
+    "A0-WORKSPACE-01",
+    "A0-WORKSPACE-02",
+    "A0-WORKSPACE-03",
+    "A0-WORKSPACE-12A",
+    "A0-WORKSPACE-22",
+    "A0-WORKSPACE-23"
+  ],
+  "routeRule": "An isolated sprint-state path must rebind sibling board, journal, pitfalls, meta-problem, eval-history, and human-board artifacts into the same workspace root or reject before writing."
+}

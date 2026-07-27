@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Run/track transitions now use a durable hash-checked transaction intent; corrupt control state and ambiguous post-GO launches fail closed instead of being treated as empty or dead
 - Orchestrated `await-workers` now explicitly uses the crash-safe spawn lifecycle (not Colony routing), with durable logs and launcher-owned deadlines across manager crashes
 - Auto-generated pitfall constraints now enter probation, use exact multilingual token relevance, and stay out of hard prompts until curated; concurrent pitfall additions are serialized
+- Added the A0 `check:state-architecture` gate plus frozen state-architecture inventories/schemas for workspace routing, trust boundary, writer surfaces, and terminal surfaces
 - `check:all` and CI now enforce lint across source, E2E, tests, and website JavaScript; package publication also runs deterministic checks and E2E
 - Coverage now includes focused and legacy unit suites, fails below the recorded 80/80/80/65 line/statement/function/branch floor, and runs in CI plus prepublish validation
 
@@ -42,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prevented stale or dirty task worktrees, unrelated working-tree changes, and squash recovery from silently entering approved commits
 - Terminated spawned worker process trees on timeout/intervention (POSIX process groups; Windows `taskkill /T`) instead of leaving descendants alive
 - Preserved sibling active runs during shared/isolated workspace initialization and recovery
+- Prevented isolated `--state-file` runs from silently falling back to integration-root sprint/meta/eval artifacts, and made `meta report` stdout-only so read-only profiles no longer write files
 - Preserved completed worker results through commit approval, commit, and journal recovery phases; missing or stale execution approval now returns the run to plan approval instead of dispatching
 - Prevented interrupted re-reviews from reusing an earlier PASS result and prevented checked items outside the Human Board Instructions section from satisfying intent reconciliation
 - Added a READY→persist→GO worker launcher barrier with token heartbeats, including zero-config legacy-root runs; recovery/claim cleanup now serializes with the executor, halt survives late settlement, PID/token identity clears only after verified exit, and stale/ambiguous identity blocks destructive cleanup

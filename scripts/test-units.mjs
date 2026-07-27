@@ -7214,11 +7214,19 @@ test("auto-pilot cockpit: stale approval blocks dispatch until reapproved", () =
   }), "utf8");
   fs.writeFileSync(humanBoard, "# Human Board\n\n## Instructions\n\n", "utf8");
   fs.writeFileSync(journalFile, "# Run Journal\n\n", "utf8");
+  const reviewer = path.join(tmpDir, ".va-auto-pilot", "stub-plan-reviewer.mjs");
+  fs.writeFileSync(reviewer, "console.log('PLAN REVIEW STATUS: PASS');\n", "utf8");
+  fs.writeFileSync(path.join(tmpDir, ".va-auto-pilot", "config.yaml"), [
+    "qualityGate:",
+    "  buildCommand: 'true'",
+    `  planReviewCommand: ${JSON.stringify(`${process.execPath} ${reviewer}`)}`,
+    "",
+  ].join("\n"), "utf8");
 
   const script = path.join(process.cwd(), "scripts", "auto-pilot.mjs");
   spawnSync(process.execPath, [script, "orchestrate", "init", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
   spawnSync(process.execPath, [script, "orchestrate", "plan", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
-  spawnSync(process.execPath, [script, "orchestrate", "review-plan", "--dry-run", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
+  spawnSync(process.execPath, [script, "orchestrate", "review-plan", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
   const approve = spawnSync(process.execPath, [script, "orchestrate", "approve-plan", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
   assert.equal(approve.status, 0, approve.stderr);
 
@@ -7252,7 +7260,7 @@ test("auto-pilot cockpit: stale approval blocks dispatch until reapproved", () =
 
   const recover = spawnSync(process.execPath, [script, "orchestrate", "recover", "--apply", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
   assert.equal(recover.status, 0, recover.stderr);
-  const review = spawnSync(process.execPath, [script, "orchestrate", "review-plan", "--dry-run", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
+  const review = spawnSync(process.execPath, [script, "orchestrate", "review-plan", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
   assert.equal(review.status, 0, review.stderr);
   const reapprove = spawnSync(process.execPath, [script, "orchestrate", "approve-plan", "--json", "--state-file", stateFile, "--journal-file", journalFile], { cwd: tmpDir, encoding: "utf8" });
   assert.equal(reapprove.status, 0, reapprove.stderr);

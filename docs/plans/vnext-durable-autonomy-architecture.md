@@ -1,7 +1,7 @@
 # VA Auto-Pilot vNext Durable Autonomy Architecture
 
-Status: proposed revision 26 — formal rounds one through nine remain failed
-evidence and revision-ten through twenty-five preflight found additional blockers; implementation
+Status: proposed revision 31 — formal rounds one through nine remain failed
+evidence and revision-ten through thirty preflight found additional blockers; implementation
 remains blocked until a detached-snapshot round-ten manifest passes all four
 perspectives against these exact plan bytes and the frozen external review
 governance bundle.
@@ -219,8 +219,14 @@ the installed byte identity is reverified at seal.
 A0 first closes the dogfood artifact leak: repository-local
 `.va-auto-pilot/workspaces/**` and other declared ephemeral run roots are ignored
 by source control, while schemas/templates/fixtures remain explicitly tracked.
-An isolated-workspace init/plan/recover test asserts the integration worktree
-status is byte-for-byte unchanged.
+The reviewed ignore/exclude rule for `.va-auto-pilot/workspaces/**` lands in the
+same A0 change-set before any isolated init/plan/recover zero-diff assertion may
+run. The architecture gate includes a literal `workspaces check-ignore` proof:
+`git check-ignore` must match the declared ephemeral roots and `git ls-files`
+must show zero tracked runtime workspace artifacts before the isolation matrix
+is allowed to assert a clean integration tree. An isolated-workspace
+init/plan/recover test then asserts the integration worktree status is
+byte-for-byte unchanged.
 Every post-bootstrap command receives one canonical `WorkspaceRouteV1`; the
 closed pre-route operations below receive only their bootstrap object. Neither
 surface derives
@@ -308,7 +314,7 @@ reap/retire proof without this no-late-registration barrier is insufficient; amb
 after GO/effect is sticky conflict, never a fresh child.
 
 The closed route roles cover the descriptor projection; sprint state/board,
-human board, journal, pitfalls, constraints and history/evaluation; config input
+human board, journal, pitfalls, meta-problem awareness, constraints and history/evaluation; config input
 and proposal outbox; orchestration active/run/tracks/checkpoint/snapshot/
 directives/candidate-backlog/candidate-plan/plan-review/state-transaction;
 worker lifecycle/heartbeat/launch/stdout/stderr/parallel/colony diagnostics;
@@ -387,6 +393,12 @@ The compatibility-critical mappings include:
 | SDK mutating open/create/import/adopt/update/archive/link/extension operation | exact `docstore-sdk-*` route | routed mutator |
 | installed DocStore `enforce-staged` Git hook invocation | exact `docstore-hook-*` route | routed read-only validator child |
 | automatic layout/pending-transaction recovery during mutating open | `docstore-automatic-recovery` | routed lower-saga mutator |
+| `va-auto-pilot meta list [--open] [--category <cat>]` with a current route | `meta-list` | read-only |
+| `va-auto-pilot meta list --project <path> [--open] [--category <cat>]` without a current route | `meta-list-pre-route` | read-only |
+| `va-auto-pilot meta report` with a current route | `meta-report` | read-only |
+| `va-auto-pilot meta report --project <path>` without a current route | `meta-report-pre-route` | read-only |
+| `va-auto-pilot meta record`, current route | `meta-record` | routed mutator |
+| `va-auto-pilot meta resolve`, current route | `meta-resolve` | routed mutator |
 
 For the DocStore entrypoint, `--plan-only` and bare `migrate` are the frozen
 0.2.1 forms; `--plan`/`--apply` are normalized aliases rather than replacements.
@@ -398,6 +410,43 @@ profile may not create layout, lock, recovery, journal, index, schema or backup
 bytes. Top-level `state migrate` is a different entrypoint/grammar and retains
 its own explicit plan/apply/finalize profiles.
 
+The meta record profile and meta resolve profile are the only mutating meta
+surfaces; both route through `scripts/auto-pilot-meta.mjs` and
+`scripts/lib/meta-problems.mjs` to `.va-auto-pilot/meta-problems.json`.
+Under an isolated-workspace `WorkspaceRouteV1`, that same closed
+`meta-problem awareness` role rebinds before effect to
+`.va-auto-pilot/workspaces/<workspace>/meta-problems.json`; cross-workspace or
+integration-root fallthrough is rejected. The generated profile/callsite
+inventory therefore keeps one role with default and isolated path rows rather
+than a matrix exemption.
+`meta-list`, `meta-list-pre-route`, `meta-report` and `meta-report-pre-route`
+are the only public meta read profiles, and every one of them is stdout-only
+read-only: Markdown or JSON list/report bytes emit only to the process stdout
+channel. The 0.2.1 `meta report --output <file>` write surface is retired from
+the public inventory; `--output`, an output path positional, redirected
+write-destination options, `mkdir`/`writeFile`/`appendFile`/stream-create of
+report or list bytes, and any other filesystem write destination are closed-
+grammar rejects before route lookup (`A0-WORKSPACE-14` / `A0-WORKSPACE-22`),
+with zero filesystem/process/Git effect. Under a current isolated route the
+trusted `meta-list`/`meta-report` readers must rebind through that same
+`meta-problem awareness` `WorkspaceRouteV1` entry to the workspace-scoped
+`meta-problems.json` and may not authorize through integration-root-only
+helpers such as `metaFileForProject()`. The exact public argv shapes are
+frozen and mutually exclusive:
+- current route + `meta list [--open] [--category <cat>]` → `meta-list`;
+- no current route + `meta list --project <path> [--open] [--category <cat>]`
+  → `meta-list-pre-route`;
+- current route + `meta report` → `meta-report`;
+- no current route + `meta report --project <path>` → `meta-report-pre-route`.
+Any other combination rejects before effect (`A0-WORKSPACE-17` /
+`A0-WORKSPACE-23`), including current route plus `--project`, absent route
+plus bare `meta list`/`meta report` without `--project`, `process.cwd()`
+silent fallthrough, and hidden `--meta-file`-only trusted selectors that are
+not one of the four frozen shapes. Pre-route diagnostic profiles never
+silently become routed writers or mixed-root readers. Those readers remain
+subject to the same generated inventory equality and `A0-WORKSPACE-12`
+closure.
+
 - read-only `init-preview-pre-route`/routed `init-preview-adopted`, plus
   mutating `init-unadopted`, `init-existing-repository` and routed `init-adopted`;
   `upgrade-adopted`; top-level `run`; loop
@@ -406,6 +455,7 @@ its own explicit plan/apply/finalize profiles.
 - every sprint-board subcommand; gate audit and `gates maintain` proposal/apply;
   observe, cockpit and the five intervene profiles `halt-run | halt-track |
   replan | supersede-plan | set-worker`;
+- meta `list | report | record | resolve`;
 - orchestrate `init | plan | review-plan | approve-plan | dispatch |
   await-workers | approve-commit | commit | journal | recover | close |
   run-unattended | list-runs`;
@@ -543,6 +593,11 @@ Mixed roots, an unregistered fallback, re-derivation such as
 `resolveOrchestrationDir()`, or a child using an old route generation is rejected
 before any file/process/Git effect. Route adoption/update CAS-conflicts with an
 active run, and changing generation fences every old operation, lease and child.
+This path-coherence rule explicitly includes the `meta-problem awareness` row:
+`--meta-file`, routed `meta record|resolve`, and routed `meta list|report`
+trusted reads must all resolve to the same default or isolated route entry, so
+an isolated command can never mix workspace state with integration-root
+`meta-problems.json` across crash, retry or replay boundaries.
 The isolated matrix runs every command profile and kill boundary and asserts the
 integration tree plus every out-of-route root remain byte-for-byte unchanged.
 Existing accidentally tracked artifacts would
@@ -563,6 +618,7 @@ schema/template/fixture.
 | sprint/tasks/claims | kernel-authoritative | `sprint-state.json`; sprint-board, loop, parallel runner, orchestrator | kernel documents + leases; JSON generation projection |
 | run/tracks/checkpoint/directives/plans | kernel-authoritative | orchestration-state and plan-review direct writes | kernel documents; JSON generation projection |
 | pitfalls/learned constraints | kernel-authoritative | pitfalls JSON and constraint YAML from sprint-board | kernel constraint catalog/ledger; JSON/YAML projection |
+| meta-problem awareness | kernel-authoritative | `.va-auto-pilot/meta-problems.json` and `.va-auto-pilot/workspaces/**/meta-problems.json`; `scripts/auto-pilot-meta.mjs` `meta list|report|record|resolve` entrypoints; `scripts/lib/meta-problems.mjs` mutators/readers and `scripts/lib/meta-problem-report.mjs` report renderer | kernel documents; JSON projection and stdout-only read-only report/list views |
 | journal/events/eval history | kernel-authoritative audit | journal Markdown and JSONL writers | kernel audit/receipt rows; Markdown/JSONL projection |
 | receipt/calibration state | kernel-authoritative | not yet present | kernel receipt, chain, archive, calibration tables |
 | worker/claim liveness | kernel-authoritative ownership | tracks plus heartbeat files and TTL fields | leases with fencing; heartbeat files diagnostic projection only |
@@ -699,10 +755,11 @@ either excluded from the packed artifact as a test fixture or receives its own
 bounded-temp route profile—there is no demo exemption.
 
 Every path row expands default and isolated-workspace forms, including
-`.va-auto-pilot/workspaces/**/{sprint-state.json,sprint.md,run-journal.md,pitfalls.json,workspace.json}`
-and workspace-scoped `docs/todo/human-board.md`. Orchestration globs explicitly
-include `active.json`, `state-transaction.json`, candidate plan/backlog,
-plan-review, snapshots, worker heartbeat/logs, and per-run directories.
+`.va-auto-pilot/workspaces/**/{sprint-state.json,sprint.md,run-journal.md,pitfalls.json,meta-problems.json,workspace.json}`,
+`.va-auto-pilot/meta-problems.json`, and workspace-scoped
+`docs/todo/human-board.md`. Orchestration globs explicitly include
+`active.json`, `state-transaction.json`, candidate plan/backlog, plan-review,
+snapshots, worker heartbeat/logs, and per-run directories.
 
 A0 freezes `schemas/vnext/old-writer-corpus.json` under
 `old-writer-corpus.schema.json`. It pins every released package version the
@@ -710,11 +767,12 @@ project claims to protect and enumerates attack entrypoints at least
 for `bin/va-auto-pilot.mjs`, `scripts/auto-pilot-loop.mjs`,
 `scripts/auto-pilot.mjs`, `scripts/auto-pilot-orchestrate.mjs`,
 `scripts/auto-pilot-gates.mjs`, `scripts/auto-pilot-intent.mjs`,
-`scripts/auto-pilot-intervene.mjs`, `scripts/auto-pilot-observe.mjs`,
-`scripts/va-parallel-runner.mjs`, and
+`scripts/auto-pilot-intervene.mjs`, `scripts/auto-pilot-meta.mjs`,
+`scripts/auto-pilot-observe.mjs`, `scripts/va-parallel-runner.mjs`, and
 `scripts/sprint-board.mjs`, plus published `scripts/doc-store-cli.mjs`, its
 SDK/lifecycle mutation exports, automatic recovery, extension mutators,
-low-level direct-subpath writers, packed demo disposition and
+low-level direct-subpath writers, `scripts/lib/meta-problems.mjs`,
+packed demo disposition and
 installed/uninstalled Git-hook writers,
 including state/projection/Git/config/DocStore writes. Router
 and imported-library provenance is expanded to the public subcommand that makes
@@ -723,7 +781,7 @@ blocks A3 cutover; versions outside the declared corpus are not claimed
 compatible.
 
 Corpus entries follow a frozen schema:
-`{packageVersion, artifactKind:"npm-pack", sha256,
+`{packageVersion, packageVersionIdentity, artifactKind:"npm-pack", sha256,
 entrypoints:[{path,writeDomains[]}],
 resolutionSurfaces:[{specifier,surfaceClass,expectedResolution,
 compatibilityDisposition,trustedDisposition}],
@@ -738,6 +796,14 @@ before the corpus gate can pass. The corpus includes `gates maintain --apply`
 after a pitfall-triggered proposal and binds the before/after config hashes plus
 proposal receipt. It also attacks `init --force` against an adopted project and
 requires refusal or a signed config/package proposal without direct overwrite.
+`packageVersionIdentity` is the declared packageVersion identity fence for one
+immutable compatibility row. The pinned `501aac41...` 142-file artifact remains
+the pre-meta seed for `0.2.1`; a later tree that still declares `0.2.1` but
+packs a different surface, such as HEAD `9dcd8b77...` with the meta stack and
+148 files, is outside that seed row. Before A0 inventory freeze, such drift
+must either bump `packageVersion` or receive a distinct second corpus row with
+its own `packageVersion identity`; `A0-PACKAGE-03` and clean-pack equality are
+evaluated only within one declared packageVersion identity.
 For DocStore it records the real 0.2.1 resolution graph and attacks the canonical
 index/managed-store aliases plus journal append, lifecycle init, index/config,
 migration, automatic-open recovery and extension mutators. Argv vectors preserve
@@ -782,8 +848,9 @@ subset.
 `state-lint/terminal-callsites.json` format and zero-drift comparison.
 
 Dynamic CLI routing is not exempt. A0 inventories every `--state-file`,
-`--board-file`, `--journal-file`, `--pitfalls-file`, `--history-file` and
-`--config-file`, init target/`--force`, and environment override. Before cutover,
+`--board-file`, `--journal-file`, `--pitfalls-file`, `--meta-file`,
+`--history-file` and `--config-file`, init target/`--force`, and environment
+override. Before cutover,
 `state route adopt` canonicalizes/realpaths under the one-use bootstrap operation
 and persists an approved route in the registry or quarantines it as a standalone
 legacy graph. After cutover, full-trusted commands reject unregistered routes;
@@ -813,8 +880,10 @@ are limited to `kernel-projection`, `bootstrap`, `test-fixture`, and
 `doc-store-external`.
 
 The terminal/trust inventory statically parses `scripts/`, `bin/`, `e2e/` and
-`templates/` for Done/TaskDoneProvisional/ReadyToCommit/GitBoundUntrusted transitions and trust
-comparisons, then emits `{file,line,symbol,classification}`. Test fixtures are
+`templates/` for Done/TaskDoneProvisional/TaskDone/GoalComplete/ReadyToCommit/GitBoundUntrusted transitions,
+trust comparisons, and any direct completion/status write or projection that
+bypasses `canCountTaskCompletion()` or `canCountGoalCompletion()`, then emits
+`{file,line,symbol,classification}`. Test fixtures are
 explicitly classified and do not become silent exclusions. Runtime doctor
 cross-checks dynamic route/writer observations against the same registry.
 
@@ -2840,8 +2909,9 @@ writable copies:
   writer bind/effect. The arm-receipt transaction alone CASes both fence
   `reserved -> armed` and broker `reserved-for-arm -> allowance-eligible`.
   A writer effect under `allowance-eligible` is legal only while the fence is
-  armed and the broker-generation recovery-admission head remains `writer-
-  open`; the mode may remain stored during `drain-closing` solely until the
+  armed, the broker-generation recovery-admission head remains `writer-open`,
+  and `broker_generation = generation_head.current_broker_generation`; the mode
+  may remain stored during `drain-closing` solely until the
   atomic drain-root demotion, but the backend already denies new writer
   admission/effect. The `current-broker-drained` barrier transaction has two
   closed identity branches after every writer slot is tombstoned and its
@@ -2883,8 +2953,18 @@ writable copies:
   dispatch head is `send-authorized | observation-bound`, a raw OS exit may be
   recorded but the allocation's `bound-to-process -> reaping` CAS is barred by
   the shared fence/reservation/dispatch revisions until that may-send operation
-  is reconciled and continuity is bound. Thus principal retirement cannot erase
-  the exact current allocation needed to classify an authenticated observation.
+  is reconciled and continuity is bound. The sole exception is the same-key
+  authenticated-absent branch: once the exact current allocation/process exit is
+  observed while dispatch remains `send-authorized`, recovery may classify
+  `send-authorized-exited-absent` by paired-CASing dispatch/reservation to
+  `manual-conflict` plus the fence to `conflict-containment-pending` without
+  waiting for whole-job reap, RouteSpawn audit seal or principal retirement.
+  That exact conflict classification explicitly lifts the may-send reaping
+  barrier so later `bound-to-process -> reaping`, budget exhaustion and
+  containment can proceed without any continuity bind. Thus principal
+  retirement cannot erase the exact current allocation needed to classify an
+  authenticated observation, but exit-observed absence no longer waits on
+  reaping/audit/retirement to become classifiable.
   The pre-send race is linearized too: send authorization must validate the
   exact allocation/process/RouteSpawn tuple and, in its paired transaction, CAS
   the allocation's expected `bound-to-process` revision to the same state with a
@@ -5499,15 +5579,24 @@ second route authority:
   conflict`; it never reopens or regains writer admission. Immutable
   `git_publication_writer_fence_broker_generation_claims(id, head_id,
   generation, claim_kind, allocation_id, allocation_identity_hash,
-  control_reservation_id, control_reservation_hash, expected_head_revision,
-  resulting_head_revision, previous_claim_id, previous_claim_hash,
-  previous_claim_root_hash, resulting_claim_root_hash, claim_hash,
-  created_sequence)` have `UNIQUE(head_id,generation)`, partial
+  control_reservation_id, control_reservation_hash,
+  predecessor_terminal_barrier_id, predecessor_terminal_barrier_hash,
+  predecessor_broker_exit_receipt_hash,
+  predecessor_broker_whole_job_reap_receipt_hash,
+  predecessor_broker_route_spawn_audit_seal_hash,
+  predecessor_broker_principal_retirement_receipt_hash,
+  expected_head_revision, resulting_head_revision, previous_claim_id,
+  previous_claim_hash, previous_claim_root_hash, resulting_claim_root_hash,
+  claim_hash, created_sequence)` have `UNIQUE(head_id,generation)`, partial
   `UNIQUE(head_id,previous_claim_id)`, `UNIQUE(head_id,allocation_id)` and a same-head ordinal predecessor. The
-  first claim has generation one and a canonical-empty predecessor; every later
-  claim has `generation=previous.generation+1`. `claim_hash` excludes row ID,
+  first claim has generation one and an explicit zero-predecessor terminal-
+  barrier composite; every later `recovery-writer` claim has
+  `generation=previous.generation+1` and composite-FKs the immediately previous
+  writer-admitted generation's exact predecessor terminal barrier: predecessor
+  exit, whole-job reap, RouteSpawn audit seal and principal retirement must all
+  already be bound before the claim inserts. `claim_hash` excludes row ID,
   resulting root, its own hash, creation sequence and time and includes every
-  allocation/reservation/predecessor semantic field; the resulting root
+  allocation/reservation/predecessor-barrier semantic field; the resulting root
   domain-binds the previous root plus this claim ID/hash. Claim insertion,
   head count/root/current pointer and exact revision CAS commit together. That
   CAS has a closed generation-write rule: `arm-writer | recovery-writer` while
@@ -5518,17 +5607,27 @@ second route authority:
   composite remains the immutable authority. No other action may write either
   head field. An in-place reservation appends no claim and leaves both
   values unchanged.
+  A `recovery-writer` claim does not itself authorize a write: RouteFS/RouteGit
+  writer-effect admission must prove `allowance-eligible ∧ armed ∧ writer-open ∧
+  broker_generation = head.current_broker_generation`, so a stale live broker or
+  a future generation can never obtain second-writer effect authority from mode
+  bits alone.
 
   Claim kind is a closed `arm-writer | recovery-writer | control-attempt`
   oneOf. `arm-writer` is generation one and `recovery-writer` is legal only in
   `writer-open`; both require the exact writer-admitted allocation and null
-  control reservation. `control-attempt` is legal only in `drain-closing |
+  control reservation, but only `recovery-writer` requires the exact
+  predecessor terminal-barrier composite while `arm-writer` requires the
+  explicit zero-predecessor branch. `control-attempt` is legal only in `drain-closing |
   writer-drained-control-open`, requires one exact successor reservation and
   its precomputed allocation identity, and can never authorize a writer. The
   ID-only claim↔reservation reverse relation is `DEFERRABLE INITIALLY
   DEFERRED` and checked at transaction commit: reservation hash is computed
   first, then allocation/claim hashes, and no reverse hash edge exists. An
-  arm/recovery claim composite-FKs a materialized writer allocation immediately.
+  arm/recovery claim composite-FKs a materialized writer allocation immediately,
+  and a recovery claim additionally carries the predecessor barrier FKs so
+  successor claim ordering can never outrun predecessor exit/reap/audit/
+  retirement.
   A control claim's allocation ID/hash is instead a precomputed reservation
   token: its reservation outcome must later bind either that exact allocation
   row or a `never-materialized` terminal receipt whose transaction anti-joins
@@ -5975,7 +6074,8 @@ second route authority:
   expected_fence_phase, expected_fence_revision, resulting_fence_revision,
   receipt_hash, created_sequence)` have unique dispatch/reservation and a closed
   `qualification-mismatch | guard-generation-mismatch | divergent-authenticated-
-  result` kind. The sole child dispatch RecoveryAction for the current dispatch
+  result | send-authorized-exited-absent` kind. The sole child dispatch
+  RecoveryAction for the current dispatch
   phase alone inserts this receipt and in one transaction CASes dispatch and
   reservation to `manual-conflict` plus the fence to `conflict-containment-
   pending`; the parent may only wake/await it. In particular,
@@ -5985,10 +6085,19 @@ second route authority:
   hash includes every listed semantic field except row ID, its own hash,
   creation sequence and time. A backend absence response, missing process or
   caller assertion is not no-send evidence. If a query after `send-authorized`
-  returns authenticated absent because the process died between the CAS and
-  syscall, recovery issues/replays the exact same idempotent operation key and
-  queries again; it may never allocate a new key or reinterpret absence as a
-  terminal result. Positive observation instead composite-FKs the qualification-
+  returns authenticated absent before the exact current allocation/process exit
+  is observed, recovery issues/replays the exact same idempotent operation key
+  and queries again. Once dispatch remains `send-authorized`, that exact exit is
+  bound for the same reservation, and the same operation key still returns
+  authenticated absent, the child action inserts one
+  `send-authorized-exited-absent` conflict receipt and paired-CASes
+  dispatch/reservation to `manual-conflict` plus fence
+  `conflict-containment-pending` without waiting for whole-job reap, RouteSpawn
+  audit seal or principal retirement. That dedicated terminal kind explicitly
+  lifts the may-send reaping barrier so `bound-to-process -> reaping`, budget
+  exhaustion and manual-conflict containment may proceed, but the absence may
+  never be reclassified as `cancelled-no-send` or successful no-send. It may
+  never allocate a new key. Positive observation instead composite-FKs the qualification-
   authenticated normalized fence backend observation and, in one SQLite
   transaction, CASes dispatch `send-authorized -> observation-bound` plus the
   same reservation `observing -> observation-bound`. The armed
@@ -6050,7 +6159,9 @@ second route authority:
   resulting root domain-binds the previous root plus this receipt ID/hash. Its
   insertion transaction updates the fence's failed-attempt count/root and
   reservation terminal pointer under the same fence revision CAS. Its only
-  terminal kind is `failed-before-guard-send`.
+  terminal kind is `failed-before-guard-send`; the dedicated
+  `send-authorized-exited-absent` branch is never treated as no-send and is
+  classified through the guard-conflict/manual-conflict path above instead.
   `attempt_materialization_kind` is a closed `no-allocation | allocation-
   created-no-process | process-retained-in-place | process-started-reaped`
   oneOf:
@@ -7038,8 +7149,10 @@ second route authority:
   exact tombstoned backend result; it then closes the actor channel and binds
   exit, whole-job reap, audit seal and principal retirement. A retired broker
   uses its exact generation handoff/reap/audit/retirement evidence and is legal
-  only while the generation head is still `writer-open` and a later recovery-
-  writer claim has won. Once the head is `drain-closing`, the distinguished last
+  only while the generation head is still `writer-open`; it must close before a
+  later `recovery-writer` claim may win, and that later claim composite-FKs the
+  already-bound predecessor terminal barrier rather than making retirement wait
+  on successor existence. Once the head is `drain-closing`, the distinguished last
   writer-broker slot can close only as `current-broker-drained`. That drain
   barrier always keeps the actor subject/allocation of that last writer-admitted
   broker—never the control-only successor—and requires `barrier.broker_generation
@@ -7541,8 +7654,10 @@ second route authority:
   after every other head is closed, consumes the already-closed last-writer
   closure/seal, inserts the sole drain-origin barrier plus root continuity
   receipt and binds the barrier pointer for all affected sagas. Under `writer-
-  open`, a broker becomes historical only after a later recovery-writer claim
-  wins the same generation-head revision, so the two routes cannot race.
+  open`, a broker becomes historical by first binding its exact retired-broker
+  barrier; only after that barrier exists may a later `recovery-writer` claim
+  win the same generation-head revision, so the two routes cannot invert or
+  race into dual live writers.
   Lost acknowledgments at any substep return the same rows.
   A never-materialized head closes through its zero-writer closure and needs no
   mailbox call. Thus every materialized head has an enabling close action, and
@@ -12504,8 +12619,64 @@ serialization for send, reap and in-place retarget; immutable budget-exhaustion
 and guard-conflict receipts; one fence-owned release transaction; one head-owned
 zero-continuity drain-root transaction; intent-kind-stable post-death mailbox
 seal recovery; and one fault row per persisted RouteSpawn/control boundary.
-These bytes remain proposed until fresh from-zero preflight passes; no
-implementation dispatch is authorized.
+Exact revision-twenty-six bytes
+`7f4b6c817d3fd4678bb10e9c5fa4d7097c488e419340d12bd97bfe67da28a70b`
+(`13,575` lines; `1,056,679` bytes) nevertheless failed valid exact-byte
+preflight with aggregate `CRITICAL 1 / P1 4 / P2 3`: crash/authority/mailbox/
+broker `1/1/0`, false-success `0/0/0`, schema/hash-DAG `0/0/0`, and
+repository-feasibility `0/3/3`.
+
+Revision twenty-nine closed the revision-twenty-eight exact-byte preflight
+findings that had already been accepted into the proposed plan by preserving
+the predecessor terminal-barrier composites on every `recovery-writer` claim,
+tightening `send-authorized-exited-absent` so same-key authenticated absence
+becomes classifiable immediately after exact exit observation and explicitly
+lifts the may-send reaping barrier through paired conflict CAS, fencing corpus
+equality by `packageVersion identity`, expanding the terminal/trust inventory
+to cover `TaskDone`/`GoalComplete` plus direct bypass writes, retaining the
+public `meta list | report | record | resolve` profiles while adding a closed
+`meta-problem awareness` route role with default/isolated path-row expansion
+and isolated `meta record|resolve` rebinding, forcing the
+`.va-auto-pilot/workspaces/**` ignore rule plus `workspaces check-ignore` proof
+to land before any isolated zero-diff assertion, extending the dynamic
+path-override/old-writer corpus to include `--meta-file`, and requiring
+architecture-gate coverage on every later track that can change the guarded
+package/command/resolution surfaces, with D2 explicitly running
+`check:state-faults --track D2` alongside `check:state-architecture` and
+`check:soak-report`.
+
+Revision thirty responds to the revision-twenty-nine exact-byte preflight
+aggregate `CRITICAL 0 / P1 2 / P2 1`, where false-success and schema/hash-DAG
+both returned PASS (`0/0/0`), by preserving every revision-twenty-nine closure
+while additionally binding `meta-list`/`meta-report` trusted reads to the same
+workspace-scoped `meta-problem awareness` route entry as writers under an
+isolated current route, keeping `meta report --project <path>` without a route
+as an explicit pre-route diagnostic profile rather than a silent routed
+fallthrough, and expanding the path-coherence fault/validator language so mixed
+workspace/integration roots that include meta paths or `--meta-file` are
+rejected before first write, including the isolated `--state-file` plus
+integration-root `--meta-file` dual-writer kill across crash/retry. Exact
+revision-thirty bytes
+`e8c836f495848ed174284b663003368bf1840f641ee600f2bbf43ba0e5922982`
+(`13,711` lines; `1,068,586` bytes) nevertheless failed valid exact-byte
+preflight with aggregate `CRITICAL 0 / P1 2 / P2 3`: crash/authority/mailbox/
+broker `0/0/0`, false-success `0/2/1`, schema/hash-DAG `0/0/0`, and
+repository-feasibility `0/0/2`.
+
+Revision thirty-one responds to the revision-thirty exact-byte preflight by
+preserving every revision-thirty closure while freezing four mutually exclusive
+public meta-read argv→profile rows (`meta-list`, `meta-list-pre-route`,
+`meta-report`, `meta-report-pre-route`), retiring the 0.2.1 `meta report
+--output` write surface from every read-only meta profile so report/list bytes
+are stdout-only with closed-grammar rejection of write destinations before
+route lookup, rejecting current-route-plus-`--project` and absent-route bare
+`meta list`/`meta report` shapes before effect, forbidding `process.cwd()` /
+hidden `--meta-file`-only trusted fallthrough for those readers, correcting the
+domain registry attribution so `auto-pilot-meta.mjs` owns the list/report
+entrypoints, and adding `A0-WORKSPACE-22`/`A0-WORKSPACE-23` fault rows for the
+write-destination and selector-ambiguity kills. These bytes remain proposed
+until fresh from-zero preflight passes; no implementation dispatch is
+authorized.
 
 Round nine preserved all four raw outputs but failed. Before A0
 exists, round ten uses the exact operator-admitted immutable
@@ -12588,18 +12759,18 @@ Track-to-gate mapping is explicit:
 
 | Track | Required incremental command/profile |
 | --- | --- |
-| A0 | `check:state-architecture` (registry, writer/terminal/state-machine inventories, corpus, review manifest) plus `check:state-faults --track A0` |
+| A0 | `check:state-architecture` (registry, writer/terminal/state-machine inventories, `packageVersion identity` corpus, meta command inventory, `workspaces check-ignore`, review manifest) plus `check:state-faults --track A0` |
 | A1 | `check:state-architecture` plus `check:state-faults --track A1` and `validate:backend-qualification --profile pr` (Linux/Node 22 maintained-line subset); merge proof includes outbox no-effect/positive/dead-letter every-phase kill matrix; full platform matrix nightly |
-| A2 | `check:state-architecture` plus `check:state-faults --track A2`, commit-batch/member/source/order/history-rewrite contract corpus, structured RouteFS link/rename/fsync and index-witness qualification, every-phase three/two/zero-lock owner-generation recovery, post-commit absent/vNext/legacy/trigger/containment matrix, broker-fence normalized deny/exact-allow effects and mutation/no-write observations, owner-kind/phase/actor tuples, actor-bound capability issuance plus backend slot prepare/activate/query/delivery/terminalize every-phase kill matrix, post-tombstone actor barriers, phase/action-exact broker-generation claim/drain-closure/budget-exhaustion competition, result-missing/member-missing and required-identity property tests, control reservation/no-allocation/never-started/retained-process/allocation materialization/send-vs-reap/no-send/guard-conflict/observation/exit-barrier/failed-attempt/continuity kills, in-place retarget and post-death same-key mailbox-seal tests, last-delivery-vs-seal/lost-ack/channel-alias tests, immutable drain and terminal projections across later saga phases, explicit single-writer drain-root/release action tests, composite consume/revoke receipts and immutable arm/observe/release/broker-retirement chain, post-final control suffix classification, complete final touched/untouched worktree observation, and receipt→settlement→manifest→release every-boundary kill corpus and normal repository gates |
+| A2 | `check:state-architecture` plus `check:state-faults --track A2`, commit-batch/member/source/order/history-rewrite contract corpus, structured RouteFS link/rename/fsync and index-witness qualification, every-phase three/two/zero-lock owner-generation recovery, post-commit absent/vNext/legacy/trigger/containment matrix, broker-fence normalized deny/exact-allow effects and mutation/no-write observations, owner-kind/phase/actor tuples, actor-bound capability issuance plus backend slot prepare/activate/query/delivery/terminalize every-phase kill matrix, post-tombstone actor barriers, predecessor terminal-barrier recovery-writer admission, `current_broker_generation` writer-effect gating, phase/action-exact broker-generation claim/drain-closure/budget-exhaustion competition, result-missing/member-missing and required-identity property tests, control reservation/no-allocation/never-started/retained-process/allocation materialization/send-vs-reap/no-send/guard-conflict/`send-authorized-exited-absent`/observation/exit-barrier/failed-attempt/continuity kills, in-place retarget and post-death same-key mailbox-seal tests, last-delivery-vs-seal/lost-ack/channel-alias tests, immutable drain and terminal projections across later saga phases, explicit single-writer drain-root/release action tests, composite consume/revoke receipts and immutable arm/observe/release/broker-retirement chain, post-final control suffix classification, complete final touched/untouched worktree observation, and receipt→settlement→manifest→release every-boundary kill corpus and normal repository gates |
 | B1 | `check:state-architecture` plus `check:state-faults --track B1`, constraint property/fake-clock suite and normal repository gates |
-| C0 | `check:state-faults --track C0` plus sandbox/control-plane-denial suite and normal repository gates |
-| A3 | `check:state-faults --track A3` plus cutover/reverse/finalization suite and normal repository gates |
+| C0 | `check:state-architecture` plus `check:state-faults --track C0`, sandbox/control-plane-denial suite and normal repository gates |
+| A3 | `check:state-architecture` plus `check:state-faults --track A3`, cutover/reverse/finalization suite and normal repository gates |
 | C1 | `check:state-architecture` plus `check:state-faults --track C1`, completion/obligation/full-reproof suite, task direct/direct-descendant-first-proof/descendant-refresh/rewrite transition property corpus, next-entry-before-draft race, signed snapshot-backed baseline eligibility, canonical generated goal-head key boundary vectors and settlement-chain property corpus and normal repository gates |
 | B2a | `check:state-faults --track B2a` plus immutable feedback/catalog suite and normal repository gates |
 | C2 | `check:state-architecture` plus `check:state-faults --track C2`, deterministic PR-safe calibration profile and governed approve/commit/promotion fixture; full platform mutation matrix nightly |
 | B2b | `check:state-architecture` plus `check:state-faults --track B2b` and automatic-lifecycle every-phase kill/approval/capability-skip/archive-replay suite |
-| D1 | schema/template/docs/distribution parity suite plus normal repository gates |
-| D2 | `check:soak-report` against nightly/release external reports |
+| D1 | `check:state-architecture` plus schema/template/docs/distribution parity suite and normal repository gates |
+| D2 | `check:state-architecture` plus `check:state-faults --track D2` and `check:soak-report` against nightly/release external reports |
 
 D1 wires deterministic PR-safe commands into `check:all`; multi-hour and full
 platform profiles remain required nightly/release evidence rather than silently
@@ -12622,7 +12793,7 @@ Normative minimum fault annex:
 | Track/scenario | Matrix/boundary | Expected protected result / verdict |
 | --- | --- | --- |
 | `A0-WORKSPACE-01` | any sprint-board/init/plan/recover command receives an isolated `--state-file` while sibling output-path flags are omitted | every derived artifact stays under that workspace or the command rejects before writing; integration worktree/hash set is unchanged |
-| `A0-WORKSPACE-02` | state, board, journal, pitfall or history arguments resolve to mixed workspace/integration roots | path-coherence validator rejects the command before its first write; `fail-closed` |
+| `A0-WORKSPACE-02` | state, board, journal, pitfall, meta or history arguments, including `--meta-file`, resolve to mixed workspace/integration roots | path-coherence validator rejects the command before its first write; `fail-closed`, including isolated `--state-file` plus integration-root `--meta-file` so crash/retry can never create dual meta writers |
 | `A0-WORKSPACE-03` | any isolated route orchestration/log/evidence/lock helper defaults back to integration root | route operation cannot materialize; zero effect before rejection |
 | `A0-WORKSPACE-04` | a verified path parent/inode is replaced through symlink, hardlink, mount or rename after resolve | RouteFS identity/fence mismatch; operation becomes `manual-conflict` before target open |
 | `A0-WORKSPACE-05` | child/lease presents an operation from an older route generation | RouteFS/RouteSpawn/RouteGit reject every effect; zero writes/spawns/Git mutation |
@@ -12632,12 +12803,15 @@ Normative minimum fault annex:
 | `A0-WORKSPACE-09` | adopted `upgrade` rewrites scripts/templates/package/version or sentinel/temp/backup outside reviewed Git/outbox profile | no direct write; upgrade proposal/saga remains pending |
 | `A0-WORKSPACE-10` | `progress-iterate` or delegated child derives CWD/state/log route independently | missing/old operation capability rejects spawn/write |
 | `A0-WORKSPACE-11` | RouteFS effect occurs before operation-effect receipt | exact target/lower saga observes and binds once or operation becomes conflict |
-| `A0-WORKSPACE-12` | exported CLI/router inventory contains a command/writer with no command profile | architecture gate fails before release/cutover |
+| `A0-WORKSPACE-12` | exported CLI/router inventory, including `meta list | report | record | resolve`, contains a command/writer with no command profile | architecture gate fails before release/cutover |
+| `A0-WORKSPACE-12A` | the `.va-auto-pilot/workspaces/**` ignore/exclude rule is missing, lands after isolation assertions, or the `workspaces check-ignore` / `git ls-files` proof shows runtime workspace artifacts remain trackable | `check:state-architecture` fails before any isolated zero-diff assertion or release/cutover |
 | `A0-WORKSPACE-13` | pre-route adoption creates generation one or settles its routed effects before acknowledgment, then retries | the signed bootstrap operation returns the same provisional route/operation and reaches `adopted` once; no second generation |
 | `A0-WORKSPACE-14` | argv alias, duplicate/unknown option, positional or `--` smuggling maps to another effect profile | closed grammar rejects before route lookup; zero filesystem/process/Git effect |
 | `A0-WORKSPACE-15` | an external Agent/package-script/gate/shell spawn is requested without a current exact sandbox-backend qualification | typed unsupported result; no child/namespace/GO or authorizing evidence |
 | `A0-WORKSPACE-16` | a child with a valid current route uses native syscall, descendant, symlink/mount or write-then-restore outside its writable roots | OS sandbox denies and continuous audit records the attempt; operation cannot settle authoritatively |
 | `A0-WORKSPACE-17` | a public argv/route/target-shape tuple matches zero or multiple public-command→profile rows, or an internal profile ID is treated as a public command | route lookup rejects before operation/effect; generated grammar/profile/corpus equality fails |
+| `A0-WORKSPACE-22` | any `meta-list`, `meta-list-pre-route`, `meta-report` or `meta-report-pre-route` profile receives `--output` / another write destination, or creates list/report bytes on disk | closed grammar rejects before route lookup; stdout-only; zero filesystem effect |
+| `A0-WORKSPACE-23` | current route plus `meta list|report --project`, absent route plus bare `meta list|report` without `--project`, or trusted meta read via `process.cwd()` / hidden `--meta-file`-only fallthrough | exact-one argv→profile mapping rejects before effect; no silent pre-route/routed dual meaning |
 | `A0-WORKSPACE-18` | an SDK call, installed hook or automatic recovery is represented by fabricated argv, omits its typed invocation route, or its persisted raw-input/alias/selector observation differs | public-invocation `oneOf`/FK/equality rejects before route lookup; zero effect |
 | `A0-WORKSPACE-19` | automatic plan approval is fabricated as approve-plan argv, automatic commit approval as approve-commit argv, or human/automatic selector source/profile is swapped | source invocation/internal branch/profile `oneOf` rejects before selection/preparation; no decision/signing/current manifest/saga; `fail-closed` |
 | `A0-WORKSPACE-20` | an index witness uses an undeclared link API, cross-device link, wrong source/destination identity, different after inode, hidden lower-saga syscall or omitted link/rename/fsync/unlink target | RouteFS schema/lint/operation-root equality rejects before effect, or binds the one exact lost acknowledgment; unsupported hardlink semantics make trusted Git read-only |
@@ -12686,7 +12860,7 @@ Normative minimum fault annex:
 | `A0-DOCSTORE-15` | hook Git-common-dir, `core.hooksPath`, resolved path/bytes, argv, CWD, environment, chain ordinal/root, preserved member or parent Git identity differs from installation | invocation/profile/chain equality rejects before validation; no maintenance/common-dir effect or trusted receipt; `fail-closed` |
 | `A0-PACKAGE-01` | an exports map or packaging change preserves DocStore but drops/changes any other still-supported 0.2.1 resolvable subpath | package-wide specifier/artifact/named-export/type/error graph comparison rejects the release |
 | `A0-PACKAGE-02` | canonical DocStore facade claims a runtime `ManagedDocStore`, error class or named export absent from the packed artifact, or aliases lose an existing symbol | generated runtime/type surface equality rejects before distribution |
-| `A0-PACKAGE-03` | old-writer corpus/schema omits a claimed package version, resolution surface, attack receipt or pinned checksum | A0/A3 gate fails closed; unsupported coverage is never inferred |
+| `A0-PACKAGE-03` | old-writer corpus/schema omits a claimed `packageVersion identity`, resolution surface, attack receipt or pinned checksum, or merges divergent packed trees under one declared identity | A0/A3 gate fails closed, and any later track that changes the guarded packageVersion/command-resolution surface must also run `check:state-architecture` fail-closed; clean-pack equality is evaluated only within one declared packageVersion identity and unsupported coverage is never inferred |
 | `A0-PACKAGE-04` | baseline pack runs in a dirty checkout and includes injected plan/review/workspace/untracked bytes absent from the pinned Git tree | pack-input/tree equality rejects the corpus; rebuild twice from a clean detached tree |
 | `A0-ROUTE-SPAWN-01` | spawn member row is missing/duplicated/reordered or a set root/policy differs from full member enumeration | arm rejects before namespace/child; caller hash is never authority |
 | `A0-ROUTE-SPAWN-02A` | persisted phase remains `reserved`; arm/close action is killed before either CAS commits | exact frozen aggregate returns; `arm-or-close-route-spawn-sandbox` |
@@ -13213,6 +13387,7 @@ Normative minimum fault annex:
 | `A2-GIT-PUB-55I` | the final permitted broker is terminal and the immutable budget-exhaustion receipt plus head `manual-conflict` and fence `conflict-containment-pending` paired CAS commits before acknowledgment | the exact receipt and containment pointers return with zero successor claim/process; `diagnose-only` |
 | `A2-GIT-PUB-55J` | a `control-attempt` claim or any later head mutation overwrites the drain-frozen `last_writer_generation` or its claim composite | invariant: the closed generation-write rule and closure equality reject the transaction before a false last-writer barrier can bind |
 | `A2-GIT-PUB-55K` | a post-death recovery `armed-observed` receipt binds while continuity count is zero and its child path attempts to create the origin barrier/root | the observation transaction may only bind its reservation pointers and wake the head; only `reconcile-drain-or-control-attempt` creates the last-writer barrier and first continuity receipt |
+| `A2-GIT-PUB-55L` | a live predecessor broker under an armed fence attempts to coexist with a successor `recovery-writer` claim before exact predecessor exit/reap/audit/retirement barrier evidence exists | invariant: claim insert rejects with zero second writer effect; no successor allowance actor or RouteFS/RouteGit authority appears |
 | `A2-GIT-PUB-56A` | a control reservation/root/claim transaction commits before acknowledgment | exact reservation and current head/fence pointers return; `bind-or-terminalize-unmaterialized-control-attempt` |
 | `A2-GIT-PUB-56B` | the exact control RouteSpawn commits `cancelled-before-child` before acknowledgment | cancellation/registration-close/empty-job/namespace/audit evidence returns; `settle-cancelled-route-spawn` |
 | `A2-GIT-PUB-56C` | an in-place no-send terminal receipt commits while the same process is retained | the failed root returns and a later in-place reservation may reuse the same generation without changing allocation identity; `noop` |
@@ -13223,7 +13398,7 @@ Normative minimum fault annex:
 | `A2-GIT-PUB-56H` | a no-send broker exits and the `process-started-reaped` allocation/exit/reap/audit/retirement plus failed-attempt/root transaction commits before acknowledgment | the exact terminal branch and complete lifecycle root return; `noop` |
 | `A2-GIT-PUB-56I` | the prelaunch reserved allocation and RouteSpawn spec/child descriptor materialization commits before acknowledgment while reservation remains `reserved` | the same preallocated rows return and no second allocation/spec/child is created; `bind-or-terminalize-unmaterialized-control-attempt` |
 | `A2-GIT-PUB-57A` | dispatch `reserved` cancellation races send authorization | invariant: one dispatch revision produces exactly no-send or send-authorized, never both |
-| `A2-GIT-PUB-57B` | process dies after `send-authorized` CAS and before the first backend syscall, so same-key query returns absent | absence remains nonterminal and the identical key is issued/replayed until authenticated outcome; `query-or-replay-control-guard-observation` |
+| `A2-GIT-PUB-57B` | same-key query after `send-authorized` returns authenticated absent | if exact exit for that allocation is not yet bound, the identical key is queried/replayed only; once exact exit is bound and the same key still returns authenticated absent, the child inserts `send-authorized-exited-absent` and paired-CASes dispatch/reservation `manual-conflict` plus fence containment without waiting for reap/audit/retirement, explicitly lifts the may-send reaping barrier, and never classifies the absence as `cancelled-no-send` or success; `query-or-replay-control-guard-observation` |
 | `A2-GIT-PUB-57C` | authenticated observation/dispatch-head bind commits before acknowledgment | exact observation-bound head returns; `bind-control-continuity-receipt` |
 | `A2-GIT-PUB-57D` | an in-place broker exits after observation but before continuity, and principal reaping races continuity | invariant: reservation/dispatch barrier rejects reaping until observation/continuity binds |
 | `A2-GIT-PUB-57E` | continuity/reservation success bind commits before acknowledgment | exact current continuity/root returns; `noop` |
@@ -13235,6 +13410,7 @@ Normative minimum fault annex:
 | `A2-GIT-PUB-57K` | pre-send principal reaping races send authorization for the same control allocation | invariant: both CAS the identical expected allocation revision, so either reaping wins and only no-send classification remains, or send wins and the may-send barrier blocks reaping |
 | `A2-GIT-PUB-57L` | an in-place reservation/root append plus allocation current-reservation retarget CAS commits before acknowledgment | the exact reservation and allocation revision/pointer return together; `reconcile-drain-or-control-attempt` |
 | `A2-GIT-PUB-57M` | guard-conflict receipt plus dispatch/reservation/fence paired containment CAS commits before acknowledgment | the exact conflict composite returns and no observation/continuity result can replace it; `diagnose-only` |
+| `A2-GIT-PUB-57N` | coordinator is SIGKILLed after `send-authorized` and before the first backend syscall, and the broker is also dead before recovery observes any authenticated backend result | the same operation key is reused; once exact exit binds and the same key remains authenticated absent, recovery classifies `send-authorized-exited-absent`, paired-CASes dispatch/reservation to `manual-conflict` plus fence containment, explicitly lifts the may-send reaping barrier, and then allows reaping/budget exhaustion/conflict containment to proceed with zero no-send success |
 | `A2-GIT-PUB-58A` | actor-slot closure plus seal-intent transaction commits before acknowledgment | exact closed revision/projection/intent returns; `close-seal-and-bind-allowance-actor-terminal-barrier` |
 | `A2-GIT-PUB-58B` | the last mailbox delivery admission races actor-slot closure/seal intent | invariant: one actor-head revision wins and closure recomputes that winner's complete delivery projection |
 | `A2-GIT-PUB-58C` | permanent mailbox seal succeeds before its authenticated observation binds | same seal key is queried/replayed and no replacement intent is created; `close-seal-and-bind-allowance-actor-terminal-barrier` |

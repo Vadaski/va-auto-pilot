@@ -130,7 +130,7 @@ VA Auto-Pilot 采用不同的模型。在任何评审开始之前，管理 Agent
 
 ### 7. 工具会报告自己的问题
 
-pitfall 复利的是*项目自身*的失败；meta-problem 闭环的是*工具自身*的失败。当 gate 无法表达项目的技术栈、orchestration 状态机行为异常、或协议文本误导 agent 时，agent 会把一条结构化的 meta-problem（分类、严重度、期望 vs 实际、命令/退出码/输出证据）记录到项目本地的 `.va-auto-pilot/meta-problems.json`——协议要求必须在当轮 cycle 结束前完成记录。记录永不离开项目磁盘。在采用了 auto-pilot 的项目上运行 `va-auto-pilot meta report --project <path>`，会把它未解决的 meta-problem 聚类成按严重度排序、映射到本仓库候选模块的改进报告，让真实世界的摩擦流回 backlog，而不是随冲刺结束蒸发。
+pitfall 复利的是*项目自身*的失败；meta-problem 闭环的是*工具自身*的失败。当 gate 无法表达项目的技术栈、orchestration 状态机行为异常、或协议文本误导 agent 时，agent 会把一条结构化的 meta-problem（分类、严重度、期望 vs 实际、命令/退出码/输出证据）记录到项目本地的 `.va-auto-pilot/meta-problems.json`——协议要求必须在当轮 cycle 结束前完成记录。记录永不离开项目磁盘。在采用了 auto-pilot 的项目上运行 `va-auto-pilot meta report --project <path>`，会以 stdout-only 方式输出未解决 meta-problem 的聚类报告，并映射到本仓库候选模块，让真实世界的摩擦流回 backlog，而不是随冲刺结束蒸发。
 
 ---
 

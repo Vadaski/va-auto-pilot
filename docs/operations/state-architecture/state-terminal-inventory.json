@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "architecturePlanSha256": "a2dbc412711aacb870cea5ca1334536a6d585860568d5979933caa8257215965",
+  "surfaces": [
+    {
+      "surfaceId": "worker-launcher",
+      "entrypoint": "scripts/lib/worker-launcher.mjs",
+      "kind": "child-lifecycle-heartbeat",
+      "terminalStates": ["ready", "launching", "running", "stopping", "terminal"]
+    },
+    {
+      "surfaceId": "orchestrate-dispatch",
+      "entrypoint": "scripts/auto-pilot-orchestrate.mjs",
+      "kind": "manager-dispatch",
+      "terminalStates": ["queued", "running", "settled", "failed"]
+    },
+    {
+      "surfaceId": "orchestrate-await-workers",
+      "entrypoint": "scripts/auto-pilot-orchestrate.mjs",
+      "kind": "manager-await-loop",
+      "terminalStates": ["running", "settled", "failed"]
+    },
+    {
+      "surfaceId": "progress-iterate",
+      "entrypoint": "scripts/auto-pilot-progress-iterate.mjs",
+      "kind": "delegated-follow-up",
+      "terminalStates": ["completed", "failed", "abandoned"]
+    }
+  ]
+}

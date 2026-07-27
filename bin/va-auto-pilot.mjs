@@ -109,8 +109,10 @@ Options (meta):
          [--hypothesis "..."] [--suggestion "..."] [--command "..."] [--exit-code <n>]
          [--output-excerpt "..."] [--component "..."] [--task <TASK-ID>] [--files a,b] [--source agent|human]
   list [--open] [--category <cat>]
+  list --project <path> [--open] [--category <cat>] [--json]
   resolve --id MP-NNN --resolution "..."
-  report --project <path> [--output <file>]   Cluster a project's open meta-problems into an improvement report
+  report [--json]                            Cluster current-route meta-problems into an improvement report
+  report --project <path> [--json]          Cluster a project's open meta-problems into an improvement report
 
 Options (run):
   --max-cycles <n>        Maximum task cycles (default: 50)

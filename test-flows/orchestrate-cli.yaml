@@ -89,12 +89,12 @@ flows:
             printf '\n  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs\n' >> .va-auto-pilot/config.yaml
           fi
         else
-          cat > .va-auto-pilot/config.yaml <<'CFG'
-version: 1
-qualityGate:
-  buildCommand: 'true'
-  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs
-CFG
+          printf '%s\n' \
+            'version: 1' \
+            'qualityGate:' \
+            "  buildCommand: 'true'" \
+            '  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs' \
+            > .va-auto-pilot/config.yaml
         fi
         node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
@@ -167,12 +167,12 @@ CFG
             printf '\n  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs\n' >> .va-auto-pilot/config.yaml
           fi
         else
-          cat > .va-auto-pilot/config.yaml <<'CFG'
-version: 1
-qualityGate:
-  buildCommand: 'true'
-  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs
-CFG
+          printf '%s\n' \
+            'version: 1' \
+            'qualityGate:' \
+            "  buildCommand: 'true'" \
+            '  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs' \
+            > .va-auto-pilot/config.yaml
         fi
         node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
@@ -352,12 +352,12 @@ CFG
             printf '\n  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs\n' >> .va-auto-pilot/config.yaml
           fi
         else
-          cat > .va-auto-pilot/config.yaml <<'CFG'
-version: 1
-qualityGate:
-  buildCommand: 'true'
-  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs
-CFG
+          printf '%s\n' \
+            'version: 1' \
+            'qualityGate:' \
+            "  buildCommand: 'true'" \
+            '  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs' \
+            > .va-auto-pilot/config.yaml
         fi
         node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --run-id run-wt --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --run-id run-wt --json >/dev/null
@@ -407,13 +407,12 @@ CFG
           shift
           (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate init "$@" --json >/dev/null)
           (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate plan "$@" --json >/dev/null)
-          (cd "$dir" && mkdir -p .va-auto-pilot && printf '%s\n' 'console.log("PLAN REVIEW STATUS: PASS");' > .va-auto-pilot/stub-plan-reviewer.mjs && cat > .va-auto-pilot/config.yaml <<'CFG'
-version: 1
-qualityGate:
-  buildCommand: 'true'
-  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs
-CFG
-)
+          (cd "$dir" && mkdir -p .va-auto-pilot && printf '%s\n' 'console.log("PLAN REVIEW STATUS: PASS");' > .va-auto-pilot/stub-plan-reviewer.mjs && printf '%s\n' \
+            'version: 1' \
+            'qualityGate:' \
+            "  buildCommand: 'true'" \
+            '  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs' \
+            > .va-auto-pilot/config.yaml)
           (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan "$@" --json >/dev/null)
           (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan "$@" --json >/dev/null)
         }
@@ -692,12 +691,12 @@ CFG
             printf '\n  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs\n' >> .va-auto-pilot/config.yaml
           fi
         else
-          cat > .va-auto-pilot/config.yaml <<'CFG'
-version: 1
-qualityGate:
-  buildCommand: 'true'
-  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs
-CFG
+          printf '%s\n' \
+            'version: 1' \
+            'qualityGate:' \
+            "  buildCommand: 'true'" \
+            '  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs' \
+            > .va-auto-pilot/config.yaml
         fi
         node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null

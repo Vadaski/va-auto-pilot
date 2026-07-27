@@ -113,7 +113,7 @@ node scripts/auto-pilot.mjs goal --text "..."
 node scripts/auto-pilot.mjs plan-from-goal --json
 node scripts/auto-pilot.mjs plan-from-goal --apply --json
 node scripts/auto-pilot.mjs orchestrate plan
-node scripts/auto-pilot.mjs observe --json
+node scripts/auto-pilot.mjs observe --json             # read snapshot.managerWorld before choosing a path
 node scripts/auto-pilot.mjs orchestrate review-plan    # Codex/read-only plan review; approvalPolicy may auto-approve
 node scripts/auto-pilot.mjs orchestrate approve-plan   # explicit when approvalPolicy requires human judgment
 node scripts/auto-pilot.mjs orchestrate dispatch

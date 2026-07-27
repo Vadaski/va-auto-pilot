@@ -1,6 +1,6 @@
 # Sprint Board
 
-> Last updated: 2026-07-01 by VA Auto-Pilot
+> Last updated: 2026-07-27 by VA Auto-Pilot
 > Generated from `.va-auto-pilot/sprint-state.json` via `node scripts/sprint-board.mjs render`.
 >
 > Rules:
@@ -61,6 +61,9 @@
 | AP-101 | Validation matrix: inventory every design surface and map each to executable proof | 2026-07-01 | Created docs/operations/design-validation-matrix.md. Verified: npm run typecheck PASS; npm run check:all PASS; npm run check:e2e PASS; public stale-expression scan PASS/no matches; git diff --check PASS. Follow-up gaps mapped to AP-102..AP-107, with CI/typecheck gap assigned to AP-103. |
 | AP-102 | Dogfood orchestrated mode end-to-end with observable evidence | 2026-07-01 | Verified full governed orchestrated dogfood with deterministic worker, captured observe JSON, gate log, journal output, checkpoint/event-log paths, task commit, journal control commit, and final clean temp git status. Regressions: full governed cycle with external journal path skipped from git pathspecs, unattended two-cycle replanning after journal commits, commit failure clearing stale approval without processing later approved tasks. Gates: typecheck, check:units, check:cli-flows, check:all, check:e2e all PASS. |
 | AP-103 | CI parity audit: prove required local gates are represented by GitHub Actions | 2026-07-01 | CI parity closed: GitHub Actions check job runs npm ci, npm run typecheck, npm run check:all, and npm run check:e2e; PR doc-store job runs doctor and enforce-staged --base main. check:all now includes typecheck and check:public-narrative. docs/operations/ci-parity.md records CI-required vs release/manual gates for check:quality, clean install smoke, and website preview. Verified: CI YAML parse PASS; npm run typecheck PASS; npm run check:public-narrative PASS; npm run check:all PASS; npm run check:e2e PASS; npm run doc-store:doctor PASS; npm run doc-store:enforce-staged -- --base main PASS; git diff --check PASS. |
+| AP-111 | observe: expose managerWorld (run/workspace/phase/claims/binding/dirty/stale/legalNextActions) | 2026-07-27 | - |
+| AP-112 | observe: expose managerWorld (run/workspace/phase/claims/binding/dirty/stale/legalNextActions) | 2026-07-27 | - |
+| AP-113 | observe: surface distractionRuns so halted default cannot masquerade as the working line | 2026-07-27 | - |
 | AP-001 | Upgrade multi-perspective review to dynamic perspective selection | 2026-02-23 | Two cross-reviews (adversarial + protocol designer), 6 CRITICALs resolved, templates synced |
 | AP-003 | Add sprint-board.mjs add command to create tasks via CLI without hand-editing JSON | 2026-02-23 | add command implemented: auto-ID (AP-NNN), validation, depends-on, regex-safe prefix; printHelp updated; templates mirrored; all gates pass |
 | AP-004 | Add unit test suite for sprint-board.mjs pure functions | 2026-02-23 | 41/41 unit tests pass via node:test; check:units added to check:all; all gates pass |
@@ -120,6 +123,7 @@
 | AP-107 | Runtime proof for MCP read-only resources and smoke-test runner paths | 2026-07-01 | Runtime proof added via npm run check:runtime-proof: reads every MCP read-only resource against current repo state, parses JSON payloads, reasserts sprint-summary dispatch authority, proves smoke disabled/current path plus enabled deterministic runner path and real invalid-config/malformed-YAML structured GateResult failures, and audits gateTrust for disabled-smoke maintenanceNotes plus no weak required placeholder commands. Validation: npm run check:runtime-proof; node scripts/auto-pilot.mjs gates audit --json; npm run check:units; npm run typecheck; npm run validate:distribution; npm run check:public-narrative; npm run check:all; npm run check:e2e. |
 | AP-108 | Fix regular loop final cycle-boundary journal dirty state | 2026-07-01 | Validated final cycle-boundary journal cleanliness with node scripts/test-cli-flows.mjs --flow test-flows/cycle-restart.yaml, node scripts/test-cli-flows.mjs --flow test-flows/auto-pilot-loop-cli.yaml, npm run typecheck, npm run check:units, npm run check:all, npm run check:e2e, and git diff --check. |
 | AP-109 | Project review: remove stale AP-102 validation matrix gaps | 2026-07-01 | Removed stale AP-102 gap language from the design validation matrix and verified with npm run check:public-narrative, npm run typecheck, npm run check:sprint, and git diff --check. |
+| AP-114 | tests+meta: cover multi-run observe honesty; record dogfood meta-problem; keep binding/dry-run invariants | 2026-07-27 | - |
 | AP-002 | Fix parseArgv boolean flag regression (--flag value silently dropped) | 2026-02-23 | parseArgv now throws when bool flag is followed by non-flag token; templates mirrored; check:all and validate:distribution pass |
 | AP-005 | Replace hand-rolled YAML parser with yaml package in sprint-utils.mjs | 2026-02-23 | yaml package moved to dependencies; readSprintPathsFromConfig replaced with yaml.parse(); stripYamlValue kept as compat export; templates mirrored; all gates pass |
 | AP-008 | Resolve templates/ dual-copy maintenance burden | 2026-02-23 | All gates passed: 41/41 unit tests, 18/18 CLI flow MUSTs, validate:distribution. Init smoke test confirmed scripts/ correctly copied to target project. Dry-run path verified. Mirror drift check removed. templates/scripts/ deleted. |
@@ -148,6 +152,7 @@
 | AP-093 | Roadmap: implement read-only MCP resources before write tools | 2026-06-26 | Read-only MCP resource layer landed: list/read APIs for sprint-state, sprint-summary, run-journal, pitfall-guide, and human-board; adapter contract docs added; unit coverage added. typecheck PASS; check:units PASS; check:all PASS. |
 | AP-097 | Research follow-up: add eval history persistence and comparison | 2026-06-26 | npm run typecheck; npm run check:units; npm run check:all |
 | AP-098 | Research follow-up: fix gate name propagation in fix-and-retest paths | 2026-06-26 | npm run typecheck; npm run check:units; npm run check:all |
+| AP-110 | 提升 Manager-agent 可观测性与硬边界：observe/cockpit 必须一次说清 phase、claim、binding、dirty integration tree、checkpoint 为何 stale、合法 nextActions；不可破边界保持证据与权限（architecturePlanBinding 字节、dry-run 不能... | 2026-07-27 | - |
 | AP-007 | Correct 'human-out-of-the-loop' framing to 'human-on-the-loop' across docs and website | 2026-02-23 | docs/human-on-the-loop.md created with updated framing; old file removed; README.md and README.zh.md references updated; all gates pass |
 | AP-033 | Fresh context review：spawn 隔离的 reviewer agent session（不同 model 或独立 context window） | 2026-03-29 | - |
 | AP-068 | orchestration: observe suggests replenish when backlog empty | 2026-05-19 | orchestration hardening: check:all + orchestrate-cli.yaml |

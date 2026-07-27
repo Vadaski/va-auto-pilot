@@ -1,1 +1,25 @@
-{"version":1,"entries":[]}
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "MP-001",
+      "category": "ux",
+      "severity": "major",
+      "title": "Default observe could select a halted run as the working line",
+      "symptom": "Manager saw run-race halted as the observe default while architecture-v2 work continued elsewhere",
+      "expected": "observe/cockpit expose managerWorld with distractionRuns and warn when terminal/halted runs remain in the active index",
+      "actual": "active-run index newest-heartbeat selection could point Managers at a misleading line without calling out distractions",
+      "hypothesis": "",
+      "suggestion": "",
+      "context": {
+        "command": "node scripts/auto-pilot.mjs observe --json",
+        "exitCode": 0,
+        "outputExcerpt": "managerWorld.distractionRuns now surfaces halted/terminal active runs"
+      },
+      "source": "agent",
+      "resolution": "",
+      "resolvedAt": null,
+      "createdAt": "2026-07-27T09:47:03.208Z"
+    }
+  ]
+}

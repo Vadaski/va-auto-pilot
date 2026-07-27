@@ -11,6 +11,7 @@ import {
   buildRecoveryPlan,
   isTerminalRunPhase,
   isCheckpointStale,
+  readActiveRuns,
   readCandidateBacklog,
   readCheckpoint,
   readDirectives,
@@ -19,6 +20,11 @@ import {
   recoverRunTracksTransaction,
   writeSnapshot,
 } from "./lib/orchestration-state.mjs";
+import {
+  buildManagerWorld,
+  prioritizeManagerWorldActions,
+  prioritizeManagerWorldCommands,
+} from "./lib/manager-world.mjs";
 import { detectStopCondition, readSprintState } from "./auto-pilot-loop.mjs";
 import { planTaskIds } from "./lib/plan-helpers.mjs";
 import { readTaskEvidenceSummary } from "./lib/observability.mjs";
@@ -1000,6 +1006,8 @@ export function buildCockpit(snapshot) {
   });
   const evidenceTrust = evidenceView.trust;
 
+  const managerWorld = snapshot.managerWorld ?? null;
+
   return {
     schemaVersion: 1,
     updatedAt: snapshot.updatedAt,
@@ -1012,6 +1020,7 @@ export function buildCockpit(snapshot) {
       "qualityGate",
       "orchestrate phases",
     ],
+    managerWorld,
     humanJudgment: {
       goal: {
         status: unchecked.length > 0 ? "needs-human-intent-processing" : pendingTasks > 0 ? "active" : "needs-objective",
@@ -1168,7 +1177,35 @@ export async function refreshSnapshot(opts) {
     commitReadiness,
     structuredEvidence,
     anomalies,
-    recommendedActions: buildRecommendedActions({
+    recommendedActions: [],
+    nextCommands: [],
+  };
+
+  const baseNextCommands = buildNextCommands({
+    run,
+    stopCondition,
+    uncheckedBoard,
+    directives,
+    pendingTasks,
+    anomalies,
+    gateTrust,
+    checkpointStatus,
+    recovery,
+    commitReadiness,
+    structuredEvidence,
+  });
+  const managerWorld = buildManagerWorld({
+    workDir: opts.workDir,
+    run,
+    opts,
+    state,
+    checkpointStatus,
+    legalNextActions: baseNextCommands,
+    activeEntries: readActiveRuns(opts.workDir),
+  });
+  snapshot.managerWorld = managerWorld;
+  snapshot.recommendedActions = prioritizeManagerWorldActions(
+    buildRecommendedActions({
       run,
       stopCondition,
       uncheckedBoard,
@@ -1179,20 +1216,15 @@ export async function refreshSnapshot(opts) {
       checkpointStatus,
       recovery,
       structuredEvidence,
+      managerWorld,
     }),
-    nextCommands: buildNextCommands({
-      run,
-      stopCondition,
-      uncheckedBoard,
-      directives,
-      pendingTasks,
-      anomalies,
-      gateTrust,
-      checkpointStatus,
-      recovery,
-      commitReadiness,
-      structuredEvidence,
-    }),
+    managerWorld
+  );
+  snapshot.nextCommands = prioritizeManagerWorldCommands(baseNextCommands, managerWorld);
+  // Keep legalNextActions aligned with the prioritized command list Manager should see.
+  snapshot.managerWorld = {
+    ...managerWorld,
+    legalNextActions: snapshot.nextCommands,
   };
 
   snapshot.cockpit = buildCockpit(snapshot);
@@ -1237,8 +1269,14 @@ function buildAnomalies({ run, trackList, state, pendingTasks, stopCondition }) 
   return anomalies;
 }
 
-function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies, gateTrust, checkpointStatus, recovery, structuredEvidence }) {
+function buildRecommendedActions({ run, stopCondition, uncheckedBoard, directives, pendingTasks, anomalies, gateTrust, checkpointStatus, recovery, structuredEvidence, managerWorld }) {
   const actions = [];
+  if ((managerWorld?.distractionRuns ?? []).length > 0) {
+    actions.push("choose the intended workspace/run explicitly; do not follow a halted or terminal distraction run");
+  }
+  if (managerWorld?.selectionWarning) {
+    actions.push(managerWorld.selectionWarning);
+  }
   if (gateTrust?.status === "missing-required-gates") {
     actions.push("configure required evidence gates");
   } else if (gateTrust?.status === "needs-agent-attention" || gateTrust?.status === "not-configured") {

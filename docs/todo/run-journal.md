@@ -2833,3 +2833,58 @@
   - review-fallback
   - adaptive-gate-prune
 ---
+## 2026-07-27T09:42:30.462Z - human-intent
+- Summary: objective: 提升 Manager-agent 可观测性与硬边界：observe/cockpit 必须一次说清 phase、claim、binding、dirty integration tree、checkpoint 为何 stale、合法 nextActions；不可破边界保持证据与权限（architecturePlanBinding 字节、dry-run 不能授权 approve、commit 清单、质量门），战术路径留给强模型自由选择，不引入替 Manager 决策的总控 advance 脚本。
+- Source: unknown
+- Signals:
+  - human-intent:objective
+---
+## 2026-07-27T09:42:38.795Z - human-intent
+- Summary: constraint: - MUST NOT 引入 orchestrate advance / continue 总控脚本替 Manager 选择战术路径
+- observe/cockpit 对 Manager-agent 一次暴露：active run 选择、phase、claims、architecturePlanBinding、integration dirty（相对 commit 不变量）、checkpoint stale 原因与合法 nextActions
+- 默认 observe 不得静默指向陈旧 halted/done run 而不标明「非当前工作线」
+- 硬边界保持 fail-closed：binding 字节、dry-run 不可 authorize approve-plan、commit manifest、质量门
+- Source: unknown
+- Signals:
+  - human-intent:constraint
+---
+## 2026-07-27T09:42:39.371Z - human-intent
+- Summary: risk: 主要风险：过度流程化削弱强模型自治；或 observe 噪声过大淹没信号。验收以 Manager 在 dogfood 中少踩 STALE_CONTEXT/看错 run 为准，不以新增仪式步骤为准。
+- Source: unknown
+- Signals:
+  - human-intent:risk
+---
+## 2026-07-27T09:42:39.921Z - human-intent
+- Summary: acceptance: MUST:
+- observe --json 含 managerWorld 块：selectedRun、workspace、phase、claims、bindingSummary、integrationDirty（commit-blocking vs allowed）、checkpointStale{reason,humanReason,blocksDispatch}、legalNextActions[]
+- 存在陈旧 active/halted run 时，observe 明确标记 distractionRuns[]，且 recommendedActions 优先指向「开正确 workspace 的新 run」而非盲从 halted run
+- 单测覆盖：halted default run + architecture workspace backlog 并存时，observe 不把 halted 线伪装成唯一真相
+- dry-run review 仍不能 authorize approve；binding mismatch 仍 fail-closed（回归）
+- npm run check:units 与相关 CLI flow 通过
+SHOULD:
+- cockpit.humanJudgment 摘要引用 managerWorld，不泄漏无关 internals 噪声
+- 记录至少 1 条 meta-problem（本轮 dogfood：默认 observe 指向 run-race）
+Evidence: node scripts/auto-pilot.mjs observe --json；npm run check:units；必要时 test-flows/orchestrate-cli.yaml 相关条目
+- Source: unknown
+- Signals:
+  - human-intent:acceptance
+---
+
+## 2026-07-27T09:42:41.458Z - goal
+- Summary: plan-from-goal applied 1 candidate backlog item(s) from objective intent
+- Signals:
+  - goal-to-backlog:b82386c5251c
+---
+
+## 2026-07-27T09:45:10.678Z - plan-review
+- Summary: plan-review passed planHash=8f4835da06b250ec753acdaea813339f1a9aaa9d304e757ea341827fe3c46570 critical=0 warning=0
+- Signals:
+  - plan-review:8f4835da06b250ec753acdaea813339f1a9aaa9d304e757ea341827fe3c46570
+---
+
+## 2026-07-27T095142Z - managerWorld
+- Summary: Landed observe/cockpit managerWorld (claims/binding/dirty/stale/distractionRuns/legalNextActions). MP-001 recorded. No orchestrate advance script.
+- Signals:
+  - manager-observability
+  - hard-boundaries
+---

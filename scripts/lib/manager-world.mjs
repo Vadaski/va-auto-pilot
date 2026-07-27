@@ -119,16 +119,29 @@ export function buildBindingSummary(candidatePlan, workDir) {
     };
   }
   const check = validateArchitecturePlanBinding(candidatePlan, workDir);
+  if (check.ok === false) {
+    return {
+      present: true,
+      path: binding.path ?? null,
+      sha256: binding.sha256 ?? null,
+      bytes: binding.bytes ?? null,
+      materializeIntoWorktree: binding.materializeIntoWorktree === true,
+      ok: false,
+      code: check.code ?? "BINDING_INVALID",
+      message: check.message ?? "binding invalid",
+      actualSha256: null,
+    };
+  }
   return {
     present: true,
     path: binding.path ?? null,
     sha256: binding.sha256 ?? null,
     bytes: binding.bytes ?? null,
     materializeIntoWorktree: binding.materializeIntoWorktree === true,
-    ok: check.ok === true,
-    code: check.ok ? null : (check.code ?? "BINDING_INVALID"),
-    message: check.ok ? "architecture plan bytes match binding" : (check.message ?? "binding invalid"),
-    actualSha256: check.ok ? (check.actualSha256 ?? binding.sha256) : null,
+    ok: true,
+    code: null,
+    message: "architecture plan bytes match binding",
+    actualSha256: check.actualSha256 ?? binding.sha256,
   };
 }
 

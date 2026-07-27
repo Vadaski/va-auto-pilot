@@ -1761,7 +1761,7 @@ async function orchestrateReviewPlan(opts) {
   }
 
   const bindingPrecheck = validateArchitecturePlanBinding(run.candidatePlan, opts.workDir);
-  if (!bindingPrecheck.ok) {
+  if (bindingPrecheck.ok === false) {
     fail(opts, bindingPrecheck.code, bindingPrecheck.message, bindingPrecheck.context ?? {}, 2);
   }
 
@@ -1936,7 +1936,7 @@ async function orchestrateApprovePlan(opts) {
       runId: run.runId,
       workDir: opts.workDir,
     });
-    if (!validation.ok) {
+    if (validation.ok === false) {
       fail(opts, validation.code, validation.message, validation.context ?? {}, 2);
     }
   } else if (waiveReason) {
@@ -1994,14 +1994,15 @@ async function orchestrateDispatchUnlocked(opts) {
           worktreePath: track.worktree.path,
           candidatePlan: run.candidatePlan,
         });
-        if (!materialized.ok) {
+        if (materialized.ok === false) {
           fail(opts, materialized.code, materialized.message, materialized.context ?? {}, 2);
+        } else {
+          track.worktree.architecturePlanBinding = {
+            path: materialized.path,
+            sha256: materialized.sha256,
+            materialized: true,
+          };
         }
-        track.worktree.architecturePlanBinding = {
-          path: materialized.path,
-          sha256: materialized.sha256,
-          materialized: true,
-        };
       }
     }
     tracks.push(track);

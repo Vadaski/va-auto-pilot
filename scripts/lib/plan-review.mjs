@@ -23,7 +23,7 @@ export function computeCandidatePlanHash(candidatePlan) {
  *
  * @param {object} candidatePlan
  * @param {string} workDir
- * @returns {{ ok: true, binding: object, actualSha256: string } | { ok: false, code: string, message: string, context?: object }}
+ * @returns {{ ok: true, binding: object|null, actualSha256: string|null } | { ok: false, code: string, message: string, context?: object }}
  */
 export function validateArchitecturePlanBinding(candidatePlan, workDir) {
   const binding = candidatePlan?.architecturePlanBinding;
@@ -102,12 +102,17 @@ export function validateArchitecturePlanBinding(candidatePlan, workDir) {
  * workers cannot silently fall back to HEAD's older plan text.
  *
  * @param {{ workDir: string, worktreePath: string, candidatePlan: object }} input
- * @returns {{ ok: true, path: string, sha256: string } | { ok: false, code: string, message: string, context?: object }}
+ * @returns {{ ok: true, path: string|null, sha256: string|null } | { ok: false, code: string, message: string, context?: object }}
  */
 export function materializeArchitecturePlanBindingToWorktree({ workDir, worktreePath, candidatePlan }) {
   const check = validateArchitecturePlanBinding(candidatePlan, workDir);
-  if (!check.ok) {
-    return check;
+  if (check.ok === false) {
+    return {
+      ok: false,
+      code: check.code,
+      message: check.message,
+      context: check.context,
+    };
   }
   if (!check.binding) {
     return { ok: true, path: null, sha256: null };
@@ -270,8 +275,13 @@ export function validatePlanReviewForApprove({ review, candidatePlan, runId, wor
   }
   if (workDir && candidatePlan?.architecturePlanBinding) {
     const binding = validateArchitecturePlanBinding(candidatePlan, workDir);
-    if (!binding.ok) {
-      return binding;
+    if (binding.ok === false) {
+      return {
+        ok: false,
+        code: binding.code,
+        message: binding.message,
+        context: binding.context,
+      };
     }
     if (review.architecturePlanSha256
       && review.architecturePlanSha256 !== binding.actualSha256) {
@@ -297,6 +307,9 @@ export async function runPlanReviewCommand({ workDir, candidatePlan, runId, revi
 
   if (dryRun) {
     const bindingCheck = validateArchitecturePlanBinding(candidatePlan, workDir);
+    const architecturePlanBinding = bindingCheck.ok === false
+      ? { ok: false, code: bindingCheck.code, message: bindingCheck.message }
+      : { ok: true, path: bindingCheck.binding?.path ?? null, sha256: bindingCheck.actualSha256 };
     return {
       planHash,
       runId,
@@ -304,12 +317,10 @@ export async function runPlanReviewCommand({ workDir, candidatePlan, runId, revi
       reviewer: "dry-run",
       command: reviewCommand,
       findings: { critical: [], warning: [], suggestion: [] },
-      passed: bindingCheck.ok,
+      passed: bindingCheck.ok === true,
       dryRun: true,
-      architecturePlanSha256: bindingCheck.ok ? bindingCheck.actualSha256 : null,
-      architecturePlanBinding: bindingCheck.ok
-        ? { ok: true, path: bindingCheck.binding?.path ?? null, sha256: bindingCheck.actualSha256 }
-        : { ok: false, code: bindingCheck.code ?? null, message: bindingCheck.message ?? null },
+      architecturePlanSha256: bindingCheck.ok === true ? bindingCheck.actualSha256 : null,
+      architecturePlanBinding,
     };
   }
 
@@ -399,6 +410,9 @@ export async function runPlanReviewCommand({ workDir, candidatePlan, runId, revi
     && status === "PASS"
     && findings.critical.length === 0;
   const bindingCheck = validateArchitecturePlanBinding(candidatePlan, workDir);
+  const architecturePlanBinding = bindingCheck.ok === false
+    ? { ok: false, code: bindingCheck.code, message: bindingCheck.message }
+    : { ok: true, path: bindingCheck.binding?.path ?? null, sha256: bindingCheck.actualSha256 };
 
   return {
     schemaVersion: 1,
@@ -411,11 +425,9 @@ export async function runPlanReviewCommand({ workDir, candidatePlan, runId, revi
     exitCode,
     status,
     hasStructuredOutput,
-    passed: passed && bindingCheck.ok,
-    architecturePlanSha256: bindingCheck.ok ? bindingCheck.actualSha256 : null,
-    architecturePlanBinding: bindingCheck.ok
-      ? { ok: true, path: bindingCheck.binding?.path ?? null, sha256: bindingCheck.actualSha256 }
-      : { ok: false, code: bindingCheck.code ?? null, message: bindingCheck.message ?? null },
+    passed: passed && bindingCheck.ok === true,
+    architecturePlanSha256: bindingCheck.ok === true ? bindingCheck.actualSha256 : null,
+    architecturePlanBinding,
     stdoutPreview: stdout.slice(0, 4000),
     stderrPreview: stderr.slice(0, 4000),
   };

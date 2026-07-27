@@ -10,3 +10,4 @@ coverage/
 .va-auto-pilot/orchestration/
 .va-auto-pilot/parallel-runs/
 .va-auto-pilot/workspaces/
+/.va-auto-pilot/evidence

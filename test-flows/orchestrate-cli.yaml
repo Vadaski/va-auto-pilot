@@ -82,20 +82,7 @@ flows:
         cd "$tmpdir"
         node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
-        mkdir -p .va-auto-pilot
-        printf '%s\n' 'console.log("PLAN REVIEW STATUS: PASS");' > .va-auto-pilot/stub-plan-reviewer.mjs
-        if [[ -f .va-auto-pilot/config.yaml ]]; then
-          if ! grep -q 'planReviewCommand:' .va-auto-pilot/config.yaml; then
-            printf '\n  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs\n' >> .va-auto-pilot/config.yaml
-          fi
-        else
-          printf '%s\n' \
-            'version: 1' \
-            'qualityGate:' \
-            "  buildCommand: 'true'" \
-            '  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs' \
-            > .va-auto-pilot/config.yaml
-        fi
+        node "$repo/scripts/install-stub-plan-reviewer.mjs"
         node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --dry-run --json >/dev/null
@@ -160,20 +147,7 @@ flows:
         cd "$tmpdir"
         node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
-        mkdir -p .va-auto-pilot
-        printf '%s\n' 'console.log("PLAN REVIEW STATUS: PASS");' > .va-auto-pilot/stub-plan-reviewer.mjs
-        if [[ -f .va-auto-pilot/config.yaml ]]; then
-          if ! grep -q 'planReviewCommand:' .va-auto-pilot/config.yaml; then
-            printf '\n  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs\n' >> .va-auto-pilot/config.yaml
-          fi
-        else
-          printf '%s\n' \
-            'version: 1' \
-            'qualityGate:' \
-            "  buildCommand: 'true'" \
-            '  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs' \
-            > .va-auto-pilot/config.yaml
-        fi
+        node "$repo/scripts/install-stub-plan-reviewer.mjs"
         node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
     env:
@@ -345,20 +319,7 @@ flows:
         git commit -q -m "seed"
         node "$repo/scripts/auto-pilot.mjs" orchestrate init --run-id run-wt --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate plan --run-id run-wt --json >/dev/null
-        mkdir -p .va-auto-pilot
-        printf '%s\n' 'console.log("PLAN REVIEW STATUS: PASS");' > .va-auto-pilot/stub-plan-reviewer.mjs
-        if [[ -f .va-auto-pilot/config.yaml ]]; then
-          if ! grep -q 'planReviewCommand:' .va-auto-pilot/config.yaml; then
-            printf '\n  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs\n' >> .va-auto-pilot/config.yaml
-          fi
-        else
-          printf '%s\n' \
-            'version: 1' \
-            'qualityGate:' \
-            "  buildCommand: 'true'" \
-            '  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs' \
-            > .va-auto-pilot/config.yaml
-        fi
+        node "$repo/scripts/install-stub-plan-reviewer.mjs"
         node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --run-id run-wt --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --run-id run-wt --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --run-id run-wt --json \
@@ -407,12 +368,7 @@ flows:
           shift
           (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate init "$@" --json >/dev/null)
           (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate plan "$@" --json >/dev/null)
-          (cd "$dir" && mkdir -p .va-auto-pilot && printf '%s\n' 'console.log("PLAN REVIEW STATUS: PASS");' > .va-auto-pilot/stub-plan-reviewer.mjs && printf '%s\n' \
-            'version: 1' \
-            'qualityGate:' \
-            "  buildCommand: 'true'" \
-            '  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs' \
-            > .va-auto-pilot/config.yaml)
+          (cd "$dir" && node "$repo/scripts/install-stub-plan-reviewer.mjs")
           (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan "$@" --json >/dev/null)
           (cd "$dir" && node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan "$@" --json >/dev/null)
         }
@@ -684,20 +640,7 @@ flows:
         git commit -q -m "chore: seed permission fixture"
         node "$repo/scripts/auto-pilot.mjs" orchestrate init --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate plan --json >/dev/null
-        mkdir -p .va-auto-pilot
-        printf '%s\n' 'console.log("PLAN REVIEW STATUS: PASS");' > .va-auto-pilot/stub-plan-reviewer.mjs
-        if [[ -f .va-auto-pilot/config.yaml ]]; then
-          if ! grep -q 'planReviewCommand:' .va-auto-pilot/config.yaml; then
-            printf '\n  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs\n' >> .va-auto-pilot/config.yaml
-          fi
-        else
-          printf '%s\n' \
-            'version: 1' \
-            'qualityGate:' \
-            "  buildCommand: 'true'" \
-            '  planReviewCommand: node .va-auto-pilot/stub-plan-reviewer.mjs' \
-            > .va-auto-pilot/config.yaml
-        fi
+        node "$repo/scripts/install-stub-plan-reviewer.mjs"
         node "$repo/scripts/auto-pilot.mjs" orchestrate review-plan --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate approve-plan --json >/dev/null
         node "$repo/scripts/auto-pilot.mjs" orchestrate dispatch --json >/dev/null
